@@ -910,11 +910,16 @@ function renderSidebar() {
 }
 
 function quickActionsCard() {
+  // Inside the Mac app the vault is unlocked automatically from the Keychain,
+  // so "Lock" is hidden — it would lock the user out of a passphrase they
+  // never see.
+  const lock = window.honNative ? ""
+    : '<button data-action="lock"><span class="qa-ico">🔒</span>Lock vault</button>';
   return '<div class="card"><div class="label">Quick actions</div>'
     + '<div class="qa">'
     + '<button data-action="add-connection"><span class="qa-ico">＋</span>Add account</button>'
     + '<button data-action="refresh"><span class="qa-ico">↻</span>Refresh data</button>'
-    + '<button data-action="lock"><span class="qa-ico">🔒</span>Lock vault</button>'
+    + lock
     + "</div></div>";
 }
 
@@ -1626,6 +1631,12 @@ function showGate(creating) {
       try {
         await api("/vault/unlock", "POST", { passphrase });
         sessionStorage.setItem("honVaultPass", passphrase);
+        // Inside the Mac app, hand the passphrase to the native shell so it
+        // can store it in the Keychain and unlock silently next launch.
+        if (window.webkit && window.webkit.messageHandlers
+            && window.webkit.messageHandlers.honVault) {
+          window.webkit.messageHandlers.honVault.postMessage(passphrase);
+        }
         closeOverlay();
         document.getElementById("app").hidden = false;
         await loadAll();

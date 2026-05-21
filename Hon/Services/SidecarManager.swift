@@ -121,10 +121,11 @@ final class SidecarManager: ObservableObject {
         Task { await start() }
     }
 
-    /// An API client for the running engine, or nil if it is not connected.
-    func makeClient() -> APIClient? {
+    /// URL of the engine's web dashboard, with the per-launch auth token in the
+    /// fragment so the page's scripts can authenticate every API call.
+    func dashboardURL() -> URL? {
         guard let port else { return nil }
-        return APIClient(port: port, token: token)
+        return URL(string: "http://127.0.0.1:\(port)/#token=\(token)")
     }
 
     // MARK: - stdout handling
@@ -169,11 +170,33 @@ final class SidecarManager: ObservableObject {
 
     private func verifyHealth(port: Int) async {
         do {
-            let health = try await APIClient(port: port, token: token).health()
-            status = .connected(version: health.version)
+            let client = APIClient(port: port, token: token)
+            let health = try await client.health()
             appendLog("Health check OK — db \(health.db).")
+            await unlockVault(using: client)
+            status = .connected(version: health.version)
         } catch {
             fail("Health check failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// Unlocks the engine's credential vault with a passphrase kept in the
+    /// macOS Keychain, generating one the first time. Best-effort: if it fails
+    /// (a vault created elsewhere with another passphrase) the web dashboard
+    /// shows its own prompt and hands the passphrase back to be saved.
+    private func unlockVault(using client: APIClient) async {
+        let passphrase: String
+        if let stored = KeychainStore.vaultPassphrase() {
+            passphrase = stored
+        } else {
+            passphrase = KeychainStore.generatePassphrase()
+            try? KeychainStore.setVaultPassphrase(passphrase)
+        }
+        do {
+            try await client.unlockVault(passphrase: passphrase)
+            appendLog("Credential vault unlocked.")
+        } catch {
+            appendLog("Vault not auto-unlocked — the dashboard will ask once.")
         }
     }
 
