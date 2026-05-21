@@ -1,0 +1,1685 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Hon</title>
+<style>
+  :root {
+    --bg: #131120; --bg-elev: #1b1930; --card: #211f33; --card-hi: #2b2842;
+    --hairline: rgba(255,255,255,0.075); --hairline-2: rgba(255,255,255,0.15);
+    --text: #f1eff8; --muted: rgba(255,255,255,0.60); --faint: rgba(255,255,255,0.40);
+    --brand: #ecb949; --indigo: #7d72ff; --indigo-soft: rgba(125,114,255,0.16);
+    --green: #3ddc84; --amber: #f5b54a; --red: #f4685a;
+    --grad-1: #7d72ff; --grad-2: #4a3fb0;
+    --shadow: 0 10px 30px rgba(0,0,0,0.42); --shadow-sm: 0 2px 10px rgba(0,0,0,0.32);
+    --scrim: rgba(9,8,16,0.80);
+  }
+  [data-theme="light"] {
+    --bg: #f1f1f7; --bg-elev: #ffffff; --card: #ffffff; --card-hi: #f3f3f9;
+    --hairline: rgba(24,22,48,0.09); --hairline-2: rgba(24,22,48,0.17);
+    --text: #1d1b2e; --muted: rgba(29,27,46,0.62); --faint: rgba(29,27,46,0.44);
+    --brand: #c79220; --indigo: #5f54e3; --indigo-soft: rgba(95,84,227,0.11);
+    --green: #16a85c; --amber: #cf8c1c; --red: #d8473a;
+    --grad-1: #6f64f0; --grad-2: #9182f6;
+    --shadow: 0 12px 32px rgba(45,42,80,0.13); --shadow-sm: 0 2px 12px rgba(45,42,80,0.08);
+    --scrim: rgba(28,26,52,0.55);
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 15px/1.5 -apple-system, "SF Pro Text", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    transition: background-color .3s ease, color .3s ease;
+  }
+  a { color: var(--indigo); }
+
+  /* --- Shell ------------------------------------------------------------- */
+  #app { display: flex; flex-direction: column; min-height: 100vh;
+    padding: 0 26px 48px; }
+
+  header {
+    position: sticky; top: 0; z-index: 20;
+    display: flex; align-items: center; gap: 12px;
+    padding: 16px 0 14px; margin-bottom: 8px;
+    background: var(--bg); border-bottom: 1px solid var(--hairline);
+  }
+  .brand { display: flex; align-items: center; gap: 9px; }
+  .brand-mark { width: 22px; height: 22px; border-radius: 7px;
+    background: linear-gradient(135deg, var(--brand), #d98f2e);
+    box-shadow: 0 2px 8px rgba(236,185,73,0.4); }
+  h1 { font: 800 23px/1 ui-rounded, "SF Pro Rounded", system-ui;
+    color: var(--brand); letter-spacing: .3px; }
+  #engine { color: var(--faint); font-size: 12px; }
+  .spacer { margin-left: auto; }
+
+  .shell { display: grid; grid-template-columns: minmax(0,1fr) 340px;
+    gap: 22px; align-items: start;
+    transition: grid-template-columns .3s ease; }
+  .shell.collapsed { grid-template-columns: minmax(0,1fr) 0px; }
+  .shell.collapsed #sidebar { opacity: 0; pointer-events: none; }
+  .main { min-width: 0; }
+  #sidebar { position: sticky; top: 78px; display: flex; flex-direction: column;
+    gap: 14px; overflow: hidden; transition: opacity .22s ease; }
+  @media (max-width: 880px) {
+    .shell, .shell.collapsed { grid-template-columns: 1fr; }
+    #sidebar { position: static; }
+    .shell.collapsed #sidebar { display: none; }
+  }
+
+  /* --- Buttons ----------------------------------------------------------- */
+  button {
+    background: var(--card); color: var(--text);
+    border: 1px solid var(--hairline-2); border-radius: 9px;
+    padding: 8px 14px; font: inherit; font-size: 13px; font-weight: 500;
+    cursor: pointer; white-space: nowrap;
+    transition: transform .12s ease, border-color .15s, background .15s, opacity .15s;
+  }
+  button:hover { border-color: var(--indigo); }
+  button:active { transform: scale(.97); }
+  button:disabled { opacity: .42; cursor: default; transform: none; }
+  button.primary { background: var(--indigo); border-color: transparent;
+    color: #fff; box-shadow: 0 4px 14px var(--indigo-soft); }
+  button.primary:hover { filter: brightness(1.08); }
+  button.danger { color: var(--red); }
+  button.danger:hover { border-color: var(--red); }
+  button.mini { padding: 5px 11px; font-size: 12px; }
+  button.block { width: 100%; padding: 11px; font-size: 14px; }
+  .icon-btn { width: 36px; height: 36px; padding: 0; font-size: 15px;
+    display: inline-flex; align-items: center; justify-content: center; }
+
+  /* --- Nav --------------------------------------------------------------- */
+  nav { display: flex; gap: 3px; margin-bottom: 20px; padding: 5px;
+    background: var(--bg-elev); border: 1px solid var(--hairline);
+    border-radius: 13px; max-width: 460px; }
+  nav button { flex: 1; background: none; border: none; border-radius: 9px;
+    padding: 9px 12px; color: var(--muted); font-size: 13.5px; font-weight: 600; }
+  nav button:hover { color: var(--text); }
+  nav button.active { background: var(--indigo); color: #fff;
+    box-shadow: var(--shadow-sm); }
+
+  /* --- Cards & sections -------------------------------------------------- */
+  .label { font: 700 11px/1 system-ui; letter-spacing: 1.4px;
+    color: var(--faint); text-transform: uppercase; }
+  section { margin-bottom: 18px; }
+  .card { background: var(--card); border: 1px solid var(--hairline);
+    border-radius: 16px; padding: 17px 18px; box-shadow: var(--shadow-sm);
+    transition: transform .16s ease, box-shadow .16s ease, background-color .3s; }
+  .card h3 { font-size: 15px; font-weight: 700; }
+  .card .meta { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .card-head .spacer { margin-left: auto; }
+  .col-grid { columns: 412px; column-gap: 18px; }
+  .col-grid > * { break-inside: avoid; margin-bottom: 18px; }
+  .sec-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+  .sec-head .spacer { margin-left: auto; }
+
+  /* --- Net worth banner -------------------------------------------------- */
+  .networth { position: relative; overflow: hidden;
+    background: linear-gradient(135deg, var(--grad-1), var(--grad-2));
+    border-radius: 20px; padding: 26px 26px 24px; color: #fff;
+    box-shadow: var(--shadow); margin-bottom: 18px; }
+  .networth::after { content: ""; position: absolute; top: -60px; right: -40px;
+    width: 220px; height: 220px; border-radius: 50%;
+    background: rgba(255,255,255,0.10); }
+  .networth .label { color: rgba(255,255,255,0.75); }
+  .nw-total { font: 800 46px/1.05 ui-rounded, "SF Pro Rounded", system-ui;
+    margin-top: 10px; letter-spacing: -.5px; }
+  .nw-total.neg { color: #ffd7d1; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  .chip { background: rgba(255,255,255,0.16); border-radius: 999px;
+    padding: 5px 12px; font-size: 13px; font-weight: 600; }
+  .nw-sub { color: rgba(255,255,255,0.78); font-size: 12.5px; margin-top: 14px;
+    position: relative; }
+
+  /* --- Generic rows ------------------------------------------------------ */
+  .row { display: flex; justify-content: space-between; align-items: center;
+    gap: 12px; padding: 10px 0; border-top: 1px solid var(--hairline); }
+  .list .row:first-child { border-top: 0; }
+  .row .name { font-size: 14px; font-weight: 500; }
+  .row .secondary { color: var(--faint); font-size: 12px; margin-top: 2px; }
+  .amount { font: 700 14px/1 ui-rounded, "SF Pro Rounded", system-ui;
+    white-space: nowrap; }
+  .pos { color: var(--green); }
+  .empty { color: var(--muted); font-size: 13px; padding: 14px 2px;
+    text-align: center; }
+  .pill { display: inline-block; font-size: 11px; padding: 2px 8px;
+    border-radius: 999px; background: var(--indigo-soft); color: var(--indigo);
+    font-weight: 600; }
+
+  .logo { position: relative; flex: 0 0 36px; width: 36px; height: 36px;
+    border-radius: 10px; background: var(--card-hi); display: inline-flex;
+    align-items: center; justify-content: center; font-size: 18px; overflow: hidden; }
+  .logo img { position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: contain; background: #fff; }
+
+  /* --- Connection cards -------------------------------------------------- */
+  .conn-accounts { margin-top: 12px; }
+  .conn-foot { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 13px;
+    padding-top: 13px; border-top: 1px solid var(--hairline); }
+  .conn-total { margin-left: auto; align-self: center; font-weight: 700;
+    font-family: ui-rounded, "SF Pro Rounded", system-ui; }
+
+  /* --- Activity ---------------------------------------------------------- */
+  .cat-card { padding: 16px 16px 8px; }
+  .cat-head { display: flex; align-items: center; gap: 9px; }
+  .cat-dot { width: 12px; height: 12px; border-radius: 5px; flex: 0 0 auto; }
+  .cat-name { font-size: 14.5px; font-weight: 700; }
+  .cat-total { margin-left: auto; font: 800 15px/1 ui-rounded,
+    "SF Pro Rounded", system-ui; }
+  .cat-meta { color: var(--faint); font-size: 11.5px; margin: 3px 0 6px 21px;
+    font-weight: 600; letter-spacing: .3px; }
+  .txn { display: flex; align-items: center; gap: 12px; padding: 10px 8px;
+    border-radius: 11px; cursor: pointer;
+    transition: background .14s ease; }
+  .txn + .txn { border-top: 1px solid var(--hairline); }
+  .txn:hover { background: var(--card-hi); }
+  .txn:hover + .txn { border-top-color: transparent; }
+  .txn.sel { background: var(--indigo-soft);
+    box-shadow: inset 0 0 0 1.5px var(--indigo); }
+  .txn-icon { flex: 0 0 38px; width: 38px; height: 38px; border-radius: 11px;
+    display: flex; align-items: center; justify-content: center; font-size: 18px; }
+  .txn-main { flex: 1; min-width: 0; }
+  .txn-name { font-size: 13.5px; font-weight: 600; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; }
+  .txn-sub { color: var(--faint); font-size: 11.5px; margin-top: 2px; }
+  .txn-amt { font: 800 14.5px/1 ui-rounded, "SF Pro Rounded", system-ui;
+    white-space: nowrap; }
+  .txn-amt.pos { color: var(--green); }
+
+  /* --- Sidebar ----------------------------------------------------------- */
+  .qa { display: flex; flex-direction: column; gap: 7px; margin-top: 11px; }
+  .qa button { width: 100%; text-align: left; padding: 10px 12px;
+    display: flex; align-items: center; gap: 9px; font-size: 13.5px; }
+  .qa .qa-ico { font-size: 14px; }
+  .move-cats { display: flex; flex-direction: column; gap: 4px;
+    margin: 11px 0; max-height: 320px; overflow-y: auto; }
+  .move-cat { display: flex; align-items: center; gap: 9px; width: 100%;
+    text-align: left; padding: 9px 11px; border-radius: 10px; font-size: 13px;
+    border: 1.5px solid transparent; background: var(--card-hi); }
+  .move-cat:hover { border-color: var(--hairline-2); }
+  .move-cat.active { border-color: currentColor; font-weight: 700; }
+  .move-cat .mc-em { font-size: 15px; }
+  .move-cat .mc-check { margin-left: auto; font-weight: 800; opacity: 0;
+    transition: opacity .12s; }
+  .move-cat.active .mc-check { opacity: 1; }
+  .move-txn { display: flex; align-items: center; gap: 11px;
+    padding: 11px; background: var(--card-hi); border-radius: 12px;
+    margin-bottom: 4px; }
+  .always { display: flex; align-items: flex-start; gap: 9px; margin: 4px 0 13px;
+    font-size: 12.5px; color: var(--muted); cursor: pointer; }
+  .always input { width: auto; margin-top: 1px; flex: 0 0 auto;
+    accent-color: var(--indigo); }
+  .ins-body { font-size: 13px; white-space: pre-wrap; color: var(--text);
+    line-height: 1.55; }
+
+  /* --- Analytics: spending pie, trend, mini chart ------------------------ */
+  .spend-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    margin-bottom: 4px; }
+  .spend-num { font: 800 30px/1 ui-rounded, "SF Pro Rounded", system-ui; }
+  .delta { font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 999px; }
+  .delta.good { color: var(--green); background: rgba(61,220,132,0.15); }
+  .delta.bad { color: var(--red); background: rgba(244,104,90,0.15); }
+  .lg-tr.good, .ins-big.good { color: var(--green); }
+  .lg-tr.bad, .ins-big.bad { color: var(--amber); }
+  .pie-wrap { display: flex; justify-content: center; margin: 12px 0 14px; }
+  .pie { width: 186px; height: 186px; border-radius: 50%; position: relative; }
+  .pie-hole { position: absolute; inset: 27%; border-radius: 50%;
+    background: var(--card); display: flex; flex-direction: column;
+    align-items: center; justify-content: center; }
+  .pie-c-amt { font: 800 18px/1 ui-rounded, "SF Pro Rounded", system-ui; }
+  .pie-c-lbl { font-size: 9.5px; color: var(--faint); letter-spacing: 1.3px;
+    text-transform: uppercase; margin-top: 4px; }
+  .legend { display: flex; flex-direction: column; }
+  .lg-row { display: flex; align-items: center; gap: 9px; padding: 7px 2px;
+    border-top: 1px solid var(--hairline); font-size: 12.5px; }
+  .lg-row:first-child { border-top: 0; }
+  .lg-dot { width: 11px; height: 11px; border-radius: 4px; flex: 0 0 auto; }
+  .lg-name { font-weight: 600; }
+  .lg-tr { font-size: 11px; font-weight: 700; }
+  .lg-amt { margin-left: auto; font-weight: 700;
+    font-family: ui-rounded, "SF Pro Rounded", system-ui; }
+  .lg-pct { color: var(--faint); font-size: 11px; width: 32px; text-align: right; }
+  .ins-trend { text-align: center; padding: 10px 0 2px; }
+  .ins-big { font: 800 31px/1 ui-rounded, "SF Pro Rounded", system-ui; }
+  .ins-cap { font-size: 11px; color: var(--faint); letter-spacing: .3px; }
+  .ins-stats { display: flex; gap: 8px; margin: 11px 0 4px; }
+  .ins-cell { flex: 1; background: var(--card-hi); border-radius: 11px;
+    padding: 11px 8px; text-align: center; }
+  .ins-val { font: 800 15px/1.15 ui-rounded, "SF Pro Rounded", system-ui; }
+  .mb-wrap { margin-top: 12px; }
+  .mb { display: flex; align-items: flex-end; gap: 4px; height: 78px; }
+  .mb-col { flex: 1; display: flex; flex-direction: column; align-items: center;
+    justify-content: flex-end; height: 100%; }
+  .mb-fill { width: 100%; max-width: 20px; min-height: 3px;
+    border-radius: 4px 4px 2px 2px; background: var(--indigo-soft);
+    transform-origin: bottom; animation: bar-rise .5s ease both; }
+  .mb-fill.cur { background: var(--indigo); }
+  .mb-x { font-size: 9px; color: var(--faint); margin-top: 4px; }
+  .ins-llm { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--hairline); }
+
+  /* --- Bars (budgets / model) ------------------------------------------- */
+  .bar { height: 8px; border-radius: 5px; background: var(--card-hi);
+    overflow: hidden; margin-top: 6px; }
+  .bar > div { height: 100%; border-radius: 5px;
+    transition: width .6s cubic-bezier(.2,.7,.2,1); }
+  .budget-line { padding: 11px 0; border-top: 1px solid var(--hairline); }
+  .budget-line:first-child { border-top: 0; padding-top: 4px; }
+  .budget-line .top { display: flex; justify-content: space-between;
+    font-size: 13.5px; font-weight: 600; }
+  .budget-tot { display: flex; justify-content: space-between;
+    font-size: 13px; font-weight: 700; padding: 11px 0 3px;
+    margin-top: 4px; border-top: 1px solid var(--hairline-2); }
+
+  /* --- Notes, picks ------------------------------------------------------ */
+  .note { display: flex; gap: 8px; align-items: center; font-size: 12.5px;
+    padding: 9px 12px; border-radius: 10px; background: var(--card-hi);
+    margin-top: 11px; }
+  .note.run { color: var(--amber); } .note.ok { color: var(--green); }
+  .note.err { color: var(--red); }
+  .actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .company-head { display: flex; align-items: center; gap: 10px; margin-bottom: 15px; }
+  .company-head .ch-name { font-weight: 700; }
+  .company-head .ch-type { color: var(--muted); font-size: 12px; }
+  .pick-grid { display: flex; gap: 10px; margin: 8px 0 4px; }
+  .pick-card { flex: 1; border: 1px solid var(--hairline-2); border-radius: 13px;
+    padding: 20px 8px; text-align: center; cursor: pointer; background: var(--card-hi);
+    font-size: 13px; font-weight: 700; transition: border-color .15s, transform .12s; }
+  .pick-card:hover { border-color: var(--indigo); transform: translateY(-2px); }
+  .pick-card .pc-emoji { font-size: 28px; display: block; margin-bottom: 7px; }
+  .pick-card .pc-count { color: var(--muted); font-size: 11px; font-weight: 500;
+    display: block; margin-top: 3px; }
+  .pick-list { display: flex; flex-direction: column; gap: 2px; margin: 8px 0 4px;
+    max-height: 340px; overflow-y: auto; }
+  .pick-row { display: flex; align-items: center; gap: 11px; padding: 9px;
+    border-radius: 10px; cursor: pointer; }
+  .pick-row:hover { background: var(--card-hi); }
+  .back-btn { background: none; border: none; color: var(--muted); cursor: pointer;
+    font-size: 13px; padding: 4px 0; margin-bottom: 6px; }
+  .back-btn:hover { color: var(--text); }
+
+  /* --- Empty state ------------------------------------------------------- */
+  .blank { text-align: center; padding: 72px 20px;
+    display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .blank .be { font-size: 52px; }
+  .blank h2 { font-size: 19px; font-weight: 700; }
+  .blank p { color: var(--muted); font-size: 14px; max-width: 340px; }
+  .blank button { margin-top: 10px; }
+
+  /* --- Modals & gate ----------------------------------------------------- */
+  .overlay { position: fixed; inset: 0; background: var(--scrim); display: flex;
+    align-items: center; justify-content: center; padding: 24px; z-index: 50;
+    animation: fade .18s ease; }
+  .modal { background: var(--card); border: 1px solid var(--hairline);
+    border-radius: 18px; width: 100%; max-width: 446px; max-height: 86vh;
+    overflow: auto; padding: 24px; box-shadow: var(--shadow);
+    animation: pop .22s cubic-bezier(.2,.8,.2,1); }
+  .modal h2 { font-size: 18px; margin-bottom: 4px; }
+  .modal p.hint { color: var(--muted); font-size: 13px; margin-bottom: 16px; }
+  .modal ol.hint { color: var(--muted); font-size: 13px; margin: -8px 0 16px;
+    padding-left: 20px; }
+  .modal ol.hint li { margin-bottom: 3px; }
+  .field { margin-bottom: 13px; }
+  .field label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 5px; }
+  input, select {
+    width: 100%; background: var(--bg-elev); color: var(--text);
+    border: 1px solid var(--hairline-2); border-radius: 9px; padding: 9px 11px;
+    font: inherit; font-size: 14px;
+  }
+  input:focus, select:focus { outline: 2px solid var(--indigo); outline-offset: -1px; }
+  .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; }
+  .modal-err { color: var(--red); font-size: 13px; margin-top: 10px; }
+
+  #toasts { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    display: flex; flex-direction: column; gap: 8px; z-index: 60; }
+  .toast { background: var(--card); border: 1px solid var(--hairline-2);
+    border-radius: 11px; padding: 11px 17px; font-size: 13px; max-width: 460px;
+    box-shadow: var(--shadow); animation: pop .22s ease; }
+  .toast.err { border-color: var(--red); color: var(--red); }
+
+  /* --- Animations -------------------------------------------------------- */
+  @keyframes fade { from { opacity: 0; } }
+  @keyframes pop { from { opacity: 0; transform: scale(.95); } }
+  @keyframes fade-up { from { opacity: 0; transform: translateY(12px); } }
+  @keyframes txn-in { from { opacity: 0; transform: translateY(8px); } }
+  @keyframes pie-in { from { opacity: 0; transform: scale(.84) rotate(-14deg); } }
+  @keyframes bar-rise { from { transform: scaleY(0); } }
+  .tab-enter > * { animation: fade-up .36s ease both; }
+  .tab-enter .txn { animation: txn-in .3s ease both; }
+  .tab-enter .pie { animation: pie-in .55s cubic-bezier(.2,.8,.2,1) both; }
+  .move-card { animation: pop .22s ease; }
+</style>
+</head>
+<body>
+<main id="app" hidden>
+  <header>
+    <div class="brand"><span class="brand-mark"></span><h1>Hon</h1></div>
+    <span id="engine"></span>
+    <span class="spacer"></span>
+    <button class="icon-btn" id="theme-toggle" title="Light / dark">☀</button>
+    <button class="icon-btn" id="sidebar-toggle" title="Show / hide panel">⇥</button>
+  </header>
+  <div class="shell" id="shell">
+    <div class="main">
+      <nav id="nav"></nav>
+      <div id="content"></div>
+    </div>
+    <aside id="sidebar"></aside>
+  </div>
+</main>
+<div id="overlays"></div>
+<div id="toasts"></div>
+<script>
+"use strict";
+
+const token = new URLSearchParams(location.hash.slice(1)).get("token");
+const SYMBOLS = { ILS: "₪", NIS: "₪", USD: "$", EUR: "€", GBP: "£" };
+const CATEGORIES = ["Groceries","Dining","Transport","Fuel","Shopping","Utilities",
+  "Housing","Health","Entertainment","Subscriptions","Travel","Education",
+  "Income","Transfers","Fees","Other"];
+// [emoji, accent colour] per category — mirrors the macOS app's CategoryStyle.
+const CATEGORY_STYLE = {
+  Groceries: ["🛒", "#5CC773"], Dining: ["🍽️", "#F59942"],
+  Transport: ["🚌", "#5C9EF5"], Fuel: ["⛽", "#EB736B"],
+  Shopping: ["🛍️", "#D975D6"], Utilities: ["💡", "#F2C752"],
+  Housing: ["🏠", "#66B8BD"], Health: ["⚕️", "#ED6680"],
+  Entertainment: ["🎭", "#A880ED"], Subscriptions: ["🔁", "#7D8CED"],
+  Travel: ["✈️", "#5CC7DB"], Education: ["📚", "#73B39E"],
+  Income: ["💰", "#4CD180"], Transfers: ["↔️", "#999EB8"],
+  Fees: ["﹪", "#B38C80"], Other: ["▫️", "#8C8FA8"],
+};
+function catStyle(cat) { return CATEGORY_STYLE[cat] || CATEGORY_STYLE.Other; }
+const FIELD_LABELS = {
+  username: "Username", password: "Password", userCode: "User code",
+  id: "ID number", card6Digits: "Card — last 6 digits", nationalID: "National ID",
+  num: "Account number", clientId: "SnapTrade Client ID",
+  consumerKey: "SnapTrade Consumer Key",
+};
+const SECURE_FIELDS = new Set(["password", "consumerKey"]);
+const SNAPTRADE_ID = "snaptrade";
+const TABS = [["overview", "Overview"], ["accounts", "Accounts"], ["activity", "Activity"]];
+
+const state = {
+  companies: [], connections: [], accounts: [], transactions: [],
+  summary: null, budget: null, insights: null, analytics: null, llm: null,
+  scrapes: {}, categorize: null, tab: "overview",
+  move: null,            // { txnId, picked, always } while moving a transaction
+  _renderedTab: null, _nwShown: null, _sidebarSig: null,
+};
+
+// --- Helpers ---------------------------------------------------------------
+
+function money(value, currency, sign) {
+  if (value == null) return "—";
+  const cur = (currency || "").toUpperCase();
+  const symbol = SYMBOLS[cur] || cur + " ";
+  const n = Math.abs(value).toLocaleString(undefined,
+    { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const prefix = value < 0 ? "−" : (sign && value > 0 ? "+" : "");
+  return prefix + symbol + n;
+}
+function fmtDate(s) {
+  const d = new Date(s);
+  return isNaN(d) ? s : d.toLocaleDateString(undefined,
+    { year: "numeric", month: "short", day: "numeric" });
+}
+function fmtSize(bytes) {
+  if (!bytes) return "";
+  const gb = bytes / 1e9;
+  return gb >= 1 ? gb.toFixed(1) + " GB" : Math.round(bytes / 1e6) + " MB";
+}
+// Compact money for tight spots (e.g. the donut centre): ₪12.3k, ₪840.
+function moneyShort(value, currency) {
+  const sym = SYMBOLS[(currency || "").toUpperCase()] || "";
+  const abs = Math.abs(value);
+  const sign = value < 0 ? "−" : "";
+  if (abs >= 1000) return sign + sym + (abs / 1000).toFixed(abs >= 10000 ? 0 : 1) + "k";
+  return sign + sym + Math.round(abs);
+}
+function monthName(key) {
+  const p = key.split("-");
+  return new Date(Number(p[0]), Number(p[1]) - 1, 1)
+    .toLocaleDateString(undefined, { month: "short", year: "numeric" });
+}
+function monthLetter(key) {
+  const p = key.split("-");
+  return new Date(Number(p[0]), Number(p[1]) - 1, 1)
+    .toLocaleDateString(undefined, { month: "narrow" });
+}
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"]/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
+function toast(message, isError) {
+  const el = document.createElement("div");
+  el.className = "toast" + (isError ? " err" : "");
+  el.textContent = message;
+  document.getElementById("toasts").appendChild(el);
+  setTimeout(() => el.remove(), 4500);
+}
+
+// Counts a number up to its target — a small flourish on the net-worth figure.
+function animateValue(el, to, currency) {
+  const dur = 850, start = performance.now();
+  (function step(now) {
+    const p = Math.min(1, (now - start) / dur);
+    const eased = 1 - Math.pow(1 - p, 3);
+    el.textContent = money(to * eased, currency);
+    if (p < 1) requestAnimationFrame(step);
+  })(start);
+}
+
+class VaultLocked extends Error {}
+
+async function api(path, method, body) {
+  // Only send a JSON content-type when there is a body — Fastify rejects an
+  // empty body with 400 "Bad Request" if application/json is declared.
+  const headers = {};
+  if (token) headers.Authorization = "Bearer " + token;
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  const res = await fetch(path, {
+    method: method || "GET",
+    headers,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  if (res.status === 409) throw new VaultLocked("vault locked");
+  if (!res.ok) {
+    let detail = "HTTP " + res.status;
+    try { detail = (await res.json()).error || detail; } catch (e) {}
+    if (res.status === 401) detail = "Not authorized — re-open with ./web.sh.";
+    throw new Error(detail);
+  }
+  return res.status === 204 ? null : res.json();
+}
+
+// --- Theme & sidebar -------------------------------------------------------
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+  localStorage.setItem("honTheme", theme);
+  const btn = document.getElementById("theme-toggle");
+  if (btn) btn.textContent = theme === "light" ? "☾" : "☀";
+}
+function applySidebar(open) {
+  document.getElementById("shell").classList.toggle("collapsed", !open);
+  localStorage.setItem("honSidebar", open ? "1" : "0");
+}
+function sidebarOpen() { return localStorage.getItem("honSidebar") !== "0"; }
+
+// --- Data loading ----------------------------------------------------------
+
+async function loadAll() {
+  try {
+    const [companies, connections, accounts, transactions, summary, budget,
+           insights, analytics, llm] =
+      await Promise.all([
+        api("/companies").then((r) => r.companies),
+        api("/connections").then((r) => r.connections),
+        api("/accounts").then((r) => r.accounts),
+        api("/transactions?limit=400").then((r) => r.transactions),
+        api("/summary").then((r) => r.summary),
+        api("/budget"),
+        api("/insights"),
+        api("/analytics"),
+        api("/llm"),
+      ]);
+    Object.assign(state, {
+      companies, connections, accounts, transactions, summary, budget,
+      insights, analytics, llm,
+    });
+    // Drop a stale move target if its transaction is gone.
+    if (state.move && !transactions.some((t) => t.id === state.move.txnId)) {
+      state.move = null;
+    }
+    render();
+  } catch (err) {
+    if (err instanceof VaultLocked) return showGate();
+    toast(err.message, true);
+  }
+}
+
+// --- Rendering -------------------------------------------------------------
+
+function render() {
+  document.getElementById("nav").innerHTML = TABS.map(([id, label]) =>
+    '<button data-tab="' + id + '"' + (state.tab === id ? ' class="active"' : "")
+    + ">" + label + "</button>").join("");
+
+  const content = document.getElementById("content");
+  const tabChanged = state._renderedTab !== state.tab;
+  state._renderedTab = state.tab;
+
+  if (!state.connections.length) {
+    content.innerHTML = emptyState();
+  } else if (state.tab === "accounts") {
+    content.innerHTML = accountsView();
+  } else if (state.tab === "activity") {
+    content.innerHTML = activityView();
+  } else {
+    content.innerHTML = overviewView();
+  }
+
+  if (tabChanged) {
+    content.classList.remove("tab-enter");
+    void content.offsetWidth;
+    content.classList.add("tab-enter");
+    // Drop the class once the animation is done so later re-renders (scrape
+    // polling, selecting a transaction) don't replay it.
+    clearTimeout(state._tabTimer);
+    state._tabTimer = setTimeout(() => content.classList.remove("tab-enter"), 750);
+  }
+
+  // Count the net-worth figure up when Overview is freshly shown.
+  const nw = document.getElementById("nw-value");
+  if (nw && nw.dataset.value) {
+    const v = Number(nw.dataset.value);
+    if (tabChanged || state._nwShown !== v) { animateValue(nw, v, "ILS"); }
+    state._nwShown = v;
+  }
+
+  renderSidebar();
+}
+
+function emptyState() {
+  return '<div class="blank"><div class="be">🏦</div>'
+    + "<h2>No accounts yet</h2>"
+    + "<p>Connect a bank, credit card, or brokerage to pull your balances "
+    + "and transactions into Hon.</p>"
+    + '<button class="primary" data-action="add-connection">+ Add your first account</button>'
+    + "</div>";
+}
+
+/* --- Overview ------------------------------------------------------------ */
+
+function overviewView() {
+  return netWorthCard()
+    + '<div class="col-grid">' + spendingCard() + budgetSection() + modelCard()
+    + "</div>";
+}
+
+// "This month" card — total spend, the month-over-month trend, and a donut
+// chart of where the money went, with each slice's trend in the legend.
+function spendingCard() {
+  const a = state.analytics;
+  if (!a) return "";
+  let badge = "";
+  if (a.spendingChangePct != null) {
+    const down = a.spendingChangePct < 0;
+    badge = '<span class="delta ' + (down ? "good" : "bad") + '">'
+      + (down ? "↓ " : "↑ ") + Math.abs(a.spendingChangePct).toFixed(0)
+      + "% vs last month</span>";
+  }
+  return '<section class="card"><div class="card-head"><h3>This month</h3></div>'
+    + '<div class="spend-top"><div class="spend-num">'
+    + money(a.thisMonth.spending, "ILS") + "</div>" + badge + "</div>"
+    + spendPie(a.byCategory) + "</section>";
+}
+
+function spendPie(cats) {
+  const total = cats.reduce((s, c) => s + c.amount, 0);
+  if (total <= 0) return '<div class="empty">No spending recorded this month.</div>';
+  let acc = 0;
+  const stops = cats.map((c) => {
+    const a0 = (acc / total) * 100;
+    acc += c.amount;
+    return catStyle(c.category)[1] + " " + a0.toFixed(2) + "% "
+      + ((acc / total) * 100).toFixed(2) + "%";
+  }).join(", ");
+  const legend = cats.map((c) => {
+    const color = catStyle(c.category)[1];
+    let tr = "";
+    if (c.changePct != null && Math.abs(c.changePct) >= 1) {
+      const down = c.changePct < 0;
+      tr = '<span class="lg-tr ' + (down ? "good" : "bad") + '">'
+        + (down ? "↓" : "↑") + Math.abs(c.changePct).toFixed(0) + "%</span>";
+    }
+    return '<div class="lg-row"><span class="lg-dot" style="background:' + color
+      + '"></span><span class="lg-name">' + esc(c.category) + "</span>" + tr
+      + '<span class="lg-amt">' + money(c.amount, "ILS") + "</span>"
+      + '<span class="lg-pct">' + Math.round((c.amount / total) * 100) + "%</span></div>";
+  }).join("");
+  return '<div class="pie-wrap"><div class="pie" style="background:conic-gradient('
+    + stops + ')"><div class="pie-hole"><div class="pie-c-amt">'
+    + moneyShort(total, "ILS") + '</div><div class="pie-c-lbl">spent</div>'
+    + "</div></div></div>"
+    + '<div class="legend">' + legend + "</div>";
+}
+
+function netWorthCard() {
+  const s = state.summary || { byCurrency: [], accountCount: 0, connectionCount: 0 };
+  const totals = (s.byCurrency || []).slice().sort((a, b) =>
+    a.currency === "ILS" ? -1 : b.currency === "ILS" ? 1 : b.total - a.total);
+
+  // The headline is every account combined into one ILS figure; the chips show
+  // the original per-currency balances. Falls back to ILS-only if FX is down.
+  let valueAttr = "", headline, neg = false, chipTotals;
+  if (s.netWorthILS != null) {
+    headline = money(s.netWorthILS, "ILS");
+    valueAttr = ' id="nw-value" data-value="' + s.netWorthILS + '"';
+    neg = s.netWorthILS < 0;
+    chipTotals = totals.length > 1 ? totals : [];
+  } else {
+    headline = totals[0] ? money(totals[0].total, totals[0].currency) : "—";
+    neg = totals[0] && totals[0].total < 0;
+    chipTotals = totals.slice(1);
+  }
+  const chips = chipTotals.map((t) =>
+    '<span class="chip">' + money(t.total, t.currency) + "</span>").join("");
+  return '<section class="networth"><div class="label">Total net worth</div>'
+    + '<div class="nw-total' + (neg ? " neg" : "") + '"' + valueAttr + ">"
+    + headline + "</div>"
+    + (chips ? '<div class="chips">' + chips + "</div>" : "")
+    + '<div class="nw-sub">' + (s.accountCount || 0) + " accounts across "
+    + (s.connectionCount || 0) + " connections</div></section>";
+}
+
+function modelCard() {
+  const llm = state.llm;
+  if (!llm) return "";
+  let body;
+  if (llm.state === "ready") {
+    body = '<div class="meta">Loaded: ' + esc(llm.modelName || llm.modelId) + "</div>";
+  } else if (llm.state === "downloading" || llm.state === "loading" || llm.state === "downloaded") {
+    const pct = llm.totalBytes ? Math.round(100 * llm.downloadedBytes / llm.totalBytes) : 0;
+    body = '<div class="meta">' + esc(llm.message || llm.state) + "</div>"
+      + '<div class="bar"><div style="width:' + pct + '%;background:var(--indigo)"></div></div>'
+      + '<div class="actions" style="margin-top:10px"><button class="mini" '
+      + 'data-action="cancel-model">Cancel</button></div>';
+  } else {
+    const options = (llm.catalog || []).map((m) =>
+      '<div class="row"><div><div class="name">' + esc(m.name)
+      + (m.recommended ? ' <span class="pill">recommended</span>' : "") + "</div>"
+      + '<div class="secondary">' + esc(m.description) + " · " + fmtSize(m.approxSizeBytes)
+      + "</div></div>"
+      + '<button class="mini" data-action="download-model" data-arg="' + esc(m.id)
+      + '">Download</button></div>').join("");
+    body = '<div class="meta">No on-device AI model yet — needed for smart '
+      + 'categorization and insights.</div><div class="list" style="margin-top:8px">'
+      + options + "</div>";
+  }
+  return '<section class="card"><div class="card-head"><h3>On-device AI</h3></div>'
+    + body + "</section>";
+}
+
+/* --- Accounts ------------------------------------------------------------ */
+
+function accountsView() {
+  return '<div class="sec-head"><div class="label">Accounts</div>'
+    + '<span class="spacer"></span>'
+    + '<button class="mini" data-action="add-connection">+ Add account</button>'
+    + '<button class="mini primary" data-action="sync-all">↻ Sync all</button></div>'
+    + '<div class="col-grid">' + state.connections.map(connectionCard).join("")
+    + "</div>";
+}
+
+// A category emoji with the institution's favicon layered on top; if the
+// favicon cannot load, onerror removes it and the emoji shows through.
+function companyLogo(company) {
+  const type = company && company.type ? company.type : "bank";
+  const emoji = type === "card" ? "💳" : type === "brokerage" ? "📈" : "🏦";
+  const img = company && company.domain
+    ? '<img src="/logo/' + encodeURIComponent(company.id) + '" '
+      + 'alt="" onerror="this.remove()">'
+    : "";
+  return '<span class="logo">' + emoji + img + "</span>";
+}
+function categoryLabel(type) {
+  return type === "card" ? "Credit card"
+    : type === "brokerage" ? "Brokerage" : "Bank";
+}
+function brokerageLogo(b) {
+  const img = b.logoUrl
+    ? '<img src="' + esc(b.logoUrl) + '" alt="" onerror="this.remove()">'
+    : "";
+  return '<span class="logo">📈' + img + "</span>";
+}
+
+function connectionCard(conn) {
+  const accounts = state.accounts.filter((a) => a.connectionId === conn.id);
+  const isSnap = conn.companyId === SNAPTRADE_ID;
+  const prog = state.scrapes[conn.id];
+  const company = state.companies.find((c) => c.id === conn.companyId);
+
+  let metaText = company ? company.name : conn.companyId;
+  if (conn.lastScrapeAt) {
+    metaText += " · " + (conn.lastStatus === "error" ? "sync failed" : "synced")
+      + " " + fmtDate(conn.lastScrapeAt);
+  }
+
+  const buttons = [];
+  if (!conn.hasCredentials) {
+    buttons.push('<button class="mini primary" data-action="set-credentials" data-id="'
+      + conn.id + '">Set credentials</button>');
+  }
+  buttons.push('<button class="mini" data-action="sync" data-id="' + conn.id + '">↻ Sync</button>');
+  if (isSnap) {
+    buttons.push('<button class="mini" data-action="link-brokerage" data-id="' + conn.id
+      + '">Link brokerage</button>');
+  }
+  buttons.push('<button class="mini danger" data-action="remove" data-id="' + conn.id
+    + '">Remove</button>');
+
+  let rows, total = null, totalCur = "ILS";
+  if (accounts.length) {
+    total = 0;
+    accounts.forEach((a) => { if (a.balance != null) { total += a.balance; totalCur = a.currency; } });
+    rows = '<div class="list conn-accounts">' + accounts.map((a) =>
+      '<div class="row"><div><div class="name">'
+      + esc(a.label || "Account " + a.accountNumber) + "</div>"
+      + (a.label ? '<div class="secondary">' + esc(a.accountNumber) + "</div>" : "")
+      + '</div><div class="amount">' + money(a.balance, a.currency)
+      + "</div></div>").join("") + "</div>";
+  } else if (isSnap && !conn.lastScrapeAt) {
+    rows = '<div class="empty">No brokerage linked yet — use “Link brokerage”.</div>';
+  } else {
+    rows = '<div class="empty">' + (conn.lastScrapeAt ? "No accounts found." : "Not synced yet.")
+      + "</div>";
+  }
+
+  let progressNote = "";
+  if (prog) {
+    const cls = prog.phase === "done" ? "ok" : prog.phase === "failed" ? "err" : "run";
+    progressNote = '<div class="note ' + cls + '">' + esc(prog.message) + "</div>";
+  }
+  const disabled = prog && prog.phase === "running" ? " disabled" : "";
+  const btns = buttons.join("").replace(/<button/g, "<button" + (disabled ? " disabled" : ""));
+
+  return '<div class="card"><div class="card-head">' + companyLogo(company)
+    + '<div style="min-width:0"><h3>' + esc(conn.displayName)
+    + '</h3><div class="meta">' + esc(metaText) + "</div></div>"
+    + (total != null
+        ? '<span class="conn-total">' + money(total, totalCur) + "</span>" : "")
+    + "</div>" + progressNote + rows
+    + '<div class="conn-foot actions">' + btns + "</div></div>";
+}
+
+/* --- Activity ------------------------------------------------------------ */
+
+function toolsSection() {
+  const c = state.categorize;
+  let note = "";
+  if (c && c.state === "running") {
+    note = '<div class="note run">' + esc(c.message || "Categorizing…")
+      + " (" + c.done + "/" + c.total + ")</div>";
+  }
+  return '<section class="card"><div class="card-head"><h3>Categorize transactions</h3>'
+    + '<span class="spacer"></span>'
+    + '<button class="mini" data-action="categorize">Run</button></div>'
+    + '<div class="meta">Tag transactions by spending category using rules and the '
+    + "AI model.</div>" + note + "</section>";
+}
+
+function activityView() {
+  if (!state.transactions.length) {
+    return toolsSection() + '<div class="card empty">No transactions yet — '
+      + "sync an account to see activity.</div>";
+  }
+  const byId = {};
+  state.accounts.forEach((a) => { byId[a.id] = a; });
+
+  // Group transactions under their spending category.
+  const groups = {};
+  state.transactions.forEach((t) => {
+    const cat = t.category || "Uncategorized";
+    (groups[cat] || (groups[cat] = [])).push(t);
+  });
+  const order = CATEGORIES.concat(["Uncategorized"]);
+  const cats = Object.keys(groups).sort((a, b) => {
+    const ia = order.indexOf(a), ib = order.indexOf(b);
+    return ((ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib)) || a.localeCompare(b);
+  });
+
+  const txnRow = (t, i) => {
+    const acct = byId[t.accountId];
+    const place = acct ? " · " + esc(acct.label || acct.connectionName) : "";
+    const [em, color] = catStyle(t.category || "Other");
+    const sel = state.move && state.move.txnId === t.id ? " sel" : "";
+    return '<div class="txn' + sel + '" data-txn="' + esc(t.id)
+      + '" style="animation-delay:' + Math.min(i, 16) * 20 + 'ms">'
+      + '<span class="txn-icon" style="background:' + color + '26;color:' + color
+      + '">' + em + "</span>"
+      + '<div class="txn-main"><div class="txn-name">' + esc(t.description) + "</div>"
+      + '<div class="txn-sub">' + fmtDate(t.date) + place + "</div></div>"
+      + '<div class="txn-amt' + (t.amount > 0 ? " pos" : "") + '">'
+      + money(t.amount, t.currency, true) + "</div></div>";
+  };
+  const cards = cats.map((cat) => {
+    const [, color] = catStyle(cat === "Uncategorized" ? "Other" : cat);
+    const list = groups[cat].slice().sort((a, b) => new Date(b.date) - new Date(a.date));
+    let total = 0, cur = "ILS";
+    list.forEach((t) => { total += t.amount; cur = t.currency; });
+    return '<div class="card cat-card"><div class="cat-head">'
+      + '<span class="cat-dot" style="background:' + color + '"></span>'
+      + '<span class="cat-name">' + esc(cat) + "</span>"
+      + '<span class="cat-total" style="color:' + (total < 0 ? "var(--text)" : "var(--green)")
+      + '">' + money(total, cur, true) + "</span></div>"
+      + '<div class="cat-meta">' + list.length
+      + (list.length === 1 ? " TRANSACTION" : " TRANSACTIONS") + "</div>"
+      + list.map(txnRow).join("") + "</div>";
+  }).join("");
+  return toolsSection() + '<div class="col-grid">' + cards + "</div>";
+}
+
+function budgetSection() {
+  const b = state.budget;
+  if (!b) return "";
+  const lines = (b.lines || []).filter((l) => l.budget != null || l.spent > 0)
+    .sort((a, b2) => b2.spent - a.spent);
+  let body, totalSpent = 0;
+  lines.forEach((l) => { totalSpent += l.spent; });
+  if (!lines.length) {
+    body = '<div class="empty">No spending or budgets yet this month.</div>';
+  } else {
+    body = lines.map((l) => {
+      const [, color] = catStyle(l.category);
+      const ratio = l.budget ? l.spent / l.budget : null;
+      const pct = ratio == null ? 0 : Math.min(100, ratio * 100);
+      const barColor = ratio == null ? color
+        : ratio > 1 ? "var(--red)" : ratio > 0.85 ? "var(--amber)" : "var(--green)";
+      return '<div class="budget-line"><div class="top"><span>' + esc(l.category) + "</span>"
+        + "<span>" + money(l.spent, b.currency)
+        + (l.budget ? ' <span style="color:var(--faint)">/ ' + money(l.budget, b.currency)
+            + "</span>" : "") + "</span></div>"
+        + '<div class="bar"><div style="width:' + pct + "%;background:" + barColor
+        + '"></div></div></div>';
+    }).join("")
+    + '<div class="budget-tot"><span>Spent this month</span><span>'
+    + money(totalSpent, b.currency) + "</span></div>";
+  }
+  return '<section class="card"><div class="card-head"><h3>Budgets · '
+    + esc(b.month) + "</h3><span class=\"spacer\"></span>"
+    + '<button class="mini" data-action="edit-budgets">Edit</button></div>'
+    + body + "</section>";
+}
+
+/* --- Sidebar ------------------------------------------------------------- */
+
+function renderSidebar() {
+  // Rebuild only when sidebar-relevant state changed, so scrape/poll re-renders
+  // don't replay the insight-bar and move-panel animations.
+  const sig = JSON.stringify([state.move, state.analytics, state.insights]);
+  if (sig === state._sidebarSig) return;
+  state._sidebarSig = sig;
+  const parts = [quickActionsCard()];
+  if (state.move) parts.push(movePanel());
+  parts.push(insightsCard());
+  document.getElementById("sidebar").innerHTML = parts.join("");
+}
+
+function quickActionsCard() {
+  return '<div class="card"><div class="label">Quick actions</div>'
+    + '<div class="qa">'
+    + '<button data-action="add-connection"><span class="qa-ico">＋</span>Add account</button>'
+    + '<button data-action="refresh"><span class="qa-ico">↻</span>Refresh data</button>'
+    + '<button data-action="lock"><span class="qa-ico">🔒</span>Lock vault</button>'
+    + "</div></div>";
+}
+
+function movePanel() {
+  const txn = state.transactions.find((t) => t.id === state.move.txnId);
+  if (!txn) { state.move = null; return ""; }
+  const [em, color] = catStyle(txn.category || "Other");
+  const cats = CATEGORIES.map((cat) => {
+    const [ce] = catStyle(cat);
+    const on = cat === state.move.picked;
+    return '<button class="move-cat' + (on ? " active" : "") + '" data-move-cat="'
+      + esc(cat) + '" style="color:' + catStyle(cat)[1] + '">'
+      + '<span class="mc-em">' + ce + "</span>"
+      + '<span style="color:var(--text);font-weight:inherit">' + esc(cat) + "</span>"
+      + '<span class="mc-check">✓</span></button>';
+  }).join("");
+  return '<div class="card move-card"><div class="card-head">'
+    + '<div class="label">Move transaction</div>'
+    + '<span class="spacer"></span>'
+    + '<button class="icon-btn mini" data-x="move-cancel">✕</button></div>'
+    + '<div class="move-txn"><span class="txn-icon" style="background:' + color
+    + '26;color:' + color + '">' + em + "</span>"
+    + '<div class="txn-main"><div class="txn-name">' + esc(txn.description) + "</div>"
+    + '<div class="txn-sub">' + money(txn.amount, txn.currency, true) + " · "
+    + fmtDate(txn.date) + "</div></div></div>"
+    + '<div class="move-cats">' + cats + "</div>"
+    + '<label class="always"><input type="checkbox" id="move-always"'
+    + (state.move.always ? " checked" : "") + ">"
+    + "<span>Always categorize transactions from this business this way</span></label>"
+    + '<button class="primary block" data-x="move-save"'
+    + (state.move.picked ? "" : " disabled") + ">Save</button></div>";
+}
+
+function insightsCard() {
+  const a = state.analytics;
+  const ins = state.insights;
+  const generating = ins && ins.state === "generating";
+
+  let stats = "";
+  if (a) {
+    let trend;
+    if (a.spendingChangePct != null) {
+      const down = a.spendingChangePct < 0;
+      trend = '<div class="ins-big ' + (down ? "good" : "bad") + '">'
+        + (down ? "↓ " : "↑ ") + Math.abs(a.spendingChangePct).toFixed(0) + "%</div>"
+        + '<div class="ins-cap">' + (down ? "less" : "more")
+        + " spent than last month</div>";
+    } else {
+      trend = '<div class="ins-big">—</div>'
+        + '<div class="ins-cap">no prior month to compare</div>';
+    }
+    stats = '<div class="ins-trend">' + trend + "</div>"
+      + '<div class="ins-stats">'
+      + statCell(money(a.avgTransaction, "ILS"), "Avg. transaction")
+      + statCell(money(a.thisMonth.spending, "ILS"), "This month")
+      + "</div>" + miniBars(a.months);
+  }
+
+  let llm;
+  if (generating) llm = '<div class="note run">Generating AI summary…</div>';
+  else if (ins && ins.state === "ready" && ins.text)
+    llm = '<div class="ins-body">' + esc(ins.text) + "</div>";
+  else if (ins && ins.state === "error")
+    llm = '<div class="empty" style="padding:6px 0">' + esc(ins.message) + "</div>";
+  else llm = '<div class="empty" style="padding:6px 0">Generate a written summary '
+    + "of your spending.</div>";
+
+  return '<div class="card"><div class="card-head"><div class="label">Insights</div>'
+    + '<span class="spacer"></span>'
+    + '<button class="mini" data-action="generate-insights"' + (generating ? " disabled" : "")
+    + ">Generate</button></div>" + stats
+    + '<div class="ins-llm">' + llm + "</div></div>";
+}
+
+function statCell(value, label) {
+  return '<div class="ins-cell"><div class="ins-val">' + value + "</div>"
+    + '<div class="ins-cap">' + label + "</div></div>";
+}
+
+// A compact 12-month spending bar chart; the current month is highlighted.
+function miniBars(months) {
+  const max = Math.max(1, ...months.map((m) => m.spending));
+  const bars = months.map((m, i) => {
+    const h = Math.max(3, Math.round((m.spending / max) * 100));
+    const cur = i === months.length - 1 ? " cur" : "";
+    return '<div class="mb-col" title="' + esc(monthName(m.month) + " · "
+      + money(m.spending, "ILS")) + '">'
+      + '<div class="mb-fill' + cur + '" style="height:' + h
+      + "%;animation-delay:" + i * 34 + 'ms"></div>'
+      + '<div class="mb-x">' + monthLetter(m.month) + "</div></div>";
+  }).join("");
+  return '<div class="mb-wrap"><div class="ins-cap" style="margin-bottom:7px">'
+    + "Spending · last 12 months</div><div class=\"mb\">" + bars + "</div></div>";
+}
+
+// --- Modals ----------------------------------------------------------------
+
+function closeOverlay() { document.getElementById("overlays").innerHTML = ""; }
+
+function openModal(buildBody) {
+  const overlay = document.createElement("div");
+  overlay.className = "overlay";
+  const modal = document.createElement("div");
+  modal.className = "modal";
+  overlay.appendChild(modal);
+  overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) closeOverlay(); });
+  document.getElementById("overlays").appendChild(overlay);
+  buildBody(modal);
+  return modal;
+}
+
+function addConnectionModal() {
+  openModal((modal) => {
+    const KINDS = [
+      ["bank", "Banks", "🏦"],
+      ["card", "Credit cards", "💳"],
+      ["brokerage", "Brokerages", "📈"],
+    ];
+    let category = "";
+    let selected = "";
+    let brokerages = null;
+    let brokeragesError = "";
+
+    const bindCancel = () => {
+      modal.querySelector('[data-x="cancel"]').addEventListener("click", closeOverlay);
+    };
+
+    const renderCategoryStep = () => {
+      const cards = KINDS.map(([type, label, emoji]) => {
+        const n = state.companies.filter((c) => (c.type || "bank") === type).length;
+        const sub = type === "brokerage"
+          ? "via SnapTrade"
+          : n + (n === 1 ? " option" : " options");
+        return '<div class="pick-card" data-cat="' + type + '">'
+          + '<span class="pc-emoji">' + emoji + "</span>" + esc(label)
+          + '<span class="pc-count">' + sub + "</span></div>";
+      }).join("");
+      modal.innerHTML = "<h2>Add an account</h2>"
+        + '<p class="hint">What kind of account do you want to connect?</p>'
+        + '<div class="pick-grid">' + cards + "</div>"
+        + '<div class="modal-actions"><button data-x="cancel">Cancel</button></div>';
+      modal.querySelectorAll(".pick-card").forEach((el) => {
+        el.addEventListener("click", () => {
+          category = el.dataset.cat; selected = ""; render2();
+        });
+      });
+      bindCancel();
+    };
+
+    const renderInstitutionStep = () => {
+      const meta = KINDS.find((c) => c[0] === category);
+      const inGroup = state.companies.filter((c) => (c.type || "bank") === category);
+      const list = inGroup.map((c) =>
+        '<div class="pick-row" data-id="' + esc(c.id) + '">'
+        + companyLogo(c) + "<div>" + esc(c.name) + "</div></div>").join("")
+        || '<p class="hint">No institutions in this category.</p>';
+      modal.innerHTML = "<h2>" + esc(meta[1]) + "</h2>"
+        + '<button class="back-btn" data-x="back">‹ All categories</button>'
+        + '<div class="pick-list">' + list + "</div>"
+        + '<div class="modal-actions"><button data-x="cancel">Cancel</button></div>';
+      modal.querySelectorAll(".pick-row").forEach((el) => {
+        el.addEventListener("click", () => { selected = el.dataset.id; render2(); });
+      });
+      modal.querySelector('[data-x="back"]')
+        .addEventListener("click", () => { category = ""; render2(); });
+      bindCancel();
+    };
+
+    const renderCredentialStep = () => {
+      const company = state.companies.find((c) => c.id === selected);
+      if (!company) { selected = ""; return render2(); }
+      let fields = '<div class="company-head">' + companyLogo(company)
+        + '<div><div class="ch-name">' + esc(company.name) + "</div>"
+        + '<div class="ch-type">' + categoryLabel(company.type) + "</div></div></div>";
+      fields += company.loginFields.map((key) => {
+        const lbl = FIELD_LABELS[key] || (key[0].toUpperCase() + key.slice(1));
+        const type = SECURE_FIELDS.has(key) ? "password" : "text";
+        return '<div class="field"><label>' + esc(lbl) + "</label>"
+          + '<input data-cred="' + esc(key) + '" type="' + type + '" autocomplete="off"></div>';
+      }).join("")
+      + '<div class="field"><label>Display name</label>'
+      + '<input id="ac-name" type="text" value="' + esc(company.name) + '"></div>';
+      if (company.id === SNAPTRADE_ID) {
+        fields += '<p class="hint">To get a Client ID and Consumer Key:</p>'
+          + '<ol class="hint">'
+          + "<li>Sign up at dashboard.snaptrade.com</li>"
+          + "<li>Open the API Keys page and copy the Client ID</li>"
+          + "<li>Click the regenerate icon next to Consumer Key, then copy the revealed key</li>"
+          + "<li>Paste both above. After connecting, use “Link brokerage” on the card "
+          + "to link up to 5 brokerages.</li></ol>";
+      }
+      modal.innerHTML = "<h2>Add an account</h2>"
+        + '<button class="back-btn" data-x="back">‹ ' + esc(categoryLabel(company.type))
+        + "s</button>"
+        + '<p class="hint">Credentials are encrypted in your local vault.</p>'
+        + fields
+        + '<div class="modal-err" id="ac-err" hidden></div>'
+        + '<div class="modal-actions"><button data-x="cancel">Cancel</button>'
+        + '<button class="primary" data-x="connect">Connect</button></div>';
+      modal.querySelector('[data-x="back"]')
+        .addEventListener("click", () => { selected = ""; render2(); });
+      modal.querySelector('[data-x="connect"]')
+        .addEventListener("click", () => submit(company));
+      bindCancel();
+    };
+
+    const renderSnapKeysStep = () => {
+      const snap = state.companies.find((c) => c.id === SNAPTRADE_ID);
+      if (!snap) {
+        modal.innerHTML = '<h2>Brokerages</h2><p class="hint">SnapTrade is unavailable.</p>'
+          + '<div class="modal-actions"><button data-x="cancel">Cancel</button></div>';
+        bindCancel();
+        return;
+      }
+      let fields = '<div class="company-head">' + companyLogo(snap)
+        + '<div><div class="ch-name">' + esc(snap.name) + "</div>"
+        + '<div class="ch-type">Brokerage</div></div></div>';
+      fields += snap.loginFields.map((key) => {
+        const lbl = FIELD_LABELS[key] || (key[0].toUpperCase() + key.slice(1));
+        const type = SECURE_FIELDS.has(key) ? "password" : "text";
+        return '<div class="field"><label>' + esc(lbl) + "</label>"
+          + '<input data-cred="' + esc(key) + '" type="' + type + '" autocomplete="off"></div>';
+      }).join("")
+      + '<div class="field"><label>Display name</label>'
+      + '<input id="ac-name" type="text" value="' + esc(snap.name) + '"></div>'
+      + '<p class="hint">To get a Client ID and Consumer Key:</p>'
+      + '<ol class="hint">'
+      + "<li>Sign up at dashboard.snaptrade.com</li>"
+      + "<li>Open the API Keys page and copy the Client ID</li>"
+      + "<li>Click the regenerate icon next to Consumer Key, then copy the revealed key</li>"
+      + "<li>Paste both above to continue.</li></ol>";
+      modal.innerHTML = "<h2>Connect a brokerage</h2>"
+        + '<button class="back-btn" data-x="back">‹ All categories</button>'
+        + '<p class="hint">First, enter your SnapTrade developer keys (one time).</p>'
+        + fields
+        + '<div class="modal-err" id="ac-err" hidden></div>'
+        + '<div class="modal-actions"><button data-x="cancel">Cancel</button>'
+        + '<button class="primary" data-x="savekeys">Continue</button></div>';
+      modal.querySelector('[data-x="back"]')
+        .addEventListener("click", () => { category = ""; render2(); });
+      modal.querySelector('[data-x="savekeys"]')
+        .addEventListener("click", () => saveSnapKeys(snap));
+      bindCancel();
+    };
+
+    const saveSnapKeys = async (snap) => {
+      const creds = {};
+      let missing = false;
+      modal.querySelectorAll("[data-cred]").forEach((inp) => {
+        const v = inp.value.trim();
+        if (!v) missing = true;
+        creds[inp.dataset.cred] = v;
+      });
+      const err = modal.querySelector("#ac-err");
+      if (missing) { err.textContent = "Please fill in every field."; err.hidden = false; return; }
+      const name = modal.querySelector("#ac-name").value.trim() || snap.name;
+      try {
+        await api("/connections", "POST",
+          { companyId: snap.id, displayName: name, credentials: creds });
+        await loadAll();
+        brokerages = null;
+        render2();
+      } catch (e) {
+        if (e instanceof VaultLocked) { closeOverlay(); return showGate(); }
+        err.textContent = e.message; err.hidden = false;
+      }
+    };
+
+    const renderBrokerageStep = () => {
+      const snapConn = state.connections.find((c) => c.companyId === SNAPTRADE_ID);
+      if (!snapConn) return renderSnapKeysStep();
+      if (brokerages === null) {
+        modal.innerHTML = "<h2>Brokerages</h2>"
+          + '<button class="back-btn" data-x="back">‹ All categories</button>'
+          + '<p class="hint">Loading brokerages…</p>'
+          + '<div class="modal-actions"><button data-x="cancel">Cancel</button></div>';
+        modal.querySelector('[data-x="back"]')
+          .addEventListener("click", () => { category = ""; render2(); });
+        bindCancel();
+        api("/snaptrade/brokerages", "POST", { connectionId: snapConn.id })
+          .then((r) => { brokerages = r.brokerages || []; brokeragesError = ""; render2(); })
+          .catch((e) => {
+            if (e instanceof VaultLocked) { closeOverlay(); return showGate(); }
+            brokerages = []; brokeragesError = e.message; render2();
+          });
+        return;
+      }
+      const rows = brokerages.map((b) =>
+        '<div class="pick-row" data-slug="' + esc(b.slug) + '">'
+        + brokerageLogo(b) + "<div>" + esc(b.name) + "</div></div>").join("")
+        || '<p class="hint">' + esc(brokeragesError || "No brokerages available.") + "</p>";
+      modal.innerHTML = "<h2>Brokerages</h2>"
+        + '<button class="back-btn" data-x="back">‹ All categories</button>'
+        + '<p class="hint">Pick a brokerage to connect.</p>'
+        + '<div class="pick-list">' + rows + "</div>"
+        + '<div class="modal-actions"><button data-x="cancel">Cancel</button></div>';
+      modal.querySelectorAll(".pick-row").forEach((el) => {
+        el.addEventListener("click", () => openBrokerPortal(snapConn, el.dataset.slug));
+      });
+      modal.querySelector('[data-x="back"]')
+        .addEventListener("click", () => { category = ""; brokerages = null; render2(); });
+      bindCancel();
+    };
+
+    const openBrokerPortal = async (snapConn, slug) => {
+      try {
+        const { portal } = await api("/snaptrade/portal", "POST", {
+          connectionId: snapConn.id,
+          broker: slug,
+          customRedirect: location.origin + "/snaptrade/done",
+        });
+        closeOverlay();
+        await loadAll();
+        if (portal.redirectURI) {
+          window.open(portal.redirectURI, "_blank");
+          toast("Opening SnapTrade's connection portal in a new tab…");
+        } else {
+          toast(portal.error || "Could not open the connection portal.", true);
+        }
+      } catch (e) {
+        if (e instanceof VaultLocked) { closeOverlay(); return showGate(); }
+        toast(e.message, true);
+      }
+    };
+
+    const render2 = () => {
+      if (!category) return renderCategoryStep();
+      if (category === "brokerage") return renderBrokerageStep();
+      if (!selected) return renderInstitutionStep();
+      return renderCredentialStep();
+    };
+    const submit = async (company) => {
+      const creds = {};
+      let missing = false;
+      modal.querySelectorAll("[data-cred]").forEach((inp) => {
+        const v = inp.value.trim();
+        if (!v) missing = true;
+        creds[inp.dataset.cred] = v;
+      });
+      const err = modal.querySelector("#ac-err");
+      if (missing) { err.textContent = "Please fill in every field."; err.hidden = false; return; }
+      const name = modal.querySelector("#ac-name").value.trim() || company.name;
+      try {
+        const { connection } = await api("/connections", "POST",
+          { companyId: company.id, displayName: name, credentials: creds });
+        closeOverlay();
+        await loadAll();
+        if (company.id !== SNAPTRADE_ID) scrape(connection);
+        else toast("Connected. Use “Link brokerage” to link your brokerages.");
+      } catch (e) {
+        if (e instanceof VaultLocked) { closeOverlay(); return showGate(); }
+        err.textContent = e.message; err.hidden = false;
+      }
+    };
+    render2();
+  });
+}
+
+function credentialsModal(conn) {
+  const company = state.companies.find((c) => c.id === conn.companyId);
+  openModal((modal) => {
+    const fields = company
+      ? company.loginFields.map((key) => {
+          const lbl = FIELD_LABELS[key] || (key[0].toUpperCase() + key.slice(1));
+          const type = SECURE_FIELDS.has(key) ? "password" : "text";
+          return '<div class="field"><label>' + esc(lbl) + "</label>"
+            + '<input data-cred="' + esc(key) + '" type="' + type + '" autocomplete="off"></div>';
+        }).join("")
+      : '<p class="hint">This institution is no longer supported.</p>';
+    modal.innerHTML = "<h2>Set credentials</h2>"
+      + '<p class="hint">Credentials for “' + esc(conn.displayName)
+      + "” are encrypted in your local vault.</p>"
+      + fields
+      + '<div class="modal-err" id="cr-err" hidden></div>'
+      + '<div class="modal-actions"><button data-x="cancel">Cancel</button>'
+      + '<button class="primary" data-x="save"' + (company ? "" : " disabled")
+      + ">Save</button></div>";
+    modal.querySelector('[data-x="cancel"]').addEventListener("click", closeOverlay);
+    const saveBtn = modal.querySelector('[data-x="save"]');
+    if (!saveBtn) return;
+    saveBtn.addEventListener("click", async () => {
+      const creds = {};
+      let missing = false;
+      modal.querySelectorAll("[data-cred]").forEach((inp) => {
+        const v = inp.value.trim();
+        if (!v) missing = true;
+        creds[inp.dataset.cred] = v;
+      });
+      const err = modal.querySelector("#cr-err");
+      if (missing) { err.textContent = "Please fill in every field."; err.hidden = false; return; }
+      try {
+        await api("/connections/" + conn.id + "/credentials", "PUT", { credentials: creds });
+        delete state.scrapes[conn.id];
+        closeOverlay();
+        await loadAll();
+        toast("Credentials saved.");
+      } catch (e) {
+        if (e instanceof VaultLocked) { closeOverlay(); return showGate(); }
+        err.textContent = e.message; err.hidden = false;
+      }
+    });
+  });
+}
+
+function budgetModal() {
+  openModal((modal) => {
+    const current = {};
+    ((state.budget && state.budget.lines) || []).forEach((l) => {
+      if (l.budget != null) current[l.category] = l.budget;
+    });
+    modal.innerHTML = "<h2>Monthly budgets</h2>"
+      + '<p class="hint">Set a monthly limit per category. Leave blank to clear.</p>'
+      + CATEGORIES.map((cat) =>
+        '<div class="field"><label>' + esc(cat) + "</label>"
+        + '<input data-budget="' + esc(cat) + '" type="number" min="0" step="50" value="'
+        + (current[cat] != null ? current[cat] : "") + '"></div>').join("")
+      + '<div class="modal-actions"><button data-x="cancel">Cancel</button>'
+      + '<button class="primary" data-x="save">Save</button></div>';
+    modal.querySelector('[data-x="cancel"]').addEventListener("click", closeOverlay);
+    modal.querySelector('[data-x="save"]').addEventListener("click", async () => {
+      const updates = [];
+      modal.querySelectorAll("[data-budget]").forEach((inp) => {
+        const cat = inp.dataset.budget;
+        const raw = inp.value.trim();
+        const amount = raw === "" ? 0 : Number(raw);
+        const was = current[cat] != null ? current[cat] : 0;
+        if (amount !== was) updates.push({ category: cat, monthlyAmount: amount });
+      });
+      try {
+        for (const u of updates) await api("/budgets", "PUT", u);
+        closeOverlay();
+        state.budget = await api("/budget");
+        render();
+        toast("Budgets saved.");
+      } catch (e) { toast(e.message, true); }
+    });
+  });
+}
+
+function promptOtp(message) {
+  return new Promise((resolve) => {
+    openModal((modal) => {
+      modal.innerHTML = "<h2>Verification code</h2>"
+        + '<p class="hint">' + esc(message || "Enter the code the bank just sent you.")
+        + "</p>"
+        + '<div class="field"><input id="otp-code" type="text" inputmode="numeric" '
+        + 'autocomplete="one-time-code" placeholder="123456"></div>'
+        + '<div class="modal-actions"><button class="primary" data-x="submit">Submit</button></div>';
+      const input = modal.querySelector("#otp-code");
+      input.focus();
+      const done = () => {
+        const code = input.value.trim();
+        if (!code) return;
+        closeOverlay();
+        resolve(code);
+      };
+      modal.querySelector('[data-x="submit"]').addEventListener("click", done);
+      input.addEventListener("keydown", (e) => { if (e.key === "Enter") done(); });
+    });
+  });
+}
+
+// --- Actions ---------------------------------------------------------------
+
+// Always runs the 2FA-aware path: if the bank asks for a one-time code, the
+// OTP prompt starts automatically.
+async function scrape(conn) {
+  if (state.scrapes[conn.id] && state.scrapes[conn.id].phase === "running") return;
+  state.scrapes[conn.id] = {
+    phase: "running",
+    message: "Signing in — you may be asked for a verification code.",
+  };
+  render();
+  try {
+    const { runId } = await api("/connections/" + conn.id + "/scrape", "POST",
+      { interactive: true, monthsBack: 3 });
+    while (true) {
+      await sleep(1500);
+      const { run } = await api("/scrape/" + runId);
+      if (run.status === "needs-otp") {
+        state.scrapes[conn.id] = { phase: "running", message: "Waiting for your code…" };
+        render();
+        const code = await promptOtp(run.message);
+        await api("/scrape/" + runId + "/otp", "POST", { code });
+        state.scrapes[conn.id] = { phase: "running", message: "Submitting code…" };
+        render();
+      } else if (run.status === "running") {
+        state.scrapes[conn.id] = { phase: "running", message: run.message };
+        render();
+      } else {
+        state.scrapes[conn.id] = {
+          phase: run.status === "success" ? "done" : "failed", message: run.message,
+        };
+        render();
+        break;
+      }
+    }
+    await loadAll();
+  } catch (e) {
+    if (e instanceof VaultLocked) return showGate();
+    state.scrapes[conn.id] = { phase: "failed", message: e.message };
+    render();
+  }
+}
+
+async function syncAll() {
+  for (const conn of state.connections) {
+    if (conn.companyId !== SNAPTRADE_ID || conn.lastScrapeAt) await scrape(conn);
+  }
+}
+
+async function removeConnection(id) {
+  if (!confirm("Remove this connection and its accounts?")) return;
+  try {
+    await api("/connections/" + id, "DELETE");
+    delete state.scrapes[id];
+    await loadAll();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function linkBrokerage(id) {
+  try {
+    const { portal } = await api("/snaptrade/portal", "POST", {
+      connectionId: id,
+      customRedirect: location.origin + "/snaptrade/done",
+    });
+    window.open(portal.redirectURI, "_blank");
+    toast(portal.atLimit
+      ? "SnapTrade's free tier links up to 5 brokerages — you're at the limit."
+      : "Opening SnapTrade's connection portal in a new tab…");
+  } catch (e) {
+    if (e instanceof VaultLocked) return showGate();
+    toast(e.message, true);
+  }
+}
+
+async function downloadModel(modelId) {
+  try {
+    await api("/llm/download", "POST", { modelId });
+    pollLlm();
+  } catch (e) { toast(e.message, true); }
+}
+async function cancelModel() {
+  try { await api("/llm/cancel", "POST"); } catch (e) {}
+  state.llm = await api("/llm"); render();
+}
+async function pollLlm() {
+  for (let i = 0; i < 6000; i++) {
+    state.llm = await api("/llm");
+    render();
+    const s = state.llm.state;
+    if (s !== "downloading" && s !== "downloaded" && s !== "loading") return;
+    await sleep(1000);
+  }
+}
+
+async function categorize() {
+  if (state.categorize && state.categorize.state === "running") return;
+  try {
+    await api("/categorize", "POST");
+    state.categorize = { state: "running", done: 0, total: 0, message: "Starting…" };
+    render();
+    for (let i = 0; i < 3000; i++) {
+      await sleep(1000);
+      state.categorize = await api("/categorize");
+      render();
+      if (state.categorize.state !== "running") break;
+    }
+    await loadAll();
+    toast("Categorization finished.");
+  } catch (e) { toast(e.message, true); }
+}
+
+async function generateInsights() {
+  if (state.insights && state.insights.state === "generating") return;
+  try {
+    await api("/insights", "POST");
+    state.insights = { state: "generating", text: "", message: "Generating…" };
+    render();
+    for (let i = 0; i < 600; i++) {
+      await sleep(1000);
+      state.insights = await api("/insights");
+      render();
+      if (state.insights.state !== "generating") break;
+    }
+  } catch (e) { toast(e.message, true); }
+}
+
+// Saves the move-transaction panel: recategorizes the transaction and, if the
+// box is ticked, saves a rule for every transaction from the same business.
+async function saveMove() {
+  if (!state.move || !state.move.picked) return;
+  const m = state.move;
+  try {
+    await api("/transactions/" + m.txnId + "/category", "PATCH",
+      { category: m.picked, applyToMerchant: m.always });
+    state.move = null;
+    await loadAll();
+    toast(m.always
+      ? "Moved to " + m.picked + " — saved as a rule for this business."
+      : "Moved to " + m.picked + ".");
+  } catch (e) {
+    if (e instanceof VaultLocked) return showGate();
+    toast(e.message, true);
+  }
+}
+
+// --- Event delegation ------------------------------------------------------
+
+function handleAction(action, btn) {
+  const id = btn && btn.dataset.id;
+  const conn = id && state.connections.find((c) => c.id === id);
+  switch (action) {
+    case "refresh": loadAll(); break;
+    case "add-connection": addConnectionModal(); break;
+    case "sync-all": syncAll(); break;
+    case "lock": lockVault(); break;
+    case "sync": if (conn) scrape(conn); break;
+    case "set-credentials": if (conn) credentialsModal(conn); break;
+    case "link-brokerage": if (id) linkBrokerage(id); break;
+    case "remove": if (id) removeConnection(id); break;
+    case "download-model": downloadModel(btn.dataset.arg); break;
+    case "cancel-model": cancelModel(); break;
+    case "categorize": categorize(); break;
+    case "edit-budgets": budgetModal(); break;
+    case "generate-insights": generateInsights(); break;
+  }
+}
+
+document.getElementById("content").addEventListener("click", (e) => {
+  const txnEl = e.target.closest("[data-txn]");
+  if (txnEl) {
+    const txn = state.transactions.find((t) => t.id === txnEl.dataset.txn);
+    if (txn) {
+      state.move = { txnId: txn.id, picked: txn.category || "", always: false };
+      if (!sidebarOpen()) applySidebar(true);
+      render();
+      document.getElementById("sidebar").scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+    return;
+  }
+  const btn = e.target.closest("[data-action]");
+  if (btn) handleAction(btn.dataset.action, btn);
+});
+
+document.getElementById("nav").addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-tab]");
+  if (!btn || btn.dataset.tab === state.tab) return;
+  state.tab = btn.dataset.tab;
+  render();
+});
+
+document.getElementById("sidebar").addEventListener("click", (e) => {
+  const moveCat = e.target.closest("[data-move-cat]");
+  if (moveCat && state.move) {
+    state.move.picked = moveCat.dataset.moveCat;
+    document.querySelectorAll("#sidebar [data-move-cat]").forEach((el) =>
+      el.classList.toggle("active", el.dataset.moveCat === state.move.picked));
+    const save = document.querySelector('#sidebar [data-x="move-save"]');
+    if (save) save.disabled = false;
+    return;
+  }
+  const x = e.target.closest("[data-x]");
+  if (x) {
+    if (x.dataset.x === "move-cancel") { state.move = null; render(); }
+    else if (x.dataset.x === "move-save") saveMove();
+    return;
+  }
+  const btn = e.target.closest("[data-action]");
+  if (btn) handleAction(btn.dataset.action, btn);
+});
+
+document.getElementById("sidebar").addEventListener("change", (e) => {
+  if (e.target.id === "move-always" && state.move) {
+    state.move.always = e.target.checked;
+  }
+});
+
+document.getElementById("theme-toggle").addEventListener("click", () => {
+  const next = document.documentElement.getAttribute("data-theme") === "light"
+    ? "dark" : "light";
+  applyTheme(next);
+});
+document.getElementById("sidebar-toggle").addEventListener("click", () => {
+  applySidebar(!sidebarOpen());
+});
+
+// --- Vault gate & boot -----------------------------------------------------
+
+function showGate(creating) {
+  document.getElementById("app").hidden = true;
+  openModal((modal) => {
+    modal.innerHTML = "<h2>" + (creating ? "Set a vault passphrase" : "Unlock Hon") + "</h2>"
+      + '<p class="hint">' + (creating
+        ? "Your bank credentials are encrypted with this passphrase. There is no recovery — keep it safe."
+        : "Enter the passphrase that protects your stored credentials.")
+      + "</p>"
+      + '<div class="field"><input id="vault-pass" type="password" '
+      + 'placeholder="Passphrase" autocomplete="current-password"></div>'
+      + '<div class="modal-err" id="vault-err" hidden></div>'
+      + '<div class="modal-actions"><button class="primary" data-x="go">'
+      + (creating ? "Create vault" : "Unlock") + "</button></div>";
+    const input = modal.querySelector("#vault-pass");
+    input.focus();
+    const go = async () => {
+      const passphrase = input.value;
+      const err = modal.querySelector("#vault-err");
+      if (!passphrase) { err.textContent = "Enter a passphrase."; err.hidden = false; return; }
+      try {
+        await api("/vault/unlock", "POST", { passphrase });
+        sessionStorage.setItem("honVaultPass", passphrase);
+        closeOverlay();
+        document.getElementById("app").hidden = false;
+        await loadAll();
+      } catch (e) {
+        err.textContent = e.message; err.hidden = false;
+      }
+    };
+    modal.querySelector('[data-x="go"]').addEventListener("click", go);
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") go(); });
+  });
+}
+
+async function lockVault() {
+  try { await api("/vault/lock", "POST"); } catch (e) {}
+  sessionStorage.removeItem("honVaultPass");
+  state.scrapes = {};
+  showGate(false);
+}
+
+async function boot() {
+  applyTheme(localStorage.getItem("honTheme") || "dark");
+  applySidebar(sidebarOpen());
+  if (!token) {
+    document.getElementById("content").innerHTML =
+      '<div class="card empty">No access token. Start the app with ./web.sh so the '
+      + "dashboard URL includes its token.</div>";
+    document.getElementById("app").hidden = false;
+    return;
+  }
+  try {
+    const health = await api("/health");
+    document.getElementById("engine").textContent = "engine v" + health.version;
+    const status = await api("/vault/status");
+    if (status.unlocked) {
+      document.getElementById("app").hidden = false;
+      return loadAll();
+    }
+    const saved = sessionStorage.getItem("honVaultPass");
+    if (status.exists && saved) {
+      try {
+        await api("/vault/unlock", "POST", { passphrase: saved });
+        document.getElementById("app").hidden = false;
+        return loadAll();
+      } catch (e) { /* fall through to the gate */ }
+    }
+    showGate(!status.exists);
+  } catch (e) {
+    document.getElementById("content").innerHTML =
+      '<div class="card empty">Could not reach the engine: ' + esc(e.message) + "</div>";
+    document.getElementById("app").hidden = false;
+  }
+}
+
+boot();
+</script>
+</body>
+</html>

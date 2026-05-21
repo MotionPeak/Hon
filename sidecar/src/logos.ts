@@ -1,0 +1,132 @@
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+// Resolves and caches an institution's logo. israeli-bank-scrapers ships no
+// logos and public favicon services barely cover Israeli banks, so Hon fetches
+// each bank's favicon straight from its own website and caches it on disk.
+// Nothing goes through a third-party logo service.
+
+export interface CachedLogo {
+  contentType: string;
+  body: Buffer;
+}
+
+const UA = { 'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' };
+const TIMEOUT_MS = 8000;
+
+// Resolved logos, including misses (null), so a domain is fetched only once.
+const memCache = new Map<string, CachedLogo | null>();
+
+function logosDir(dataDir: string): string {
+  const dir = join(dataDir, 'logos');
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+/** Identifies an image by its magic bytes — content-type headers often lie. */
+function sniffType(buf: Buffer): string | null {
+  if (buf.length < 4) return null;
+  if (buf[0] === 0x89 && buf[1] === 0x50) return 'image/png';
+  if (buf[0] === 0x00 && buf[1] === 0x00 && buf[2] === 0x01 && buf[3] === 0x00) {
+    return 'image/x-icon';
+  }
+  if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) return 'image/gif';
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg';
+  if (buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46) {
+    return 'image/webp';
+  }
+  const head = buf.subarray(0, 256).toString('utf8').trimStart().toLowerCase();
+  if (head.startsWith('<?xml') || head.startsWith('<svg')) return 'image/svg+xml';
+  return null;
+}
+
+async function fetchImage(url: string): Promise<CachedLogo | null> {
+  try {
+    const res = await fetch(url, {
+      headers: UA,
+      redirect: 'follow',
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (!res.ok) return null;
+    const body = Buffer.from(await res.arrayBuffer());
+    if (body.length < 64) return null; // blank / tracking-pixel junk
+    const contentType = sniffType(body);
+    if (!contentType) return null;
+    return { contentType, body };
+  } catch {
+    return null;
+  }
+}
+
+/** Fetches an institution's homepage and pulls its favicon out of the markup. */
+async function resolveFromWeb(domain: string): Promise<CachedLogo | null> {
+  for (const host of [`https://www.${domain}`, `https://${domain}`]) {
+    try {
+      const res = await fetch(`${host}/`, {
+        headers: UA,
+        redirect: 'follow',
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      });
+      if (!res.ok) continue;
+      const base = res.url || `${host}/`;
+      const html = await res.text();
+
+      // Prefer declared <link rel="...icon...">, largest first (apple-touch
+      // icons tend to be high-resolution); always try /favicon.ico last.
+      const candidates: string[] = [];
+      for (const tag of html.match(/<link[^>]+>/gi) ?? []) {
+        if (!/rel=["'][^"']*icon/i.test(tag)) continue;
+        const href = tag.match(/href=["']([^"']+)["']/i);
+        if (href) {
+          try {
+            candidates.push(new URL(href[1], base).href);
+          } catch {
+            // ignore unparseable href
+          }
+        }
+      }
+      candidates.push(new URL('/favicon.ico', base).href);
+
+      for (const url of candidates) {
+        const img = await fetchImage(url);
+        if (img) return img;
+      }
+    } catch {
+      // try the next host candidate
+    }
+  }
+  return null;
+}
+
+/**
+ * Returns the institution's logo, fetching it from the institution's website
+ * on first use and caching it in `<dataDir>/logos/` thereafter.
+ */
+export async function getLogo(
+  dataDir: string,
+  companyId: string,
+  domain: string,
+): Promise<CachedLogo | null> {
+  if (memCache.has(companyId)) return memCache.get(companyId) ?? null;
+
+  const dir = logosDir(dataDir);
+  const imgPath = join(dir, `${companyId}.img`);
+  const typePath = join(dir, `${companyId}.type`);
+  if (existsSync(imgPath) && existsSync(typePath)) {
+    const logo = {
+      contentType: readFileSync(typePath, 'utf8'),
+      body: readFileSync(imgPath),
+    };
+    memCache.set(companyId, logo);
+    return logo;
+  }
+
+  const logo = await resolveFromWeb(domain);
+  memCache.set(companyId, logo);
+  // Only successes are cached to disk, so a failed fetch is retried next launch.
+  if (logo) {
+    writeFileSync(imgPath, logo.body);
+    writeFileSync(typePath, logo.contentType);
+  }
+  return logo;
+}

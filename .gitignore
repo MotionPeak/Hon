@@ -1,0 +1,24 @@
+# Build output
+.build/
+DerivedData/
+build/
+*.xcuserstate
+xcuserdata/
+*.xcscmblueprint
+
+# Generated Xcode project (regenerate with: xcodegen)
+*.xcodeproj
+
+# macOS
+.DS_Store
+
+# Node
+node_modules/
+*.log
+npm-debug.log*
+
+# Local financial data — NEVER commit
+*.db
+*.db-wal
+*.db-shm
+data/

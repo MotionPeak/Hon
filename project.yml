@@ -1,0 +1,61 @@
+name: Hon
+options:
+  bundleIdPrefix: com.shaharsolomons
+  deploymentTarget:
+    macOS: "15.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: false
+  groupSortPosition: top
+fileGroups:
+  - project.yml
+  - sidecar/package.json
+  - sidecar/src/server.ts
+  - sidecar/src/db.ts
+  - sidecar/src/repo.ts
+  - sidecar/src/scrapers.ts
+  - sidecar/src/runner.ts
+  - sidecar/src/snaptrade.ts
+  - sidecar/src/otp.ts
+  - sidecar/src/llm.ts
+  - sidecar/src/categorize.ts
+  - sidecar/src/budget.ts
+  - sidecar/src/insights.ts
+  - Tools/GenerateIcon.swift
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_STRICT_CONCURRENCY: minimal
+    ALWAYS_SEARCH_USER_PATHS: NO
+    DEAD_CODE_STRIPPING: YES
+targets:
+  Hon:
+    type: application
+    platform: macOS
+    deploymentTarget: "15.0"
+    sources:
+      - path: Hon
+        excludes:
+          - "Info.plist"
+          - "Hon.entitlements"
+    settings:
+      base:
+        PRODUCT_NAME: Hon
+        PRODUCT_BUNDLE_IDENTIFIER: com.shaharsolomons.Hon
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: Hon/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Hon/Hon.entitlements
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ML9HDN3QZS
+        ENABLE_HARDENED_RUNTIME: YES
+        ENABLE_APP_SANDBOX: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        COMBINE_HIDPI_IMAGES: YES
+        ENABLE_PREVIEWS: YES
+    scheme:
+      environmentVariables:
+        HON_SIDECAR_DIR: /Users/shaharsolomons/Documents/Code/Hon/sidecar
+        HON_DEV: "1"
+      testTargets: []
