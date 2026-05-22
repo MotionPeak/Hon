@@ -3935,7 +3935,7 @@ async function scrape(conn) {
   render();
   try {
     const { runId } = await api("/connections/" + conn.id + "/scrape", "POST",
-      { interactive: true, monthsBack: 12 });
+      { interactive: true, monthsBack: 24 });
     while (true) {
       await sleep(1500);
       const { run } = await api("/scrape/" + runId);

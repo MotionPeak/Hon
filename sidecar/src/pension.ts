@@ -24,6 +24,7 @@ import type { OtpCallback } from './otp.js';
 // page.evaluate runs its callback in the browser, where these globals exist.
 declare const document: any;
 declare const location: any;
+declare const Event: any;
 
 interface PensionFund {
   id: string;
@@ -102,18 +103,12 @@ const USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
 
-// Phrases that mark the SMS one-time-password step.
-const OTP_HINTS = [
-  'סיסמה חד פעמית', 'סיסמה חד-פעמית', 'קוד חד פעמי', 'קוד חד-פעמי',
-  'קוד אימות', 'קוד שנשלח', 'הזן את הקוד', 'הזינו את הקוד', 'הקוד שקיבלת',
-  'one-time password', 'one time password', 'verification code',
-];
-
-// Phrases that mark a rejected ID number / phone, or a wrong code.
-const LOGIN_ERROR_HINTS = [
-  'שם המשתמש או הסיסמה', 'פרטים שגויים', 'הפרטים שהוזנו', 'שגויים',
-  'לא תקין', 'קוד שגוי', 'הקוד שגוי', 'אינם נכונים', 'incorrect', 'invalid',
-];
+// The OTP code-entry step exposes dedicated inputs. Migdal renders six boxes
+// all named otp, otp2…otp6; a waitForSelector on this catches that step
+// reliably — it polls the live DOM and does not depend on page text.
+const OTP_FIELD_SELECTOR =
+  'input[name="otp"], input[name="otp1"], input[id="otp"], ' +
+  'input[autocomplete="one-time-code"]';
 
 // Product keywords used to recognise a pension / gemel / study-fund balance.
 const PRODUCT_KEYWORDS = [
@@ -172,6 +167,12 @@ export async function runPensionScrape(
     await page.setUserAgent(USER_AGENT);
     await page.setViewport({ width: 1280, height: 900 });
     await page.setExtraHTTPHeaders({ 'Accept-Language': 'he-IL,he;q=0.9,en;q=0.8' });
+    // tsx/esbuild rewrites this file's functions with a `__name` helper. When a
+    // function is handed to page.evaluate it runs in the browser, where that
+    // helper is undefined — so define it as a no-op in every document.
+    await page.evaluateOnNewDocument(
+      'window.__name = window.__name || function (f) { return f; };',
+    );
 
     // Collect JSON API responses — the dashboard's real balance data, and the
     // best material for tightening the balance reader after a real run.
@@ -200,49 +201,34 @@ export async function runPensionScrape(
       );
     }
 
-    // Both portals always send an SMS code, so wait for that step, the
-    // dashboard (if the portal skipped the code), or a rejection.
+    // Both portals are passwordless: after login they send an SMS code and
+    // show a code-entry step. waitForSelector reliably catches it — it polls
+    // the live DOM for the code boxes, surviving the headless re-renders that
+    // made an evaluate-based page check unreliable.
     onProgress?.('Waiting for the verification code…');
-    let handledOtp = false;
-    let deadline = Date.now() + 150_000;
-    let reached = false;
-    while (Date.now() < deadline) {
-      await delay(2000);
-      const state = await classifyState(page);
-      if (state === 'otp' && !handledOtp) {
-        const code = await onOtpNeeded();
-        onProgress?.('Submitting the verification code…');
-        await enterOtpCode(page, (code ?? '').trim());
-        handledOtp = true;
-        deadline = Date.now() + 90_000; // give the post-OTP dashboard time
-        continue;
-      }
-      if (state === 'dashboard') {
-        reached = true;
-        break;
-      }
-      if (state === 'error') {
-        await saveDebug(page, screenshotPath, htmlPath, dataPath, jsonResponses);
-        return fail(
-          'LOGIN_FAILED',
-          'The portal rejected the details (ID number, phone, or code).',
-        );
-      }
-    }
-
-    if (!reached) {
-      // Login never completed — capture the stuck page and stop here.
+    const otpAppeared = await page
+      .waitForSelector(OTP_FIELD_SELECTOR, { timeout: 90_000 })
+      .then(() => true)
+      .catch(() => false);
+    if (!otpAppeared) {
       await saveDebug(page, screenshotPath, htmlPath, dataPath, jsonResponses);
       return fail(
         'LOGIN_FAILED',
-        handledOtp
-          ? 'The verification code was not accepted. A debug page was saved.'
-          : 'The login did not complete — the portal stayed on the sign-in ' +
-            'step. A debug page was saved.',
+        'The portal did not reach the verification-code step — the ID number ' +
+          'may have been rejected. A debug page was saved.',
       );
     }
 
-    // Migdal shows balances on a separate "my products" page — open it.
+    const code = await onOtpNeeded();
+    onProgress?.('Submitting the verification code…');
+    await enterOtpCode(page, (code ?? '').trim());
+
+    // Let the portal finish signing in once the code is submitted.
+    onProgress?.('Signing in…');
+    await delay(7000);
+
+    // Migdal shows balances on a separate "my products" page — the session
+    // cookie is set now, so navigate straight there.
     if (fund.productsUrl) {
       onProgress?.('Opening your products…');
       try {
@@ -262,9 +248,9 @@ export async function runPensionScrape(
     if (accounts.length === 0) {
       return fail(
         'NEEDS_SELECTORS',
-        'Signed in, but could not read the balances automatically yet — the ' +
-          'portal layout still needs mapping. The rendered page was saved to ' +
-          'the debug folder.',
+        'Signed in, but could not read the balances yet — the portal layout ' +
+          'still needs mapping, or the code was not accepted. The rendered ' +
+          'page was saved to the debug folder.',
       );
     }
     return { success: true, accounts };
@@ -281,36 +267,37 @@ export async function runPensionScrape(
   }
 }
 
-type PageState = 'otp' | 'dashboard' | 'error' | 'unknown';
-
-/** Best-effort read of which stage the portal is showing. */
-async function classifyState(page: Page): Promise<PageState> {
-  try {
-    return (await page.evaluate(
-      (otpHints: string[], errorHints: string[]) => {
-        const text: string = document.body ? document.body.innerText : '';
-        const url: string = String(location.href).toLowerCase();
-        const has = (hints: string[]): boolean => hints.some((h) => text.includes(h));
-        if (has(otpHints)) return 'otp';
-        if (has(errorHints)) return 'error';
-        if (!/login|signin|log-in|otp|verify/.test(url)) return 'dashboard';
-        return 'unknown';
-      },
-      OTP_HINTS,
-      LOGIN_ERROR_HINTS,
-    )) as PageState;
-  } catch {
-    return 'unknown';
-  }
-}
-
-/** Types a value into a field by CSS selector with real keystrokes. */
+/**
+ * Fills an input by CSS selector. Picks the visible match when a portal
+ * duplicates an id, types with real keystrokes, then also sets the value via
+ * JS with input/change events so an Angular reactive form registers it even
+ * if the element was not cleanly interactable.
+ */
 async function fillField(page: Page, selector: string, value: string): Promise<boolean> {
-  const el = await page.$(selector);
-  if (!el) return false;
-  // Real keystrokes — Angular reactive forms ignore programmatic value writes.
-  await el.click({ clickCount: 3 });
-  await el.type(value, { delay: 45 });
+  const handles = await page.$$(selector);
+  if (handles.length === 0) return false;
+  let target = handles[0];
+  for (const handle of handles) {
+    const box = await handle.boundingBox();
+    if (box && box.width > 0 && box.height > 0) {
+      target = handle;
+      break;
+    }
+  }
+  if (!target) return false;
+  try {
+    await target.click({ clickCount: 3 });
+    await target.type(value, { delay: 45 });
+  } catch {
+    // not cleanly interactable — the JS fill below still sets the value
+  }
+  await target.evaluate((el: any, val: string) => {
+    el.focus();
+    el.value = val;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+    el.dispatchEvent(new Event('blur', { bubbles: true }));
+  }, value);
   return true;
 }
 
@@ -366,10 +353,13 @@ async function fillAndSubmitLogin(
   credentials: Record<string, string>,
 ): Promise<boolean> {
   try {
-    await page.waitForSelector(fund.idSelector, { visible: true, timeout: 45_000 });
+    // Wait for the field to exist — not strict "visible". Migdal's login is a
+    // slow Angular SPA and the strict visibility check times out flakily.
+    await page.waitForSelector(fund.idSelector, { timeout: 60_000 });
   } catch {
     return false;
   }
+  await delay(1800); // let the Angular login form finish rendering
   if (!(await fillField(page, fund.idSelector, (credentials.id ?? '').trim()))) {
     return false;
   }

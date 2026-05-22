@@ -247,10 +247,12 @@ app.post('/connections/:id/scrape', async (req, reply) => {
       return reply.code(400).send({ error: 'no stored credentials for this connection' });
     }
   }
+  // Each scraper returns whatever history it actually holds, so asking for a
+  // long window simply means "as far back as the institution allows".
   const monthsBack =
     typeof body.monthsBack === 'number' && Number.isFinite(body.monthsBack)
-      ? Math.max(1, Math.min(12, Math.round(body.monthsBack)))
-      : 3;
+      ? Math.max(1, Math.min(24, Math.round(body.monthsBack)))
+      : 12;
 
   const runId = runner.start({
     connectionId: connection.id,
