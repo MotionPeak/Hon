@@ -666,11 +666,14 @@ export async function runPensionScrape(
  * if the element was not cleanly interactable.
  */
 async function fillField(page: Page, selector: string, value: string): Promise<boolean> {
-  const handles = await page.$$(selector);
+  // A page navigating mid-query (e.g. a Radware bounce) makes $$ throw
+  // "Execution context destroyed" — treat that as "no field" so the caller
+  // simply retries rather than crashing the whole login.
+  const handles = await page.$$(selector).catch(() => []);
   if (handles.length === 0) return false;
   let target = handles[0];
   for (const handle of handles) {
-    const box = await handle.boundingBox();
+    const box = await handle.boundingBox().catch(() => null);
     if (box && box.width > 0 && box.height > 0) {
       target = handle;
       break;
@@ -683,13 +686,15 @@ async function fillField(page: Page, selector: string, value: string): Promise<b
   } catch {
     // not cleanly interactable — the JS fill below still sets the value
   }
-  await target.evaluate((el: any, val: string) => {
-    el.focus();
-    el.value = val;
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-    el.dispatchEvent(new Event('blur', { bubbles: true }));
-  }, value);
+  await target
+    .evaluate((el: any, val: string) => {
+      el.focus();
+      el.value = val;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      el.dispatchEvent(new Event('blur', { bubbles: true }));
+    }, value)
+    .catch(() => {});
   return true;
 }
 
@@ -867,10 +872,12 @@ async function fillAndSubmitLogin(
 /**
  * Clears a bot wall standing in front of a portal's own login form. Menora
  * routes an automated browser through a Radware (perfdrive.com) interstitial
- * that serves an hCaptcha *before* the portal login is reached; Meitav puts a
- * reCAPTCHA on the login form itself. This repeatedly runs the solver and
- * waits for the portal's ID field to appear, for up to ~2.5 minutes. Returns
- * true once the login form is on the page.
+ * that serves an hCaptcha — and it briefly shows a *skeleton* login form on
+ * its own domain before bouncing the page to that challenge, so the ID field
+ * being momentarily present is not enough. This loops: while the page is on
+ * the bot wall (or off the portal domain) it runs the solver and waits for a
+ * redirect; it returns true only once the ID field is present on the portal's
+ * own domain and *stays* there. Up to ~3 minutes.
  */
 async function passBotWall(
   page: Page,
@@ -878,33 +885,41 @@ async function passBotWall(
   onProgress: ((message: string) => void) | undefined,
 ): Promise<boolean> {
   if (!fund.idSelector) return false;
-  const deadline = Date.now() + 150_000;
+  const deadline = Date.now() + 180_000;
   let round = 0;
   while (Date.now() < deadline) {
-    // The login form is already here (Meitav, or Radware already cleared).
-    if (await page.$(fund.idSelector)) {
-      plog('passBotWall: login form present at', page.url());
-      return true;
+    const url = page.url();
+    const onPortal = url.includes(fund.domain);
+    if (onPortal) {
+      const present = await page.$(fund.idSelector).catch(() => null);
+      if (present) {
+        // Confirm the form is stable — not the skeleton Menora shows for a
+        // moment before Radware bounces the page to perfdrive.com.
+        await delay(3500);
+        const stable =
+          page.url().includes(fund.domain) &&
+          Boolean(await page.$(fund.idSelector).catch(() => null));
+        if (stable) {
+          plog('passBotWall: stable login form at', page.url());
+          return true;
+        }
+      }
     }
     round += 1;
-    plog('passBotWall round', round, 'at', page.url());
+    plog(
+      `passBotWall round ${round}:`,
+      onPortal ? 'portal, no stable form' : 'bot wall',
+      url.slice(0, 75),
+    );
     onProgress?.(
       round === 1
         ? 'Solving the security check automatically — this can take a minute…'
         : 'Still clearing the security check…',
     );
     await solveCaptchas(page);
-    // Give a solved challenge time to redirect through to the real login.
-    const appeared = await page
-      .waitForSelector(fund.idSelector, { timeout: 15_000 })
-      .then(() => true)
-      .catch(() => false);
-    if (appeared) {
-      plog('passBotWall: login form appeared after round', round);
-      return true;
-    }
+    await delay(5000); // let a solved challenge redirect through to the portal
   }
-  plog('passBotWall: gave up after', round, 'rounds');
+  plog('passBotWall: gave up after', round, 'rounds, url=', page.url());
   return false;
 }
 
