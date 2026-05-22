@@ -31,6 +31,7 @@ import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import RecaptchaPlugin from 'puppeteer-extra-plugin-recaptcha';
 import type { CompanyInfo, NormalizedAccount, ScrapeOutcome } from './scrapers.js';
 import type { OtpCallback } from './otp.js';
+import { persistSession, restoreSession, type SessionHandle } from './session.js';
 
 // Solver config for the Meitav/Menora automated-login attempt, set per scrape
 // by runPensionScrape from the user's stored settings. Two services are used,
@@ -97,12 +98,17 @@ interface CaptchaSolution {
   error?: string;
 }
 
-/** POSTs JSON to an Anti-Captcha-style solver endpoint and returns the body. */
+/**
+ * POSTs JSON to an Anti-Captcha-style solver endpoint and returns the body.
+ * A 40s abort timeout is essential — a stalled fetch has no timeout of its
+ * own and would otherwise hang the whole sign-in indefinitely.
+ */
 async function solverPost(apiBase: string, path: string, body: unknown): Promise<any> {
   const res = await fetch(`${apiBase}${path}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(40_000),
   });
   return res.json();
 }
@@ -476,6 +482,7 @@ export async function runPensionScrape(
   onProgress: ((message: string) => void) | undefined,
   screenshotPath: string | undefined,
   onOtpNeeded: OtpCallback,
+  session?: SessionHandle,
 ): Promise<ScrapeOutcome> {
   const fund = FUNDS[companyId];
   if (!fund) return fail('CONFIG', `Unknown pension fund: ${companyId}`);
@@ -518,6 +525,40 @@ export async function runPensionScrape(
     const startHeadless = captchaWalled ? attemptAutomated : HEADLESS;
     ({ browser, page } = await launchPensionBrowser(startHeadless, jsonResponses));
 
+    // Replay a saved session's cookies before any navigation, so the portal
+    // can recognise the session and skip the sign-in.
+    await restoreSession(browser, session);
+
+    // Fast path: with a saved session, open the products page directly. If the
+    // portal still trusts the session it renders balances with no login and no
+    // SMS code; otherwise it bounces to a login URL and the normal sign-in
+    // runs. CAPTCHA-walled funds handle their own resume below. Any failure
+    // here is non-fatal — the run just falls through to a full sign-in.
+    if (!captchaWalled && fund.productsUrl && session?.cookies?.length) {
+      onProgress?.('Resuming your saved session…');
+      try {
+        await page.goto(fund.productsUrl, {
+          waitUntil: 'domcontentloaded',
+          timeout: 60_000,
+        });
+        if (!/login/i.test(page.url())) {
+          const resumed = await readBalances(companyId, page, screenshotPath).catch(
+            () => [] as NormalizedAccount[],
+          );
+          if (resumed.length > 0) {
+            await persistSession(browser, session);
+            await saveDebug(page, screenshotPath, htmlPath, dataPath, jsonResponses).catch(
+              () => {},
+            );
+            return { success: true, accounts: resumed };
+          }
+        }
+      } catch {
+        /* fall through to a normal sign-in */
+      }
+      onProgress?.('Saved session has expired — signing in again…');
+    }
+
     onProgress?.('Opening the pension portal…');
     try {
       await page.goto(fund.loginUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 });
@@ -532,6 +573,21 @@ export async function runPensionScrape(
     // it relaunches a visible window and the user finishes the sign-in by
     // hand — same run, no dead-end error.
     if (captchaWalled) {
+      // A saved session may still authenticate the balance API — try a read
+      // before touching the CAPTCHA login at all.
+      if (session?.cookies?.length) {
+        onProgress?.('Resuming your saved session…');
+        const resumed = await readBalances(companyId, page, screenshotPath).catch(
+          () => [] as NormalizedAccount[],
+        );
+        if (resumed.length > 0) {
+          await persistSession(browser, session);
+          await saveDebug(page, screenshotPath, htmlPath, dataPath, jsonResponses).catch(
+            () => {},
+          );
+          return { success: true, accounts: resumed };
+        }
+      }
       if (attemptAutomated) {
         onProgress?.('Attempting automated sign-in in the background…');
         await runCaptchaWalledLogin(page, fund, credentials, onProgress, onOtpNeeded, false).catch(
@@ -541,6 +597,7 @@ export async function runPensionScrape(
         // already answers — return straight away, no window ever shown.
         const auto = await readBalances(companyId, page, screenshotPath).catch(() => []);
         if (auto.length > 0) {
+          await persistSession(browser, session);
           await saveDebug(page, screenshotPath, htmlPath, dataPath, jsonResponses).catch(
             () => {},
           );
@@ -554,6 +611,7 @@ export async function runPensionScrape(
         );
         await browser?.close().catch(() => {});
         ({ browser, page } = await launchPensionBrowser(false, jsonResponses));
+        await restoreSession(browser, session);
         try {
           await page.goto(fund.loginUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 });
         } catch {
@@ -603,6 +661,7 @@ export async function runPensionScrape(
             'Open the connection again and finish signing in.',
         );
       }
+      await persistSession(browser, session);
       return { success: true, accounts };
     }
 
@@ -668,6 +727,7 @@ export async function runPensionScrape(
           'page was saved to the debug folder.',
       );
     }
+    await persistSession(browser, session);
     return { success: true, accounts };
   } catch (err) {
     plog('EXCEPTION in', companyId, '—', err instanceof Error ? err.stack : String(err));
