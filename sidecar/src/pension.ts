@@ -6,18 +6,18 @@
 // portal in a Hon-controlled Puppeteer browser, completes the SMS one-time-code
 // step, and reads the accumulated balance of every product the member holds.
 //
-// Migdal and Altshuler Shaham are both Angular single-page apps behind a WAF,
-// and both use **passwordless OTP login** — no static password:
-//   • Migdal      — ID number → a code is sent to the number on file.
-//   • Altshuler   — ID number + phone number → a code is sent by SMS
-//                   (Altshuler also runs an invisible reCAPTCHA v3 on the form).
-// Their post-login dashboards differ and cannot be inspected without real
-// credentials, so the balance reader is a best-effort heuristic that always
-// dumps the rendered page + JSON responses to <dataDir>/debug — the material
-// needed to tighten it after a real login.
+// The supported portals are all single-page apps behind a WAF, and all use
+// **passwordless OTP login** — no static password:
+//   • Migdal — ID number → a code is sent to the number on file.
+//   • Harel  — ID number + phone number → a code is sent by SMS.
+//   • Clal   — ID number + phone number, pick SMS delivery → a code by SMS.
+// Their post-login dashboards differ; the balance reader is precise for the
+// mapped portals and a best-effort heuristic otherwise, and it always dumps
+// the rendered page + JSON responses to <dataDir>/debug — the material needed
+// to tighten it after a real login.
 
 import { writeFileSync } from 'node:fs';
-import puppeteer, { type Browser, type Page } from 'puppeteer';
+import puppeteer, { type Browser, type Frame, type Page } from 'puppeteer';
 import type { CompanyInfo, NormalizedAccount, ScrapeOutcome } from './scrapers.js';
 import type { OtpCallback } from './otp.js';
 
@@ -42,10 +42,14 @@ interface PensionFund {
   phoneSelector?: string;
   /** CSS selector for the "send the code by SMS" radio, clicked to be sure. */
   smsRadioSelector?: string;
+  /** CSS selector for a "I agree to the terms" checkbox that gates submit. */
+  termsCheckboxSelector?: string;
   /** Text on the button that submits the form and triggers the SMS code. */
   submitLabels: string[];
   /** Page to open after login to reach the product balances, when separate. */
   productsUrl?: string;
+  /** Visible button text to click first to reveal the login form (Harel). */
+  openLoginLabel?: string;
 }
 
 const FUNDS: Record<string, PensionFund> = {
@@ -60,16 +64,33 @@ const FUNDS: Record<string, PensionFund> = {
     submitLabels: ['המשך', 'כניסה', 'שלח'],
     productsUrl: 'https://my.migdal.co.il/mymigdal/info/myproducts',
   },
-  altshulerShaham: {
-    id: 'altshulerShaham',
-    name: 'Altshuler Shaham (אלטשולר שחם)',
-    domain: 'as-invest.co.il',
-    loginUrl: 'https://online.as-invest.co.il/login',
+  clal: {
+    id: 'clal',
+    name: 'Clal (כלל)',
+    domain: 'clalbit.co.il',
+    loginUrl: 'https://www.clalbit.co.il/login/',
     loginFields: ['id', 'phone'],
-    idSelector: '[formcontrolname="id"]',
-    phoneSelector: '[formcontrolname="phoneNumber"]',
-    smsRadioSelector: '[id="1"]',
-    submitLabels: ['שלחו לי סיסמה', 'שלח', 'המשך'],
+    idSelector: '[formcontrolname="tz"]',
+    phoneSelector: '[formcontrolname="mobile"]',
+    // The login form is Angular Material: SMS is the first delivery radio and
+    // a terms checkbox gates the "שליחה" submit button.
+    smsRadioSelector: '#mat-radio-2-input',
+    termsCheckboxSelector: '#mat-checkbox-1-input',
+    submitLabels: ['שליחה', 'שלח', 'המשך', 'כניסה'],
+    productsUrl: 'https://www.clalbit.co.il/portfolio/',
+  },
+  harel: {
+    id: 'harel',
+    name: 'Harel (הראל)',
+    domain: 'harel-group.co.il',
+    loginUrl: 'https://www.harel-group.co.il/Pages/login-Page/Login.aspx',
+    loginFields: ['id', 'phone'],
+    idSelector: '#idUser',
+    phoneSelector: '#phone',
+    openLoginLabel: 'כניסה לאזור האישי',
+    submitLabels: ['המשך', 'כניסה', 'שלח'],
+    productsUrl:
+      'https://www.harel-group.co.il/personal-info/my-harel/Pages/client-view.aspx',
   },
 };
 
@@ -86,9 +107,8 @@ export function isPensionCompany(companyId: string): boolean {
   return Object.prototype.hasOwnProperty.call(FUNDS, companyId);
 }
 
-// Set HON_PENSION_HEADFUL=1 to scrape with a visible browser — a real window
-// scores higher with Altshuler's invisible reCAPTCHA v3 if a headless run is
-// rejected.
+// Set HON_PENSION_HEADFUL=1 to scrape with a visible browser — useful when a
+// portal's WAF or bot-detection rejects a headless session.
 const HEADLESS = process.env.HON_PENSION_HEADFUL !== '1';
 
 // In a container Chromium runs as root with no user namespace, so its sandbox
@@ -239,10 +259,16 @@ export async function runPensionScrape(
     }
     onProgress?.('Reading your balances…');
     await delay(4000); // let the products page render its data
-    const accounts =
-      companyId === 'migdal'
-        ? await readMigdalBalances(page)
-        : await readGenericBalances(page);
+    let accounts: NormalizedAccount[];
+    if (companyId === 'migdal') {
+      accounts = await readMigdalBalances(page);
+    } else if (companyId === 'harel') {
+      accounts = await readHarelBalances(page, debugSibling(screenshotPath, '-harel-frame.html'));
+    } else if (companyId === 'clal') {
+      accounts = await readClalBalances(page);
+    } else {
+      accounts = await readGenericBalances(page);
+    }
     await saveDebug(page, screenshotPath, htmlPath, dataPath, jsonResponses);
 
     if (accounts.length === 0) {
@@ -352,6 +378,36 @@ async function fillAndSubmitLogin(
   fund: PensionFund,
   credentials: Record<string, string>,
 ): Promise<boolean> {
+  // Harel hides its login form behind a CTA button. The page also renders a
+  // zero-size duplicate of that button, so target the *visible* one (real
+  // bounding box) and click its centre with a real mouse click — page.click's
+  // hit-test and a synthetic .click() both fail here; a mouse click works.
+  if (fund.openLoginLabel) {
+    try {
+      await page.waitForSelector('button, [role=button]', { timeout: 40_000 });
+      await delay(2000);
+      const point = await page.evaluate((label: string) => {
+        const nodes: any[] = Array.from(
+          document.querySelectorAll('button, a, [role=button]'),
+        );
+        for (const node of nodes) {
+          const text = (node.innerText || '').replace(/\s+/g, ' ').trim();
+          if (text !== label) continue;
+          const r = node.getBoundingClientRect();
+          if (r.width > 0 && r.height > 0) {
+            return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+          }
+        }
+        return null;
+      }, fund.openLoginLabel);
+      if (point) {
+        await page.mouse.click(point.x, point.y);
+        await delay(1500);
+      }
+    } catch {
+      // fall through — the idSelector wait below will fail clearly
+    }
+  }
   try {
     // Wait for the field to exist — not strict "visible". Migdal's login is a
     // slow Angular SPA and the strict visibility check times out flakily.
@@ -376,6 +432,15 @@ async function fillAndSubmitLogin(
       }, fund.smsRadioSelector)
       .catch(() => {});
   }
+  if (fund.termsCheckboxSelector) {
+    // A terms checkbox can gate submit; tick it if it is not already checked.
+    await page
+      .evaluate((sel: string) => {
+        const box: any = document.querySelector(sel);
+        if (box && !box.checked) box.click();
+      }, fund.termsCheckboxSelector)
+      .catch(() => {});
+  }
   await delay(800); // let Angular validate the form and enable the button
   if (!(await clickByText(page, fund.submitLabels))) {
     await page.keyboard.press('Enter');
@@ -390,22 +455,41 @@ async function fillAndSubmitLogin(
  */
 async function enterOtpCode(page: Page, code: string): Promise<void> {
   const digits = code.replace(/\D/g, '');
-  // Tag the OTP box(es): prefer inputs named like otp/otp2…, else fall back to
-  // the visible empty text inputs on the page.
+  // Tag the OTP box(es): prefer inputs that identify themselves as OTP — named
+  // otp/otp2… (Migdal), formcontrolname="otp" (Clal) or autocomplete="one-time-
+  // code" (Harel/Clal). Only if none match fall back to the visible empty text
+  // inputs, and even then skip search boxes — a stray search field next to the
+  // OTP box would otherwise be mistaken for a second code box.
   const boxes = await page.evaluate(() => {
     const inputs: any[] = Array.from(document.querySelectorAll('input'));
     const visible = (el: any): boolean => Boolean(el.offsetWidth || el.offsetHeight);
-    let picked: any[] = inputs.filter(
-      (el: any) =>
-        /^otp\d*$/i.test(el.getAttribute('name') || el.id || '') &&
-        visible(el) &&
-        !el.disabled,
-    );
+    const isSearch = (el: any): boolean => {
+      const id = (el.id || '') + ' ' + (el.getAttribute('name') || '');
+      return (
+        (el.getAttribute('type') || '').toLowerCase() === 'search' ||
+        el.getAttribute('role') === 'searchbox' ||
+        /search|חיפוש/i.test(id)
+      );
+    };
+    let picked: any[] = inputs.filter((el: any) => {
+      const key =
+        el.getAttribute('name') || el.getAttribute('formcontrolname') || el.id || '';
+      const oneTimeCode =
+        (el.getAttribute('autocomplete') || '').toLowerCase() === 'one-time-code';
+      return (/^otp\d*$/i.test(key) || oneTimeCode) && visible(el) && !el.disabled;
+    });
     if (picked.length === 0) {
       picked = inputs.filter((el: any) => {
         const type = (el.getAttribute('type') || 'text').toLowerCase();
         const textLike = ['text', 'tel', 'number', 'password', ''].includes(type);
-        return textLike && visible(el) && !el.disabled && !el.readOnly && !el.value;
+        return (
+          textLike &&
+          visible(el) &&
+          !el.disabled &&
+          !el.readOnly &&
+          !el.value &&
+          !isSearch(el)
+        );
       });
     }
     picked.forEach((el: any, i: number) => el.setAttribute('data-hon-otp', String(i)));
@@ -423,14 +507,57 @@ async function enterOtpCode(page: Page, code: string): Promise<void> {
   }
 
   await delay(600);
-  if (
-    !(await clickByText(page, [
-      'המשך', 'אישור', 'כניסה', 'התחברות', 'שלח', 'כניסה לאזור האישי',
-      'Continue', 'Submit', 'Verify',
-    ]))
-  ) {
-    await page.keyboard.press('Enter');
-  }
+  // Submit — scoped to the OTP field's dialog so a stray "המשך" on a form
+  // behind it (Harel keeps its login panel open behind the OTP modal) is not
+  // clicked. Handles both real buttons and div/span-built buttons.
+  const submitted = await page.evaluate(() => {
+    const norm = (s: string): string => (s || '').replace(/\s+/g, ' ').trim();
+    const labels = ['המשך', 'אישור', 'כניסה', 'התחברות', 'שלח', 'Continue', 'Submit', 'Verify'];
+    // "שלחו לי את הקוד שוב" (resend) contains "שלח" — never click a resend
+    // control, or the code is re-sent instead of verified.
+    const isResend = (t: string): boolean =>
+      /שוב|חוזר|resend|send.?again|שלחו לי/i.test(t);
+    const field: any = document.querySelector('[data-hon-otp]');
+    const scopes: any[] = [];
+    if (field) {
+      const dialog = field.closest(
+        '[role=dialog], dialog, [class*="modal" i], [class*="dialog" i], form',
+      );
+      if (dialog) scopes.push(dialog);
+    }
+    scopes.push(document);
+    for (const scope of scopes) {
+      const controls: any[] = Array.from(
+        scope.querySelectorAll('button, input[type=submit], [role=button]'),
+      ).filter((b: any) => !b.disabled && !isResend(norm(b.innerText || b.value || '')));
+      // Prefer an exact label match; only then fall back to a contains match.
+      let hit: any = controls.find((b: any) =>
+        labels.includes(norm(b.innerText || b.value || '')),
+      );
+      if (!hit) {
+        hit = controls.find((b: any) => {
+          const t = norm(b.innerText || b.value || '');
+          return labels.some((l) => t.includes(l));
+        });
+      }
+      if (!hit) {
+        // div/span-built buttons (Migdal's "המשך"): innermost exact-text node.
+        const plain: any[] = Array.from(scope.querySelectorAll('span, div, a')).filter(
+          (n: any) => labels.includes(norm(n.innerText || '')),
+        );
+        plain.sort(
+          (a: any, b: any) => a.querySelectorAll('*').length - b.querySelectorAll('*').length,
+        );
+        hit = plain[0];
+      }
+      if (hit) {
+        (hit.closest('button, a, [role=button]') || hit).click();
+        return true;
+      }
+    }
+    return false;
+  });
+  if (!submitted) await page.keyboard.press('Enter');
 }
 
 /**
@@ -485,9 +612,197 @@ async function readMigdalBalances(page: Page): Promise<NormalizedAccount[]> {
 }
 
 /**
- * Fallback balance reader for portals not yet precisely mapped (e.g. Altshuler):
- * finds page blocks that name a pension product and pairs each with the largest
- * shekel-sized number inside it. A miss is expected — saveDebug keeps the page.
+ * Reads balances from Harel's "client-view" widget (verified live 2026-05-22):
+ * products render inside a cross-origin iframe whose URL contains
+ * "client-view"; each tile pairs a product name with a "₪ <amount>" figure.
+ */
+async function readHarelBalances(
+  page: Page,
+  frameDumpPath?: string,
+): Promise<NormalizedAccount[]> {
+  // The portal greets a fresh session with a privacy-policy modal and a cookie
+  // banner that sit over (and can stall) the client-view widget — clear them.
+  for (let i = 0; i < 3; i += 1) {
+    const dismissed = await clickByText(page, [
+      'הבנתי, תודה', 'הבנתי', 'אישור', 'סגירה', 'סגור', 'קיבלתי',
+    ]);
+    if (!dismissed) break;
+    await delay(800);
+  }
+
+  // The client-view widget is a single-spa micro-frontend inside a cross-origin
+  // iframe; its tiles render well after the iframe document loads. Poll every
+  // frame until one actually shows a shekel-sized figure (up to ~40s).
+  let frame: Frame | undefined;
+  for (let attempt = 0; attempt < 40 && !frame; attempt += 1) {
+    const candidates = page
+      .frames()
+      .filter((f) => /client-view|digital\.harel/.test(f.url()));
+    for (const candidate of candidates) {
+      const hasMoney = await candidate
+        .evaluate(() => /[\d][\d.,]{3,}/.test(document.body?.innerText || ''))
+        .catch(() => false);
+      if (hasMoney) {
+        frame = candidate;
+        break;
+      }
+    }
+    if (!frame) await delay(1000);
+  }
+  if (!frame) frame = page.frames().find((f) => f.url().includes('client-view'));
+  if (!frame) return [];
+  await delay(2000); // let any last tile settle
+
+  let found: { label: string; balance: number }[] = [];
+  try {
+    // The callback avoids named helper consts on purpose — that keeps esbuild
+    // from injecting a `__name` wrapper, which need not exist in this frame.
+    found = (await frame.evaluate((keywords: string[]) => {
+      const results: { label: string; balance: number }[] = [];
+      const blocks: any[] = Array.from(
+        document.querySelectorAll('div, section, li, article'),
+      );
+      for (const block of blocks) {
+        const text: string = (block.innerText || '').replace(/\s+/g, ' ').trim();
+        if (!text || text.length > 200) continue;
+        if (!keywords.some((k) => text.includes(k))) continue;
+        let largest = 0;
+        for (const match of text.match(/[\d][\d.,]{3,}/g) || []) {
+          const value = parseFloat(match.replace(/[^\d.,]/g, '').replace(/,/g, ''));
+          if (Number.isFinite(value) && value > largest) largest = value;
+        }
+        if (largest < 1000) continue;
+        const label = text
+          .replace(/[\d][\d.,]*\s*₪?|₪/g, '')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, 50);
+        results.push({ label: label || 'חיסכון', balance: largest });
+      }
+      return results;
+    }, PRODUCT_KEYWORDS)) as { label: string; balance: number }[];
+  } catch {
+    found = [];
+  }
+
+  // Always dump the widget frame's rendered HTML — if the reader missed, this
+  // is the material to map the tile structure precisely on the next pass.
+  if (frameDumpPath) {
+    try {
+      writeFileSync(frameDumpPath, await frame.content(), 'utf8');
+    } catch {
+      /* best effort */
+    }
+  }
+
+  // No keyword hit — fall back to any block carrying a shekel-sized figure, so
+  // a single-product account (e.g. only קרנות פנסיה) still reports a balance.
+  if (found.length === 0) {
+    try {
+      found = (await frame.evaluate(() => {
+        const results: { label: string; balance: number }[] = [];
+        const blocks: any[] = Array.from(document.querySelectorAll('div, section, li, article'));
+        for (const block of blocks) {
+          const text: string = (block.innerText || '').replace(/\s+/g, ' ').trim();
+          if (!text || text.length > 200) continue;
+          if (!text.includes('₪')) continue;
+          let largest = 0;
+          for (const match of text.match(/[\d][\d.,]{3,}/g) || []) {
+            const value = parseFloat(match.replace(/[^\d.,]/g, '').replace(/,/g, ''));
+            if (Number.isFinite(value) && value > largest) largest = value;
+          }
+          if (largest < 1000) continue;
+          const label = text
+            .replace(/[\d][\d.,]*\s*₪?|₪/g, '')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, 50);
+          results.push({ label: label || 'חיסכון', balance: largest });
+        }
+        return results;
+      })) as { label: string; balance: number }[];
+    } catch {
+      found = [];
+    }
+  }
+
+  // One entry per distinct balance; the tightest (shortest-label) block wins.
+  const byBalance = new Map<number, string>();
+  for (const item of found) {
+    const prev = byBalance.get(item.balance);
+    if (prev === undefined || item.label.length < prev.length) {
+      byBalance.set(item.balance, item.label);
+    }
+  }
+  return [...byBalance].map(([balance, label]) => ({
+    accountNumber: `harel:${label}`,
+    label,
+    balance: Math.round(balance * 100) / 100,
+    currency: 'ILS',
+    transactions: [],
+  }));
+}
+
+/**
+ * Reads balances from Clal's portfolio page (verified live 2026-05-22):
+ * `www.clalbit.co.il/portfolio/`. Each product is an `h2.link-title` (the
+ * product type, e.g. "קרן פנסיה") paired with a sibling `.financial-data-sum`
+ * whose spans (shekel + bigger-value + "." + smaller-value) concatenate to the
+ * accrued balance. The page also lists non-savings products under "מוצרי עבר"
+ * (e.g. travel insurance) — a product-keyword filter keeps only savings.
+ */
+async function readClalBalances(page: Page): Promise<NormalizedAccount[]> {
+  let found: { label: string; provider: string; balance: number }[] = [];
+  try {
+    found = (await page.evaluate((keywords: string[]) => {
+      const norm = (s: string): string => (s || '').replace(/\s+/g, ' ').trim();
+      const out: { label: string; provider: string; balance: number }[] = [];
+      const titles: any[] = Array.from(document.querySelectorAll('h2.link-title'));
+      for (const title of titles) {
+        const label = norm(title.innerText || '');
+        // Skip insurance and other non-savings products (travel, etc.).
+        if (!keywords.some((k) => label.includes(k))) continue;
+        const row = title.parentElement;
+        const sumEl = row ? row.querySelector('.financial-data-sum') : null;
+        if (!sumEl) continue;
+        const raw = norm(sumEl.innerText || '').replace(/,/g, '');
+        const value = parseFloat((raw.match(/[\d]+(?:\.[\d]+)?/) || ['0'])[0]);
+        if (!Number.isFinite(value)) continue;
+        // The provider name sits in a `.link-info` within the product card.
+        let provider = '';
+        let card = row;
+        for (let i = 0; card && !provider && i < 6; i += 1) {
+          const info = card.querySelector('.link-info');
+          if (info) provider = norm(info.innerText || '');
+          card = card.parentElement;
+        }
+        out.push({ label, provider, balance: value });
+      }
+      return out;
+    }, PRODUCT_KEYWORDS)) as {
+      label: string;
+      provider: string;
+      balance: number;
+    }[];
+  } catch {
+    return [];
+  }
+  return found.map((p) => {
+    const name = p.provider ? `${p.label} — ${p.provider}` : p.label;
+    return {
+      accountNumber: `clal:${name}`,
+      label: name,
+      balance: Math.round(p.balance * 100) / 100,
+      currency: 'ILS',
+      transactions: [],
+    };
+  });
+}
+
+/**
+ * Fallback balance reader for any portal without a precise mapping: finds page
+ * blocks that name a pension product and pairs each with the largest shekel-
+ * sized number inside it. A miss is expected — saveDebug keeps the page.
  */
 async function readGenericBalances(page: Page): Promise<NormalizedAccount[]> {
   let found: { label: string; balance: number }[] = [];
