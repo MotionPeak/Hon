@@ -45,6 +45,10 @@ export interface TxnRow {
   status: string | null;
   category: string | null;
   createdAt: string;
+  /** When set, the id of the transaction that refunds/reimburses this expense. */
+  refundId?: string | null;
+  /** When set, the id of the expense this transaction is a refund for. */
+  refundForId?: string | null;
 }
 
 export interface ScrapeRunRow {
@@ -61,7 +65,92 @@ export interface ScrapeRunRow {
 export interface Summary {
   connectionCount: number;
   accountCount: number;
+  manualAssetCount: number;
   byCurrency: { currency: string; total: number; accountCount: number }[];
+}
+
+export interface ManualAsset {
+  id: string;
+  kind: string;
+  name: string;
+  value: number;
+  currency: string;
+  details: Record<string, unknown> | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+type ManualAssetRow = Omit<ManualAsset, 'details'> & { details: string | null };
+
+function toManualAsset(row: ManualAssetRow): ManualAsset {
+  let details: Record<string, unknown> | null = null;
+  if (row.details) {
+    try {
+      const parsed = JSON.parse(row.details) as unknown;
+      if (parsed && typeof parsed === 'object') {
+        details = parsed as Record<string, unknown>;
+      }
+    } catch {
+      details = null;
+    }
+  }
+  return { ...row, details };
+}
+
+/** A savings goal — a thing the user is setting money aside for each month. */
+export interface PiggyBank {
+  id: string;
+  name: string;
+  emoji: string;
+  targetAmount: number;
+  monthlyAmount: number;
+  currency: string;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** A single month's set-aside for one piggy bank. */
+export interface PiggyContribution {
+  piggyId: string;
+  month: string;
+  amount: number;
+  status: 'funded' | 'skipped';
+}
+
+/** One person (besides the user) on a split, and what they owe for it. */
+export interface SplitwiseCounterparty {
+  id: number;
+  name: string;
+  owed: number;
+}
+
+/** A Hon transaction linked to the Splitwise expense created from it. */
+export interface SplitwiseLink {
+  transactionId: string;
+  expenseId: string;
+  groupId: string | null;
+  currency: string;
+  owedToMe: number;
+  counterparties: SplitwiseCounterparty[];
+  paidAmount: number;
+  /** 'open' | 'partial' | 'paid' */
+  paidState: string;
+  createdAt: string;
+  syncedAt: string | null;
+}
+
+type SplitwiseLinkRow = Omit<SplitwiseLink, 'counterparties'> & { counterparties: string };
+
+function toSplitwiseLink(row: SplitwiseLinkRow): SplitwiseLink {
+  let counterparties: SplitwiseCounterparty[] = [];
+  try {
+    const parsed = JSON.parse(row.counterparties) as unknown;
+    if (Array.isArray(parsed)) counterparties = parsed as SplitwiseCounterparty[];
+  } catch {
+    counterparties = [];
+  }
+  return { ...row, counterparties };
 }
 
 // `hasCredentials` reports whether the vault holds credentials for the
@@ -145,13 +234,50 @@ export class Repo {
   listTransactions(opts: { accountId?: string; limit?: number }): TxnRow[] {
     return this.db
       .prepare(
-        `SELECT ${TXN_COLS}
+        `SELECT ${TXN_COLS},
+                (SELECT refund_id FROM transaction_links
+                   WHERE expense_id = transactions.id) AS refundId,
+                (SELECT expense_id FROM transaction_links
+                   WHERE refund_id = transactions.id) AS refundForId
          FROM transactions
          WHERE (@accountId IS NULL OR account_id = @accountId)
          ORDER BY date DESC, created_at DESC
          LIMIT @limit`,
       )
       .all({ accountId: opts.accountId ?? null, limit: opts.limit ?? 200 }) as TxnRow[];
+  }
+
+  /** Sets one account's balance by hand (scrapers do not report card balances). */
+  setAccountBalance(id: string, balance: number): void {
+    this.db
+      .prepare('UPDATE accounts SET balance = ?, updated_at = ? WHERE id = ?')
+      .run(balance, new Date().toISOString(), id);
+  }
+
+  // --- Refund / reimbursement links ----------------------------------------
+
+  listTransactionLinks(): { expenseId: string; refundId: string }[] {
+    return this.db
+      .prepare('SELECT expense_id AS expenseId, refund_id AS refundId FROM transaction_links')
+      .all() as { expenseId: string; refundId: string }[];
+  }
+
+  /** Links an expense to its offsetting refund; a refund can offset only one. */
+  setTransactionLink(expenseId: string, refundId: string): void {
+    this.db.transaction(() => {
+      this.db.prepare('DELETE FROM transaction_links WHERE refund_id = ?').run(refundId);
+      this.db
+        .prepare(
+          `INSERT INTO transaction_links (expense_id, refund_id, created_at)
+           VALUES (?, ?, ?)
+           ON CONFLICT (expense_id) DO UPDATE SET refund_id = excluded.refund_id`,
+        )
+        .run(expenseId, refundId, new Date().toISOString());
+    })();
+  }
+
+  deleteTransactionLink(expenseId: string): void {
+    this.db.prepare('DELETE FROM transaction_links WHERE expense_id = ?').run(expenseId);
   }
 
   getTransaction(id: string): TxnRow | undefined {
@@ -165,20 +291,119 @@ export class Repo {
     this.db.prepare('UPDATE transactions SET category = ? WHERE id = ?').run(category, id);
   }
 
+  // --- Splitwise links ------------------------------------------------------
+  // Maps a Hon transaction to the Splitwise expense created from it. The paid
+  // state is recomputed on each Splitwise refresh, not stored by the client.
+
+  private static readonly SW_COLS =
+    'transaction_id AS transactionId, expense_id AS expenseId, group_id AS groupId, ' +
+    'currency, owed_to_me AS owedToMe, counterparties, paid_amount AS paidAmount, ' +
+    'paid_state AS paidState, created_at AS createdAt, synced_at AS syncedAt';
+
+  listSplitwiseLinks(): SplitwiseLink[] {
+    const rows = this.db
+      .prepare(`SELECT ${Repo.SW_COLS} FROM splitwise_links ORDER BY created_at`)
+      .all() as SplitwiseLinkRow[];
+    return rows.map(toSplitwiseLink);
+  }
+
+  getSplitwiseLink(transactionId: string): SplitwiseLink | undefined {
+    const row = this.db
+      .prepare(`SELECT ${Repo.SW_COLS} FROM splitwise_links WHERE transaction_id = ?`)
+      .get(transactionId) as SplitwiseLinkRow | undefined;
+    return row ? toSplitwiseLink(row) : undefined;
+  }
+
+  /** Records (or replaces) the link from a transaction to a Splitwise expense. */
+  createSplitwiseLink(link: {
+    transactionId: string;
+    expenseId: string;
+    groupId: string | null;
+    currency: string;
+    owedToMe: number;
+    counterparties: SplitwiseCounterparty[];
+  }): SplitwiseLink {
+    this.db
+      .prepare(
+        `INSERT INTO splitwise_links
+           (transaction_id, expense_id, group_id, currency, owed_to_me,
+            counterparties, paid_amount, paid_state, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, 0, 'open', ?)
+         ON CONFLICT (transaction_id) DO UPDATE SET
+           expense_id = excluded.expense_id, group_id = excluded.group_id,
+           currency = excluded.currency, owed_to_me = excluded.owed_to_me,
+           counterparties = excluded.counterparties,
+           paid_amount = 0, paid_state = 'open', synced_at = NULL`,
+      )
+      .run(
+        link.transactionId,
+        link.expenseId,
+        link.groupId,
+        link.currency,
+        link.owedToMe,
+        JSON.stringify(link.counterparties),
+        new Date().toISOString(),
+      );
+    return this.getSplitwiseLink(link.transactionId)!;
+  }
+
+  /** Updates a link's paid figures after a Splitwise refresh. */
+  updateSplitwiseLinkPaid(transactionId: string, paidAmount: number, paidState: string): void {
+    this.db
+      .prepare(
+        `UPDATE splitwise_links SET paid_amount = ?, paid_state = ?, synced_at = ?
+         WHERE transaction_id = ?`,
+      )
+      .run(paidAmount, paidState, new Date().toISOString(), transactionId);
+  }
+
+  deleteSplitwiseLink(transactionId: string): void {
+    this.db.prepare('DELETE FROM splitwise_links WHERE transaction_id = ?').run(transactionId);
+  }
+
   summary(): Summary {
-    const byCurrency = this.db
+    const accountTotals = this.db
       .prepare(
         `SELECT currency, COALESCE(SUM(balance), 0) AS total, COUNT(*) AS accountCount
-         FROM accounts GROUP BY currency ORDER BY currency`,
+         FROM accounts GROUP BY currency`,
       )
       .all() as { currency: string; total: number; accountCount: number }[];
+    const assetTotals = this.db
+      .prepare(
+        `SELECT currency, COALESCE(SUM(value), 0) AS total, COUNT(*) AS n
+         FROM manual_assets GROUP BY currency`,
+      )
+      .all() as { currency: string; total: number; n: number }[];
+
+    // Net worth spans both scraped accounts and manually-valued assets, so the
+    // per-currency totals merge the two before any FX conversion.
+    const totals = new Map<
+      string,
+      { currency: string; total: number; accountCount: number }
+    >();
+    for (const row of accountTotals) {
+      totals.set(row.currency, { ...row });
+    }
+    for (const row of assetTotals) {
+      const entry =
+        totals.get(row.currency) ?? { currency: row.currency, total: 0, accountCount: 0 };
+      entry.total += row.total;
+      totals.set(row.currency, entry);
+    }
+    const byCurrency = [...totals.values()].sort((a, b) =>
+      a.currency.localeCompare(b.currency),
+    );
+
     const connectionCount = (
       this.db.prepare('SELECT COUNT(*) AS n FROM connections').get() as { n: number }
     ).n;
     const accountCount = (
       this.db.prepare('SELECT COUNT(*) AS n FROM accounts').get() as { n: number }
     ).n;
-    return { connectionCount, accountCount, byCurrency };
+    const manualAssetCount = (
+      this.db.prepare('SELECT COUNT(*) AS n FROM manual_assets').get() as { n: number }
+    ).n;
+    return { connectionCount, accountCount, manualAssetCount, byCurrency };
   }
 
   /** Upserts every account + transaction from a scrape, in one transaction. */
@@ -190,7 +415,8 @@ export class Repo {
       `INSERT INTO accounts (id, connection_id, account_number, label, balance, currency, updated_at)
        VALUES (@id, @connectionId, @accountNumber, @label, @balance, @currency, @updatedAt)
        ON CONFLICT (connection_id, account_number) DO UPDATE SET
-         label = excluded.label, balance = excluded.balance,
+         label = excluded.label,
+         balance = COALESCE(excluded.balance, accounts.balance),
          currency = excluded.currency, updated_at = excluded.updated_at
        RETURNING id`,
     );
@@ -245,6 +471,205 @@ export class Repo {
     })();
 
     return { accounts: accounts.length, transactions: txnCount };
+  }
+
+  // --- Manual assets --------------------------------------------------------
+  // Cars, property, cash and the like — things the user owns that have no
+  // institution to scrape. They count toward net worth via summary().
+
+  private static readonly ASSET_COLS =
+    'id, kind, name, value, currency, details, ' +
+    'created_at AS createdAt, updated_at AS updatedAt';
+
+  listManualAssets(): ManualAsset[] {
+    const rows = this.db
+      .prepare(`SELECT ${Repo.ASSET_COLS} FROM manual_assets ORDER BY created_at`)
+      .all() as ManualAssetRow[];
+    return rows.map(toManualAsset);
+  }
+
+  getManualAsset(id: string): ManualAsset | undefined {
+    const row = this.db
+      .prepare(`SELECT ${Repo.ASSET_COLS} FROM manual_assets WHERE id = ?`)
+      .get(id) as ManualAssetRow | undefined;
+    return row ? toManualAsset(row) : undefined;
+  }
+
+  createManualAsset(input: {
+    kind: string;
+    name: string;
+    value: number;
+    currency: string;
+    details: Record<string, unknown> | null;
+  }): ManualAsset {
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO manual_assets
+           (id, kind, name, value, currency, details, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        id,
+        input.kind,
+        input.name,
+        input.value,
+        input.currency,
+        input.details ? JSON.stringify(input.details) : null,
+        now,
+        now,
+      );
+    return this.getManualAsset(id)!;
+  }
+
+  updateManualAsset(
+    id: string,
+    fields: Partial<{
+      name: string;
+      value: number;
+      details: Record<string, unknown> | null;
+    }>,
+  ): void {
+    const sets: string[] = [];
+    const values: unknown[] = [];
+    if (fields.name !== undefined) {
+      sets.push('name = ?');
+      values.push(fields.name);
+    }
+    if (fields.value !== undefined) {
+      sets.push('value = ?');
+      values.push(fields.value);
+    }
+    if (fields.details !== undefined) {
+      sets.push('details = ?');
+      values.push(fields.details ? JSON.stringify(fields.details) : null);
+    }
+    if (sets.length === 0) return;
+    sets.push('updated_at = ?');
+    values.push(new Date().toISOString());
+    values.push(id);
+    this.db
+      .prepare(`UPDATE manual_assets SET ${sets.join(', ')} WHERE id = ?`)
+      .run(...values);
+  }
+
+  deleteManualAsset(id: string): void {
+    this.db.prepare('DELETE FROM manual_assets WHERE id = ?').run(id);
+  }
+
+  // --- Piggy banks ----------------------------------------------------------
+
+  private static readonly PIGGY_COLS =
+    'id, name, emoji, target_amount AS targetAmount, monthly_amount AS monthlyAmount, ' +
+    'currency, sort_order AS sortOrder, created_at AS createdAt, updated_at AS updatedAt';
+
+  listPiggyBanks(): PiggyBank[] {
+    return this.db
+      .prepare(`SELECT ${Repo.PIGGY_COLS} FROM piggy_banks ORDER BY sort_order, created_at`)
+      .all() as PiggyBank[];
+  }
+
+  getPiggyBank(id: string): PiggyBank | undefined {
+    return this.db
+      .prepare(`SELECT ${Repo.PIGGY_COLS} FROM piggy_banks WHERE id = ?`)
+      .get(id) as PiggyBank | undefined;
+  }
+
+  createPiggyBank(input: {
+    name: string;
+    emoji: string;
+    targetAmount: number;
+    monthlyAmount: number;
+    currency: string;
+  }): PiggyBank {
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    const nextOrder =
+      (this.db.prepare('SELECT COALESCE(MAX(sort_order), 0) AS n FROM piggy_banks').get() as {
+        n: number;
+      }).n + 1;
+    this.db
+      .prepare(
+        `INSERT INTO piggy_banks
+           (id, name, emoji, target_amount, monthly_amount, currency, sort_order,
+            created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        id,
+        input.name,
+        input.emoji,
+        input.targetAmount,
+        input.monthlyAmount,
+        input.currency,
+        nextOrder,
+        now,
+        now,
+      );
+    return this.getPiggyBank(id)!;
+  }
+
+  updatePiggyBank(
+    id: string,
+    fields: Partial<{ name: string; emoji: string; targetAmount: number; monthlyAmount: number }>,
+  ): void {
+    const sets: string[] = [];
+    const values: unknown[] = [];
+    if (fields.name !== undefined) {
+      sets.push('name = ?');
+      values.push(fields.name);
+    }
+    if (fields.emoji !== undefined) {
+      sets.push('emoji = ?');
+      values.push(fields.emoji);
+    }
+    if (fields.targetAmount !== undefined) {
+      sets.push('target_amount = ?');
+      values.push(fields.targetAmount);
+    }
+    if (fields.monthlyAmount !== undefined) {
+      sets.push('monthly_amount = ?');
+      values.push(fields.monthlyAmount);
+    }
+    if (sets.length === 0) return;
+    sets.push('updated_at = ?');
+    values.push(new Date().toISOString());
+    values.push(id);
+    this.db.prepare(`UPDATE piggy_banks SET ${sets.join(', ')} WHERE id = ?`).run(...values);
+  }
+
+  deletePiggyBank(id: string): void {
+    this.db.prepare('DELETE FROM piggy_banks WHERE id = ?').run(id);
+  }
+
+  /** Every recorded set-aside, across all piggy banks and months. */
+  listPiggyContributions(): PiggyContribution[] {
+    return this.db
+      .prepare(
+        'SELECT piggy_id AS piggyId, month, amount, status FROM piggy_contributions',
+      )
+      .all() as PiggyContribution[];
+  }
+
+  /**
+   * Rewrites one month's ledger for one piggy bank — the current month is
+   * re-settled on every budget read, so it must overwrite, not accumulate.
+   */
+  setPiggyContribution(
+    piggyId: string,
+    month: string,
+    amount: number,
+    status: 'funded' | 'skipped',
+  ): void {
+    this.db
+      .prepare(
+        `INSERT INTO piggy_contributions (piggy_id, month, amount, status, created_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (piggy_id, month) DO UPDATE SET
+           amount = excluded.amount, status = excluded.status`,
+      )
+      .run(piggyId, month, amount, status, new Date().toISOString());
   }
 
   // --- Categorization -------------------------------------------------------
@@ -309,17 +734,60 @@ export class Repo {
       .run(category, description).changes;
   }
 
+  // --- Merchant recurrence --------------------------------------------------
+  // How often a recurring charge bills, keyed by a cleaned merchant name.
+
+  listMerchantFrequencies(): { merchantKey: string; frequency: string }[] {
+    return this.db
+      .prepare('SELECT merchant_key AS merchantKey, frequency FROM merchant_recurrence')
+      .all() as { merchantKey: string; frequency: string }[];
+  }
+
+  setMerchantFrequency(merchantKey: string, frequency: string): void {
+    this.db
+      .prepare(
+        `INSERT INTO merchant_recurrence (merchant_key, frequency, created_at)
+         VALUES (?, ?, ?)
+         ON CONFLICT (merchant_key) DO UPDATE SET frequency = excluded.frequency`,
+      )
+      .run(merchantKey, frequency, new Date().toISOString());
+  }
+
+  clearMerchantFrequency(merchantKey: string): void {
+    this.db
+      .prepare('DELETE FROM merchant_recurrence WHERE merchant_key = ?')
+      .run(merchantKey);
+  }
+
   /** ILS expense totals per category within [start, end) — ISO date strings. */
   monthlySpending(start: string, end: string): { category: string; total: number }[] {
     return this.db
       .prepare(
         `SELECT category, SUM(-amount) AS total
-         FROM transactions
+         FROM txn_effective
          WHERE category IS NOT NULL AND amount < 0 AND currency = 'ILS'
            AND date >= @start AND date < @end
          GROUP BY category`,
       )
       .all({ start, end }) as { category: string; total: number }[];
+  }
+
+  /**
+   * ILS money in for [start, end) — positive amounts categorised as Income or
+   * Transfers only. Positive amounts in expense categories are partial refunds
+   * offsetting a purchase, so they are deliberately left out.
+   */
+  monthlyInflow(start: string, end: string): number {
+    const row = this.db
+      .prepare(
+        `SELECT COALESCE(SUM(amount), 0) AS total
+         FROM txn_effective
+         WHERE amount > 0 AND currency = 'ILS'
+           AND category IN ('Income', 'Transfers')
+           AND date >= @start AND date < @end`,
+      )
+      .get({ start, end }) as { total: number };
+    return row.total;
   }
 
   listBudgets(): { category: string; monthlyAmount: number }[] {
@@ -364,7 +832,7 @@ export class Repo {
         `SELECT substr(date, 1, 7) AS month,
                 SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END) AS spending,
                 SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) AS income
-         FROM transactions
+         FROM txn_effective
          WHERE currency = 'ILS' AND date >= @start
          GROUP BY substr(date, 1, 7)
          ORDER BY month`,
@@ -377,7 +845,7 @@ export class Repo {
     return this.db
       .prepare(
         `SELECT COALESCE(category, 'Uncategorized') AS category, SUM(-amount) AS total
-         FROM transactions
+         FROM txn_effective
          WHERE amount < 0 AND currency = 'ILS' AND date >= @start AND date < @end
          GROUP BY COALESCE(category, 'Uncategorized')`,
       )
@@ -389,7 +857,7 @@ export class Repo {
     return this.db
       .prepare(
         `SELECT COUNT(*) AS count, COALESCE(AVG(-amount), 0) AS avg
-         FROM transactions
+         FROM txn_effective
          WHERE amount < 0 AND currency = 'ILS' AND date >= @start AND date < @end`,
       )
       .get({ start, end }) as { count: number; avg: number };
@@ -411,6 +879,10 @@ export class Repo {
           'ON CONFLICT(key) DO UPDATE SET value = excluded.value',
       )
       .run(key, value);
+  }
+
+  deleteMeta(key: string): void {
+    this.db.prepare('DELETE FROM meta WHERE key = ?').run(key);
   }
 
   getCredentialBlob(connectionId: string): string | undefined {

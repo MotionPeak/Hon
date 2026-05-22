@@ -1,54 +1,63 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import type { Vault } from './vault.js';
 
 // A SnapTrade personal key has exactly one user. Hon used to keep that user's
 // id/secret inside each connection's credentials, so removing a connection
-// lost the secret and orphaned the key. This module persists the user once,
-// keyed by the developer Client ID, independent of any connection.
+// lost the secret and orphaned the key. The user is now persisted once, keyed
+// by the developer Client ID, encrypted in the credential vault — the secret
+// grants ongoing access to the user's brokerage data, so it never sits in
+// plaintext on disk.
 
 export interface SnapTradeUser {
   userId: string;
   userSecret: string;
 }
 
-type Store = Record<string, SnapTradeUser>;
+const secretName = (clientId: string): string => `snaptrade-user:${clientId.trim()}`;
 
-function storePath(dataDir: string): string {
-  return join(dataDir, 'snaptrade-users.json');
-}
-
-function readStore(dataDir: string): Store {
+export function loadSnapTradeUser(vault: Vault, clientId: string): SnapTradeUser | null {
+  const blob = vault.loadSecret(secretName(clientId));
+  if (!blob) return null;
   try {
-    const path = storePath(dataDir);
-    if (!existsSync(path)) return {};
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as unknown;
-    return parsed && typeof parsed === 'object' ? (parsed as Store) : {};
+    const user = JSON.parse(blob) as SnapTradeUser;
+    return user?.userId && user?.userSecret ? user : null;
   } catch {
-    return {};
+    return null;
   }
 }
 
-function writeStore(dataDir: string, store: Store): void {
-  writeFileSync(storePath(dataDir), JSON.stringify(store, null, 2));
-}
-
-export function loadSnapTradeUser(dataDir: string, clientId: string): SnapTradeUser | null {
-  const user = readStore(dataDir)[clientId.trim()];
-  return user?.userId && user?.userSecret ? user : null;
-}
-
 export function saveSnapTradeUser(
-  dataDir: string,
+  vault: Vault,
   clientId: string,
   user: SnapTradeUser,
 ): void {
-  const store = readStore(dataDir);
-  store[clientId.trim()] = user;
-  writeStore(dataDir, store);
+  vault.saveSecret(secretName(clientId), JSON.stringify(user));
 }
 
-export function clearSnapTradeUser(dataDir: string, clientId: string): void {
-  const store = readStore(dataDir);
-  delete store[clientId.trim()];
-  writeStore(dataDir, store);
+export function clearSnapTradeUser(vault: Vault, clientId: string): void {
+  vault.clearSecret(secretName(clientId));
+}
+
+/**
+ * Moves any SnapTrade users left in the legacy plaintext `snaptrade-users.json`
+ * into the encrypted vault, then deletes the file. Safe to call on every
+ * unlock — it is a no-op once the file is gone.
+ */
+export function migrateLegacySnapTradeUsers(vault: Vault, dataDir: string): void {
+  const path = join(dataDir, 'snaptrade-users.json');
+  if (!existsSync(path)) return;
+  try {
+    const store = JSON.parse(readFileSync(path, 'utf8')) as
+      | Record<string, SnapTradeUser>
+      | null;
+    if (store && typeof store === 'object') {
+      for (const [clientId, user] of Object.entries(store)) {
+        if (user?.userId && user?.userSecret) saveSnapTradeUser(vault, clientId, user);
+      }
+    }
+  } catch {
+    // A corrupt legacy file should not block unlock; drop it regardless.
+  }
+  rmSync(path, { force: true });
 }

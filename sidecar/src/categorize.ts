@@ -11,6 +11,7 @@ export const CATEGORIES = [
   'Shopping',
   'Utilities',
   'Housing',
+  'Insurance',
   'Health',
   'Entertainment',
   'Subscriptions',
@@ -47,6 +48,14 @@ const RULES: Rule[] = [
   { match: 'chatgpt', category: 'Subscriptions' },
   { match: 'amazon prime', category: 'Subscriptions' },
   { match: 'מנוי', category: 'Subscriptions' },
+
+  // Insurance
+  { match: 'ביטוח', category: 'Insurance' },
+  { match: 'insurance', category: 'Insurance' },
+  { match: 'הראל', category: 'Insurance' },
+  { match: 'כלל ביטוח', category: 'Insurance' },
+  { match: 'מגדל', category: 'Insurance' },
+  { match: 'פניקס', category: 'Insurance' },
 
   // Fuel
   { match: 'סונול', category: 'Fuel' },

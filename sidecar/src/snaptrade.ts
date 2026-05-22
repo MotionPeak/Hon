@@ -7,6 +7,7 @@ import {
   saveSnapTradeUser,
   type SnapTradeUser,
 } from './snaptradeUser.js';
+import type { Vault } from './vault.js';
 
 // The SnapTrade SDK throws `SnaptradeError` with the response body in
 // `responseBody` — a JSON string like {"detail":"...","code":"1012"}.
@@ -44,10 +45,10 @@ export function describeSnapError(err: unknown): string {
  */
 function getStoredUser(
   creds: Record<string, string>,
-  dataDir: string,
+  vault: Vault,
 ): SnapTradeUser | null {
   const clientId = (creds.clientId ?? '').trim();
-  const stored = loadSnapTradeUser(dataDir, clientId);
+  const stored = loadSnapTradeUser(vault, clientId);
   if (stored) return stored;
 
   // Migrate a user that an older Hon version kept in the connection's creds.
@@ -55,7 +56,7 @@ function getStoredUser(
   const userSecret = (creds.userSecret ?? '').trim();
   if (userId && userSecret) {
     const user = { userId, userSecret };
-    saveSnapTradeUser(dataDir, clientId, user);
+    saveSnapTradeUser(vault, clientId, user);
     return user;
   }
   return null;
@@ -198,17 +199,17 @@ async function userIsRegistered(snaptrade: Snaptrade, userId: string): Promise<b
 async function resolveUser(
   snaptrade: Snaptrade,
   creds: Record<string, string>,
-  dataDir: string,
+  vault: Vault,
   clientId: string,
 ): Promise<SnapTradeUser> {
-  const stored = getStoredUser(creds, dataDir);
+  const stored = getStoredUser(creds, vault);
   if (stored && (await userIsRegistered(snaptrade, stored.userId))) {
     return stored;
   }
-  if (stored) clearSnapTradeUser(dataDir, clientId); // stale — was deleted
+  if (stored) clearSnapTradeUser(vault, clientId); // stale — was deleted
 
   const fresh = await registerFreshUser(snaptrade);
-  saveSnapTradeUser(dataDir, clientId, fresh);
+  saveSnapTradeUser(vault, clientId, fresh);
   return fresh;
 }
 
@@ -221,14 +222,14 @@ async function resolveUser(
  */
 export async function createPortalLink(
   creds: Record<string, string>,
-  dataDir: string,
+  vault: Vault,
   broker?: string,
   customRedirect?: string,
 ): Promise<PortalResult> {
   const snaptrade = makeClient(creds);
   const clientId = (creds.clientId ?? '').trim();
 
-  const { userId, userSecret } = await resolveUser(snaptrade, creds, dataDir, clientId);
+  const { userId, userSecret } = await resolveUser(snaptrade, creds, vault, clientId);
 
   // The user is persisted. Any failure past this point must still surface
   // userId/userSecret so the caller can persist them too.
@@ -271,10 +272,10 @@ export async function createPortalLink(
  */
 export async function runSnapTradeSync(
   creds: Record<string, string>,
-  dataDir: string,
+  vault: Vault,
   onProgress?: (message: string) => void,
 ): Promise<ScrapeOutcome> {
-  const user = getStoredUser(creds, dataDir);
+  const user = getStoredUser(creds, vault);
   if (!user) {
     return {
       success: false,

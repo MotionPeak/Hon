@@ -1,4 +1,3 @@
-import { writeFileSync } from 'node:fs';
 import type { Page } from 'puppeteer';
 
 // DOM globals — these exist in the browser context that page.evaluate runs in.
@@ -49,15 +48,6 @@ async function classifyPage(page: Page): Promise<PageState> {
     )) as PageState;
   } catch {
     return 'unknown';
-  }
-}
-
-/** Saves the current page's HTML for diagnosing selector mismatches. */
-async function dumpPageHtml(page: Page, path: string): Promise<void> {
-  try {
-    writeFileSync(path, await page.content(), 'utf8');
-  } catch {
-    // non-fatal
   }
 }
 
@@ -137,17 +127,12 @@ async function focusOtpField(page: Page): Promise<boolean> {
   }
 }
 
-/** Derives a sibling debug path: foo-otp.html -> foo-otp-<suffix>.html */
-function siblingDumpPath(htmlDumpPath: string, suffix: string): string {
-  return htmlDumpPath.replace(/\.html$/i, `-${suffix}.html`) || `${htmlDumpPath}.${suffix}`;
-}
-
 /**
  * Drives Beinleumi's OTP page: sends the SMS, asks the app for the code,
  * enters it and submits. The send button (#sendSms) carries only a `title`
  * attribute, so it is clicked by concrete selector first, text-match second.
  */
-async function driveOtpPage(page: Page, getCode: OtpCallback, htmlDumpPath: string): Promise<void> {
+async function driveOtpPage(page: Page, getCode: OtpCallback): Promise<void> {
   // 1. Make sure the SMS delivery method is selected (it usually is by default).
   await clickSelector(page, ['#type2']);
   await delay(300);
@@ -163,10 +148,8 @@ async function driveOtpPage(page: Page, getCode: OtpCallback, htmlDumpPath: stri
   // 3. Ask the Hon app (which asks the user) for the code while the SMS arrives.
   const code = await getCode();
 
-  // Give the post-send page (with the code field) a moment to render, then
-  // capture it so the entry/submit selectors can be confirmed after a real run.
+  // Give the post-send page (with the code field) a moment to render.
   await delay(1500);
-  await dumpPageHtml(page, siblingDumpPath(htmlDumpPath, 'sent'));
 
   // 4. Enter the code — prefer a known field id, fall back to first empty input.
   const typedIntoField = await page.evaluate((otp: string) => {
@@ -214,7 +197,6 @@ async function driveOtpPage(page: Page, getCode: OtpCallback, htmlDumpPath: stri
 export async function watchForOtp(
   page: Page,
   getCode: OtpCallback,
-  htmlDumpPath: string,
   signal: AbortSignal,
 ): Promise<void> {
   while (!signal.aborted) {
@@ -223,9 +205,8 @@ export async function watchForOtp(
 
     const state = await classifyPage(page);
     if (state === 'otp') {
-      await dumpPageHtml(page, htmlDumpPath);
       try {
-        await driveOtpPage(page, getCode, htmlDumpPath);
+        await driveOtpPage(page, getCode);
       } catch {
         // leave it — the scraper will time out and report the failure
       }

@@ -81,6 +81,28 @@ export class Vault {
     return JSON.parse(decryptWith(this.requireKey(), blob)) as Record<string, string>;
   }
 
+  // A named secret not tied to a connection — e.g. the SnapTrade user, which
+  // outlives the connections that use it. Encrypted under the same vault key
+  // and kept as a ciphertext row in the `meta` table.
+  private static readonly SECRET_PREFIX = 'vault_secret:';
+
+  saveSecret(name: string, value: string): void {
+    this.repo.setMeta(
+      Vault.SECRET_PREFIX + name,
+      encryptWith(this.requireKey(), value),
+    );
+  }
+
+  loadSecret(name: string): string | undefined {
+    const blob = this.repo.getMeta(Vault.SECRET_PREFIX + name);
+    if (!blob) return undefined;
+    return decryptWith(this.requireKey(), blob);
+  }
+
+  clearSecret(name: string): void {
+    this.repo.deleteMeta(Vault.SECRET_PREFIX + name);
+  }
+
   private requireKey(): Buffer {
     if (!this.key) {
       throw new Error('The credential vault is locked.');

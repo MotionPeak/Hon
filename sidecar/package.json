@@ -8,7 +8,8 @@
     "start": "node --import tsx src/server.ts",
     "dev": "node --import tsx --watch src/server.ts",
     "web": "./web.sh",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "postinstall": "patch-package"
   },
   "engines": {
     "node": ">=22.12"
@@ -24,6 +25,7 @@
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.9.1",
+    "patch-package": "^8.0.1",
     "tsx": "^4.22.3",
     "typescript": "^6.0.3"
   }

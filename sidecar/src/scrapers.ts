@@ -3,9 +3,10 @@ import puppeteer, { type Browser, type Page } from 'puppeteer';
 import { CompanyTypes, SCRAPERS, createScraper } from 'israeli-bank-scrapers';
 import type { ScraperCredentials, ScraperScrapingResult } from 'israeli-bank-scrapers';
 import { SNAPTRADE_COMPANY_ID, snaptradeCompany } from './snaptrade.js';
+import { PENSION_COMPANIES, isPensionCompany } from './pension.js';
 import { watchForOtp, type OtpCallback } from './otp.js';
 
-export type CompanyType = 'bank' | 'card' | 'brokerage';
+export type CompanyType = 'bank' | 'card' | 'brokerage' | 'pension';
 
 export interface CompanyInfo {
   id: string;
@@ -96,11 +97,17 @@ export function companyCatalog(): CompanyInfo[] {
       type: COMPANY_TYPES[id] ?? 'bank',
       domain: COMPANY_DOMAINS[id],
     }));
-  return [...scraped, snaptradeCompany].sort((a, b) => a.name.localeCompare(b.name));
+  return [...scraped, snaptradeCompany, ...PENSION_COMPANIES].sort((a, b) =>
+    a.name.localeCompare(b.name),
+  );
 }
 
 export function isSupportedCompany(id: string): boolean {
-  return id === SNAPTRADE_COMPANY_ID || (id in SCRAPERS && !UNSUPPORTED.has(id));
+  return (
+    id === SNAPTRADE_COMPANY_ID ||
+    isPensionCompany(id) ||
+    (id in SCRAPERS && !UNSUPPORTED.has(id))
+  );
 }
 
 /**
@@ -168,7 +175,6 @@ export async function runInteractiveScrape(
   startDate: Date,
   onProgress: ((progressType: string) => void) | undefined,
   screenshotPath: string | undefined,
-  htmlDumpPath: string,
   onOtpNeeded: OtpCallback,
 ): Promise<ScrapeOutcome> {
   let browser: Browser | undefined;
@@ -205,7 +211,7 @@ export async function runInteractiveScrape(
 
     // Watch for (and complete) the 2FA page concurrently with the scrape.
     void pagePromise
-      .then((page) => watchForOtp(page, onOtpNeeded, htmlDumpPath, controller.signal))
+      .then((page) => watchForOtp(page, onOtpNeeded, controller.signal))
       .catch(() => {});
 
     const result = await scrapePromise;
@@ -261,20 +267,36 @@ interface RawAccount {
 }
 
 function normalizeAccount(account: RawAccount): NormalizedAccount {
+  // A scraper that fails to parse a balance yields NaN; store null instead so
+  // it reads as "unknown" rather than corrupting the column.
+  const balance =
+    typeof account.balance === 'number' && Number.isFinite(account.balance)
+      ? account.balance
+      : undefined;
   return {
     accountNumber: account.accountNumber,
-    balance: account.balance,
+    balance,
     currency: 'ILS',
     transactions: (account.txns ?? []).map(normalizeTransaction),
   };
+}
+
+// israeli-bank-scrapers reports transaction dates as UTC ISO timestamps pinned
+// to local midnight — in Israel that lands on the previous evening, so storing
+// the raw string files every transaction one calendar day (and 1st-of-month
+// transactions a whole month) early. Reduce to the Asia/Jerusalem calendar date.
+function israelDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' });
 }
 
 function normalizeTransaction(txn: RawTransaction): NormalizedTransaction {
   const hasIdentifier = txn.identifier != null && String(txn.identifier).length > 0;
   return {
     externalId: hasIdentifier ? String(txn.identifier) : fingerprint(txn),
-    date: txn.date,
-    processedDate: txn.processedDate,
+    date: israelDate(txn.date),
+    processedDate: txn.processedDate ? israelDate(txn.processedDate) : undefined,
     amount: txn.chargedAmount,
     currency: txn.chargedCurrency ?? txn.originalCurrency ?? 'ILS',
     description: txn.description,

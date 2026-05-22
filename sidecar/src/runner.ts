@@ -1,7 +1,9 @@
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Repo } from './repo.js';
+import type { Vault } from './vault.js';
 import { isSnapTrade, runSnapTradeSync } from './snaptrade.js';
+import { isPensionCompany, runPensionScrape } from './pension.js';
 import { runInteractiveScrape, runScrape, type ScrapeOutcome } from './scrapers.js';
 
 export interface StartArgs {
@@ -31,13 +33,12 @@ export class ScrapeRunner {
   private readonly runs = new Map<string, RunStatus>();
   private readonly otpResolvers = new Map<string, (code: string) => void>();
   private readonly debugDir: string;
-  private readonly dataDir: string;
 
   constructor(
     private readonly repo: Repo,
     dataDir: string,
+    private readonly vault: Vault,
   ) {
-    this.dataDir = dataDir;
     this.debugDir = join(dataDir, 'debug');
   }
 
@@ -75,16 +76,6 @@ export class ScrapeRunner {
     }
   }
 
-  /** Path where the OTP page HTML is saved, for diagnosing the 2FA flow. */
-  private htmlDumpPath(companyId: string): string {
-    try {
-      mkdirSync(this.debugDir, { recursive: true });
-    } catch {
-      // best effort
-    }
-    return join(this.debugDir, `${companyId}-otp.html`);
-  }
-
   /** Called by the scraper when it needs a 2FA code; resolves when one arrives. */
   private requestOtp(status: RunStatus): Promise<string> {
     return new Promise<string>((resolve) => {
@@ -111,9 +102,21 @@ export class ScrapeRunner {
     try {
       let outcome: ScrapeOutcome;
       if (isSnapTrade(args.companyId)) {
-        outcome = await runSnapTradeSync(args.credentials, this.dataDir, (message) => {
+        outcome = await runSnapTradeSync(args.credentials, this.vault, (message) => {
           status.message = message;
         });
+      } else if (isPensionCompany(args.companyId)) {
+        // Pension funds have no scraper library, so a custom Puppeteer routine
+        // drives the portal login (and any SMS one-time code) itself.
+        outcome = await runPensionScrape(
+          args.companyId,
+          args.credentials,
+          (message) => {
+            status.message = message;
+          },
+          this.prepareScreenshotPath(args.companyId),
+          () => this.requestOtp(status),
+        );
       } else if (args.interactive) {
         outcome = await runInteractiveScrape(
           args.companyId,
@@ -123,7 +126,6 @@ export class ScrapeRunner {
             status.message = humanizeProgress(progress);
           },
           this.prepareScreenshotPath(args.companyId),
-          this.htmlDumpPath(args.companyId),
           () => this.requestOtp(status),
         );
       } else {

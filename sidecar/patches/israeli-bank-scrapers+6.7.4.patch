@@ -1,0 +1,22 @@
+diff --git a/node_modules/israeli-bank-scrapers/lib/scrapers/base-beinleumi-group.js b/node_modules/israeli-bank-scrapers/lib/scrapers/base-beinleumi-group.js
+index 4e821fa..4d98676 100644
+--- a/node_modules/israeli-bank-scrapers/lib/scrapers/base-beinleumi-group.js
++++ b/node_modules/israeli-bank-scrapers/lib/scrapers/base-beinleumi-group.js
+@@ -58,9 +58,14 @@ function createLoginFields(credentials) {
+   }];
+ }
+ function getAmountData(amountStr) {
+-  let amountStrCopy = amountStr.replace(_constants.SHEKEL_CURRENCY_SYMBOL, '');
+-  amountStrCopy = amountStrCopy.replaceAll(',', '');
+-  return parseFloat(amountStrCopy);
++  // Hon patch: the FIBI page wraps amounts in Unicode directional marks and
++  // may put the minus sign at the end, which the original parseFloat could not
++  // handle. Strip everything but digits/dot/minus and treat any minus as sign.
++  const cleaned = String(amountStr == null ? '' : amountStr).replace(/[^0-9.\-]/g, '');
++  const negative = cleaned.indexOf('-') >= 0;
++  const num = parseFloat(cleaned.replace(/-/g, ''));
++  if (Number.isNaN(num)) return NaN;
++  return negative ? -num : num;
+ }
+ function getTxnAmount(txn) {
+   const credit = getAmountData(txn.credit);
