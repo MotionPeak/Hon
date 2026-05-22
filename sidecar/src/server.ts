@@ -155,57 +155,6 @@ app.get('/connections', async (_req, reply) => {
   return { connections: repo.listConnections() };
 });
 
-// --- Pension CAPTCHA-solver settings ---------------------------------------
-// Whether Hon attempts an automated CapSolver-backed sign-in for the
-// CAPTCHA-walled pension funds (Meitav/Menora). The enabled flag lives in the
-// `meta` table; the API key is a secret kept in the vault.
-
-app.get('/settings/pension-solver', async (_req, reply) => {
-  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
-  let hasCapSolverKey = false;
-  let hasTwoCaptchaKey = false;
-  try {
-    if (vault?.unlocked) {
-      hasCapSolverKey = Boolean(vault.loadSecret('capsolver_key'));
-      hasTwoCaptchaKey = Boolean(vault.loadSecret('twocaptcha_key'));
-    }
-  } catch {
-    /* leave both false */
-  }
-  return {
-    enabled: repo.getMeta('capsolver_enabled') === '1',
-    hasCapSolverKey,
-    hasTwoCaptchaKey,
-  };
-});
-
-app.put('/settings/pension-solver', async (req, reply) => {
-  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
-  const body = (req.body ?? {}) as {
-    enabled?: boolean;
-    capSolverKey?: string;
-    twoCaptchaKey?: string;
-  };
-  // Each key is touched only when its field is present — the UI omits a field
-  // to keep the saved key. Storing a key needs an unlocked vault.
-  const keyUpdates: { secret: string; value: string }[] = [];
-  if (typeof body.capSolverKey === 'string') {
-    keyUpdates.push({ secret: 'capsolver_key', value: body.capSolverKey.trim() });
-  }
-  if (typeof body.twoCaptchaKey === 'string') {
-    keyUpdates.push({ secret: 'twocaptcha_key', value: body.twoCaptchaKey.trim() });
-  }
-  if (keyUpdates.length > 0 && !vault?.unlocked) {
-    return reply.code(409).send({ error: 'the credential vault is locked' });
-  }
-  for (const { secret, value } of keyUpdates) {
-    if (value) vault!.saveSecret(secret, value);
-    else vault!.clearSecret(secret);
-  }
-  repo.setMeta('capsolver_enabled', body.enabled ? '1' : '0');
-  return { ok: true };
-});
-
 // Serves an institution's logo, fetched from its own website and cached.
 // An explicit `?domain=` is used for SnapTrade brokerages, which are not in
 // the scraper catalog (e.g. Interactive Brokers).

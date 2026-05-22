@@ -2,215 +2,34 @@
 //
 // Israeli pension, gemel and study-fund (קרן השתלמות) providers each run their
 // own member portal — there is no shared scraping library for them the way
-// israeli-bank-scrapers covers the banks. This connector logs into a provider's
-// portal in a Hon-controlled Puppeteer browser, completes the SMS one-time-code
-// step, and reads the accumulated balance of every product the member holds.
+// israeli-bank-scrapers covers the banks. This connector drives a provider's
+// portal in a Hon-controlled Puppeteer browser and reads the accumulated
+// balance of every product the member holds.
 //
-// The automated portals are single-page apps behind a WAF, and use
-// **passwordless OTP login** — no static password:
-//   • Migdal — ID number → a code is sent to the number on file.
-//   • Harel  — ID number + phone number → a code is sent by SMS.
-//   • Clal   — ID number + phone number, pick SMS delivery → a code by SMS.
-// Hon fills the form, relays the SMS code, and reads the balances.
+// Migdal, Harel and Clal use **passwordless OTP login** — Hon fills the form,
+// relays the SMS code, and reads the balances headless.
 //
 // Meitav and Menora sit behind CAPTCHA bot-walls (reCAPTCHA Enterprise /
-// Radware + hCaptcha) and always run in a *visible* browser window.
-//
-// When a CapSolver API key is configured (HON_CAPSOLVER_KEY) the connector
-// first attempts the whole login automatically — a puppeteer-extra stealth
-// browser drives the form and a CapSolver-backed plugin solves the CAPTCHA.
-// Whether that attempt lands or not, Hon then polls the balance API while the
-// window stays open, so a blocked attempt falls back to the user finishing the
-// sign-in by hand in the same run. Without a key, those funds are interactive
-// only — the user clears the CAPTCHA and does the OTP themselves.
+// Radware + hCaptcha) that resist automation, so they run in a **visible
+// Chromium window**: Hon pre-fills the ID/phone, the user clears the security
+// check and enters the SMS code themselves, and Hon then reads the balances.
+// The session cookies are saved (encrypted, per connection) so the next sync
+// resumes already logged in — no sign-in at all — until they expire.
 
 import { writeFileSync } from 'node:fs';
 import puppeteerVanilla, { type Browser, type Frame, type Page } from 'puppeteer';
 import { addExtra } from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
-import RecaptchaPlugin from 'puppeteer-extra-plugin-recaptcha';
 import type { CompanyInfo, NormalizedAccount, ScrapeOutcome } from './scrapers.js';
 import type { OtpCallback } from './otp.js';
 import { persistSession, restoreSession, type SessionHandle } from './session.js';
 
-// Solver config for the Meitav/Menora automated-login attempt, set per scrape
-// by runPensionScrape from the user's stored settings. Two services are used,
-// because no single one covers both walls: CapSolver solves the reCAPTCHA on
-// Meitav, but its API rejects hCaptcha — so Menora's hCaptcha goes to 2captcha.
-// The HON_CAPSOLVER_KEY / HON_2CAPTCHA_KEY env vars seed defaults for dev.
-let capSolverKey = (process.env.HON_CAPSOLVER_KEY ?? '').trim();
-let twoCaptchaKey = (process.env.HON_2CAPTCHA_KEY ?? '').trim();
-let solverEnabled = capSolverKey.length > 0 || twoCaptchaKey.length > 0;
-
-const CAPSOLVER_API = 'https://api.capsolver.com';
-const TWOCAPTCHA_API = 'https://api.2captcha.com';
-
-/** Applies the user's solver settings for the run about to start. */
-export function setPensionSolverConfig(config: {
-  enabled: boolean;
-  capSolverKey: string;
-  twoCaptchaKey: string;
-}): void {
-  capSolverKey =
-    (config.capSolverKey ?? '').trim() || (process.env.HON_CAPSOLVER_KEY ?? '').trim();
-  twoCaptchaKey =
-    (config.twoCaptchaKey ?? '').trim() || (process.env.HON_2CAPTCHA_KEY ?? '').trim();
-  solverEnabled =
-    Boolean(config.enabled) && (capSolverKey.length > 0 || twoCaptchaKey.length > 0);
-}
-
-// Wrap the project's puppeteer with stealth (masks automation tells, helps all
-// funds) and the CAPTCHA solver plugin with a custom provider. The plugin is
-// always registered — solveCaptchas() is a no-op unless the user enabled the
-// solver and a key is set. puppeteer-extra's bundled types lag the installed
-// puppeteer; the cast keeps the call site clean — the runtimes are compatible.
+// Wrap the project's puppeteer with the stealth plugin — it masks the most
+// obvious automation tells, which helps every portal load normally.
+// puppeteer-extra's bundled types lag the installed puppeteer; the cast keeps
+// the call site clean — the runtimes are compatible.
 const puppeteer = addExtra(puppeteerVanilla as unknown as Parameters<typeof addExtra>[0]);
 puppeteer.use(StealthPlugin());
-puppeteer.use(
-  RecaptchaPlugin.default({
-    visualFeedback: false,
-    // 'custom' lets the plugin's findRecaptchas/enterRecaptchaSolutions stay,
-    // while solveCaptchaTasks fetches the tokens from CapSolver / 2captcha.
-    provider: { id: 'hon-solver', fn: solveCaptchaTasks },
-  }),
-);
-
-/** A captcha the recaptcha plugin detected on a page (fields it may omit). */
-interface CaptchaInfo {
-  _vendor?: 'recaptcha' | 'hcaptcha';
-  id?: string;
-  sitekey?: string;
-  url?: string;
-  isEnterprise?: boolean;
-  action?: string;
-  s?: string;
-}
-
-/** A solution in the shape the recaptcha plugin expects back from a provider. */
-interface CaptchaSolution {
-  _vendor: 'recaptcha' | 'hcaptcha';
-  provider: string;
-  id?: string;
-  text?: string;
-  hasSolution?: boolean;
-  requestAt?: Date;
-  responseAt?: Date;
-  error?: string;
-}
-
-/**
- * POSTs JSON to an Anti-Captcha-style solver endpoint and returns the body.
- * A 40s abort timeout is essential — a stalled fetch has no timeout of its
- * own and would otherwise hang the whole sign-in indefinitely.
- */
-async function solverPost(apiBase: string, path: string, body: unknown): Promise<any> {
-  const res = await fetch(`${apiBase}${path}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(40_000),
-  });
-  return res.json();
-}
-
-/**
- * Solves one detected challenge. Routes by vendor: reCAPTCHA (Meitav) →
- * CapSolver; hCaptcha (Menora, behind Radware) → 2captcha, since CapSolver's
- * API does not support hCaptcha. Both services share the Anti-Captcha-style
- * createTask / getTaskResult shape. An error is captured on the solution so a
- * miss surfaces as a failed login downstream rather than throwing.
- */
-async function solveOneCaptcha(captcha: CaptchaInfo): Promise<CaptchaSolution> {
-  const isHcaptcha = captcha._vendor === 'hcaptcha';
-  const solution: CaptchaSolution = {
-    _vendor: captcha._vendor ?? 'recaptcha',
-    provider: isHcaptcha ? '2captcha' : 'capsolver',
-    id: captcha.id,
-    requestAt: new Date(),
-  };
-  try {
-    if (!captcha.sitekey || !captcha.url || !captcha.id) {
-      throw new Error('Missing captcha data (sitekey/url/id)');
-    }
-    // hCaptcha → 2captcha; reCAPTCHA → CapSolver.
-    const apiBase = isHcaptcha ? TWOCAPTCHA_API : CAPSOLVER_API;
-    const clientKey = isHcaptcha ? twoCaptchaKey : capSolverKey;
-    const serviceName = isHcaptcha ? '2captcha' : 'CapSolver';
-    if (!clientKey) {
-      throw new Error(
-        isHcaptcha
-          ? 'No 2captcha key set — needed for Menora\'s hCaptcha'
-          : 'No CapSolver key set — needed for reCAPTCHA',
-      );
-    }
-    let task: Record<string, unknown>;
-    if (isHcaptcha) {
-      task = {
-        type: 'HCaptchaTaskProxyless',
-        websiteURL: captcha.url,
-        websiteKey: captcha.sitekey,
-        userAgent: USER_AGENT,
-      };
-    } else {
-      task = {
-        type: captcha.isEnterprise
-          ? 'ReCaptchaV2EnterpriseTaskProxyLess'
-          : 'ReCaptchaV2TaskProxyLess',
-        websiteURL: captcha.url,
-        websiteKey: captcha.sitekey,
-      };
-      if (captcha.action) task.pageAction = captcha.action;
-      if (captcha.s) task.enterprisePayload = { s: captcha.s };
-    }
-    plog(`${serviceName} task`, task.type, 'sitekey=' + String(captcha.sitekey).slice(0, 14));
-    const created = await solverPost(apiBase, '/createTask', { clientKey, task });
-    if (created.errorId || !created.taskId) {
-      throw new Error(
-        `${serviceName} createTask: ${created.errorDescription ?? created.errorCode ?? 'unknown error'}`,
-      );
-    }
-    // Solves typically land in 10–30s; poll up to ~120s.
-    const deadline = Date.now() + 120_000;
-    let token = '';
-    while (Date.now() < deadline && !token) {
-      await delay(3000);
-      const result = await solverPost(apiBase, '/getTaskResult', {
-        clientKey,
-        taskId: created.taskId,
-      });
-      if (result.errorId) {
-        throw new Error(
-          `${serviceName} getTaskResult: ${result.errorDescription ?? result.errorCode ?? 'unknown error'}`,
-        );
-      }
-      if (result.status === 'ready') {
-        token = result.solution?.gRecaptchaResponse ?? result.solution?.token ?? '';
-        if (!token) throw new Error(`${serviceName} returned no token`);
-      }
-    }
-    if (!token) throw new Error(`${serviceName} timed out`);
-    solution.text = token;
-    solution.responseAt = new Date();
-    solution.hasSolution = true;
-    plog(`${serviceName} solved, token length`, token.length);
-  } catch (err) {
-    solution.error = err instanceof Error ? err.message : String(err);
-    plog('solve failed:', solution.error);
-  }
-  return solution;
-}
-
-/**
- * Custom solver provider for puppeteer-extra-plugin-recaptcha. The plugin
- * detects the challenges and hands them here; each is solved via solveOneCaptcha
- * (which routes by vendor) and the tokens are returned for the plugin to inject.
- */
-async function solveCaptchaTasks(
-  captchas: CaptchaInfo[] = [],
-): Promise<{ solutions: CaptchaSolution[]; error?: unknown }> {
-  const solutions = await Promise.all(captchas.map((c) => solveOneCaptcha(c)));
-  return { solutions, error: solutions.find((s) => s.error) };
-}
 
 // page.evaluate runs its callback in the browser, where these globals exist.
 declare const document: any;
@@ -243,10 +62,9 @@ interface PensionFund {
   productsUrl?: string;
   /** Visible button text to click first to reveal the login form (Harel). */
   openLoginLabel?: string;
-  /** When set, the portal is behind a CAPTCHA / bot wall. Hon always opens a
-   *  visible browser for it; with a CapSolver key it attempts the login
-   *  automatically, otherwise the user signs in by hand. Either way the
-   *  connector reads balances from the portal's API. */
+  /** When set, the portal is behind a CAPTCHA / bot wall. Hon opens a visible
+   *  Chromium window for it and the user signs in by hand; the connector then
+   *  reads balances from the portal's API and saves the session. */
   interactive?: boolean;
 }
 
@@ -291,9 +109,8 @@ const FUNDS: Record<string, PensionFund> = {
       'https://www.harel-group.co.il/personal-info/my-harel/Pages/client-view.aspx',
   },
   // Meitav and Menora sit behind CAPTCHA bot-walls (reCAPTCHA Enterprise /
-  // Radware + hCaptcha). With a CapSolver key set Hon attempts an automated
-  // login and the solver plugin clears the CAPTCHA; the submitLabels below are
-  // only used on that automated path. Without a key they are interactive only.
+  // Radware + hCaptcha). They run in a visible Chromium window the user signs
+  // in to; Hon pre-fills the ID/phone and reads the balances afterwards.
   meitav: {
     id: 'meitav',
     name: 'Meitav (מיטב)',
@@ -321,10 +138,8 @@ const FUNDS: Record<string, PensionFund> = {
 };
 
 /**
- * Whether a fund opens a visible browser the user may need to act in. A
- * CAPTCHA-walled fund always does: even with a solver key set, the automated
- * attempt runs in a visible window so it can fall back to a hand sign-in if
- * the bot wall blocks it.
+ * Whether a fund opens a visible browser window the user signs in to — true
+ * for the CAPTCHA-walled funds (Meitav/Menora).
  */
 function isInteractive(fund: PensionFund): boolean {
   return Boolean(fund.interactive);
@@ -391,32 +206,6 @@ function plog(...parts: unknown[]): void {
   console.error('[pension]', ...parts);
 }
 
-/**
- * Best-effort CAPTCHA solve via the CapSolver-backed plugin. A no-op when no
- * key is configured or the page carries no challenge. Returns how many
- * challenges were found on the page and how many were actually solved, so the
- * caller can tell a "solver can't handle this" stall apart from progress.
- */
-async function solveCaptchas(page: Page): Promise<{ found: number; solved: number }> {
-  if (!solverEnabled) return { found: 0, solved: 0 };
-  try {
-    const result = (await (
-      page as unknown as { solveRecaptchas: () => Promise<any> }
-    ).solveRecaptchas()) as {
-      captchas?: unknown[];
-      solved?: { isSolved?: boolean }[];
-      error?: unknown;
-    };
-    const found = result?.captchas?.length ?? 0;
-    const solved = (result?.solved ?? []).filter((s) => s?.isSolved).length;
-    plog('solveCaptchas:', `found=${found}`, `solved=${solved}`, result?.error ? 'with error' : 'ok');
-    return { found, solved };
-  } catch (err) {
-    plog('solveCaptchas threw:', err instanceof Error ? err.message : String(err));
-    return { found: 0, solved: 0 };
-  }
-}
-
 /** Derives a debug-file path next to the run's failure screenshot. */
 function debugSibling(screenshotPath: string | undefined, suffix: string): string | undefined {
   return screenshotPath ? screenshotPath.replace(/\.png$/i, suffix) : undefined;
@@ -427,8 +216,7 @@ function debugSibling(screenshotPath: string | undefined, suffix: string): strin
  * Hebrew Accept-Language, the tsx `__name` shim, and a JSON-response collector
  * feeding `jsonResponses` (the dashboard's real balance data, kept for debug).
  * A headless launch sizes the viewport; a visible one lets the OS size the
- * window. CAPTCHA-walled funds call this more than once — headless for the
- * automated attempt, then visible if that attempt is blocked.
+ * window. CAPTCHA-walled funds launch visible so the user can sign in.
  */
 async function launchPensionBrowser(
   headless: boolean,
@@ -486,17 +274,10 @@ export async function runPensionScrape(
 ): Promise<ScrapeOutcome> {
   const fund = FUNDS[companyId];
   if (!fund) return fail('CONFIG', `Unknown pension fund: ${companyId}`);
-  // CAPTCHA-walled funds (Meitav/Menora) run in a visible window; with a
-  // CapSolver key set, Hon first attempts the login automatically.
+  // CAPTCHA-walled funds (Meitav/Menora) run in a visible window the user
+  // signs in to; the rest are driven headless by Hon.
   const captchaWalled = Boolean(fund.interactive);
-  const attemptAutomated = captchaWalled && solverEnabled;
-  plog(
-    `start ${companyId}:`,
-    `captchaWalled=${captchaWalled}`,
-    `solverEnabled=${solverEnabled}`,
-    `hasKey=${capSolverKey.length > 0}`,
-    `attemptAutomated=${attemptAutomated}`,
-  );
+  plog(`start ${companyId}: captchaWalled=${captchaWalled}`);
 
   // A non-CAPTCHA fund is driven entirely by Hon, so its credentials are
   // required up front. A CAPTCHA-walled fund can always fall back to a hand
@@ -518,12 +299,9 @@ export async function runPensionScrape(
   let page!: Page;
   try {
     onProgress?.('Starting the browser…');
-    // CAPTCHA-walled funds run the automated attempt headless (in the
-    // background) and relaunch a visible window only if it is blocked; other
-    // funds follow HEADLESS. When the solver is off, a CAPTCHA-walled fund
-    // starts visible straight away for the hand sign-in.
-    const startHeadless = captchaWalled ? attemptAutomated : HEADLESS;
-    ({ browser, page } = await launchPensionBrowser(startHeadless, jsonResponses));
+    // CAPTCHA-walled funds open a visible Chromium window the user signs in
+    // to; the rest run headless (unless HON_PENSION_HEADFUL forces a window).
+    ({ browser, page } = await launchPensionBrowser(!captchaWalled && HEADLESS, jsonResponses));
 
     // Replay a saved session's cookies before any navigation, so the portal
     // can recognise the session and skip the sign-in.
@@ -568,13 +346,13 @@ export async function runPensionScrape(
       if (!captchaWalled) throw err;
     }
 
-    // CAPTCHA-walled funds (Meitav/Menora). With a solver key, Hon first
-    // attempts the whole login headless, in the background; if that is blocked
-    // it relaunches a visible window and the user finishes the sign-in by
-    // hand — same run, no dead-end error.
+    // CAPTCHA-walled funds (Meitav/Menora). A visible Chromium window is open:
+    // a restored session may already be signed in; otherwise the user signs in
+    // by hand. Hon pre-fills the ID/phone, polls the balance API, and on
+    // success saves the session so the next sync resumes already logged in.
     if (captchaWalled) {
-      // A saved session may still authenticate the balance API — try a read
-      // before touching the CAPTCHA login at all.
+      // A restored session may still authenticate the balance API — try a
+      // read before asking the user to sign in at all.
       if (session?.cookies?.length) {
         onProgress?.('Resuming your saved session…');
         const resumed = await readBalances(companyId, page, screenshotPath).catch(
@@ -588,57 +366,15 @@ export async function runPensionScrape(
           return { success: true, accounts: resumed };
         }
       }
-      if (attemptAutomated) {
-        onProgress?.('Attempting automated sign-in in the background…');
-        await runCaptchaWalledLogin(page, fund, credentials, onProgress, onOtpNeeded, false).catch(
-          (e) => plog('runCaptchaWalledLogin (headless) threw:', e instanceof Error ? e.stack : e),
-        );
-        // If the automated attempt authenticated the session, the balance API
-        // already answers — return straight away, no window ever shown.
-        const auto = await readBalances(companyId, page, screenshotPath).catch(() => []);
-        if (auto.length > 0) {
-          await persistSession(browser, session);
-          await saveDebug(page, screenshotPath, htmlPath, dataPath, jsonResponses).catch(
-            () => {},
-          );
-          return { success: true, accounts: auto };
-        }
-        // The automated attempt was blocked — swap the hidden browser for a
-        // visible one so the user can finish the sign-in by hand.
-        onProgress?.(
-          `Automatic sign-in to ${fund.name} was blocked — opening a window ` +
-            'so you can finish the sign-in by hand.',
-        );
-        await browser?.close().catch(() => {});
-        ({ browser, page } = await launchPensionBrowser(false, jsonResponses));
-        await restoreSession(browser, session);
-        try {
-          await page.goto(fund.loginUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 });
-        } catch {
-          // the user can reload the visible window themselves if needed
-        }
-      }
-
-      // In the visible window, with the solver on, drive the login again —
-      // a visible browser clears bot detection far better than a headless
-      // one, so the same fill + submit + OTP often gets through here. The
-      // user only steps in if a visible CAPTCHA appears. Without the solver,
-      // Hon just fills the form and the user does the submit + OTP by hand.
-      // Both are fire-and-forget so the balance poll below runs concurrently
-      // and also catches a sign-in the user completes manually.
-      if (attemptAutomated) {
-        onProgress?.(`Finishing the ${fund.name} sign-in in the open window…`);
-        void runCaptchaWalledLogin(page, fund, credentials, onProgress, onOtpNeeded, true).catch(
-          (e) => plog('runCaptchaWalledLogin (visible) threw:', e instanceof Error ? e.stack : e),
-        );
-      } else {
-        onProgress?.(
-          `A browser window is open — clear the security check on ${fund.name}. ` +
-            'Hon fills in your ID and phone; you then submit and enter the SMS code.',
-        );
-        void prefillCredentials(page, fund, credentials).catch(() => {});
-      }
-      onProgress?.('Waiting for the sign-in to finish…');
+      // Not signed in — the user does it themselves in the visible window.
+      // Hon pre-fills the ID and phone (fire-and-forget, so the balance poll
+      // runs alongside) and waits for the sign-in to complete.
+      onProgress?.(
+        `A Chromium window is open — sign in to ${fund.name} there. Hon fills ` +
+          'your ID and phone; you clear the security check and enter the SMS code.',
+      );
+      void prefillCredentials(page, fund, credentials).catch(() => {});
+      onProgress?.('Waiting for you to finish signing in…');
       const deadline = Date.now() + INTERACTIVE_LOGIN_TIMEOUT_MS;
       let accounts: NormalizedAccount[] = [];
       while (Date.now() < deadline) {
@@ -666,8 +402,6 @@ export async function runPensionScrape(
     }
 
     onProgress?.('Logging in…');
-    // Clear any CAPTCHA rendered on the login page before touching the form.
-    await solveCaptchas(page);
     if (!(await fillAndSubmitLogin(page, fund, credentials))) {
       await saveDebug(page, screenshotPath, htmlPath, dataPath, jsonResponses);
       return fail(
@@ -681,8 +415,6 @@ export async function runPensionScrape(
     // the live DOM for the code boxes, surviving the headless re-renders that
     // made an evaluate-based page check unreliable.
     onProgress?.('Waiting for the verification code…');
-    // A fresh challenge can appear on submit — solve it before the OTP wait.
-    await solveCaptchas(page);
     const otpAppeared = await page
       .waitForSelector(OTP_FIELD_SELECTOR, { timeout: 90_000 })
       .then(() => true)
@@ -944,131 +676,11 @@ async function fillAndSubmitLogin(
       }, fund.termsCheckboxSelector)
       .catch(() => {});
   }
-  // Solve a CAPTCHA that gates the submit button (Meitav/Menora) before submit.
-  await solveCaptchas(page);
   await delay(800); // let Angular validate the form and enable the button
   if (!(await clickByText(page, fund.submitLabels))) {
     await page.keyboard.press('Enter');
   }
   return true;
-}
-
-/**
- * Clears a bot wall standing in front of a portal's own login form. Menora
- * routes an automated browser through a Radware (perfdrive.com) interstitial
- * that serves an hCaptcha — and it briefly shows a *skeleton* login form on
- * its own domain before bouncing the page to that challenge, so the ID field
- * being momentarily present is not enough. This loops: while the page is on
- * the bot wall (or off the portal domain) it runs the solver and waits for a
- * redirect; it returns true only once the ID field is present on the portal's
- * own domain and *stays* there. Up to ~3 minutes.
- */
-async function passBotWall(
-  page: Page,
-  fund: PensionFund,
-  onProgress: ((message: string) => void) | undefined,
-  humanCanHelp: boolean,
-): Promise<boolean> {
-  if (!fund.idSelector) return false;
-  const deadline = Date.now() + 180_000;
-  let round = 0;
-  let solverMisses = 0;
-  while (Date.now() < deadline) {
-    const url = page.url();
-    const onPortal = url.includes(fund.domain);
-    if (onPortal) {
-      const present = await page.$(fund.idSelector).catch(() => null);
-      if (present) {
-        // Confirm the form is stable — not the skeleton Menora shows for a
-        // moment before Radware bounces the page to perfdrive.com.
-        await delay(3500);
-        const stable =
-          page.url().includes(fund.domain) &&
-          Boolean(await page.$(fund.idSelector).catch(() => null));
-        if (stable) {
-          plog('passBotWall: stable login form at', page.url());
-          return true;
-        }
-      }
-    }
-    round += 1;
-    plog(
-      `passBotWall round ${round}:`,
-      onPortal ? 'portal, no stable form' : 'bot wall',
-      url.slice(0, 75),
-    );
-    onProgress?.(
-      round === 1
-        ? 'Solving the security check automatically — this can take a minute…'
-        : 'Still clearing the security check…',
-    );
-    const { found, solved } = await solveCaptchas(page);
-    if (found > 0 && solved === 0) {
-      solverMisses += 1;
-      // No human watching and the solver cannot clear this CAPTCHA (e.g.
-      // CapSolver does not support hCaptcha) — stop fast so the run can fall
-      // back to a visible window rather than spinning for three minutes.
-      if (!humanCanHelp && solverMisses >= 3) {
-        plog('passBotWall: solver cannot clear this CAPTCHA — bailing for visible fallback');
-        return false;
-      }
-    } else {
-      solverMisses = 0;
-    }
-    await delay(5000); // let a solved challenge redirect through to the portal
-  }
-  plog('passBotWall: gave up after', round, 'rounds, url=', page.url());
-  return false;
-}
-
-/**
- * Best-effort fully automated login for a CAPTCHA-walled fund (Meitav/Menora),
- * used when a CapSolver key is set: clears the bot wall, fills and submits the
- * form, relays the SMS code through the OTP callback, and enters it. Returns
- * quietly on any miss — the caller then polls for balances and, failing that,
- * falls back to the user finishing the sign-in by hand.
- */
-async function runCaptchaWalledLogin(
-  page: Page,
-  fund: PensionFund,
-  credentials: Record<string, string>,
-  onProgress: ((message: string) => void) | undefined,
-  onOtpNeeded: OtpCallback,
-  humanCanHelp: boolean,
-): Promise<void> {
-  if (!(await passBotWall(page, fund, onProgress, humanCanHelp))) {
-    plog('runCaptchaWalledLogin: bot wall not cleared');
-    return;
-  }
-  onProgress?.('Signing in automatically…');
-  if (!(await fillAndSubmitLogin(page, fund, credentials))) {
-    plog('runCaptchaWalledLogin: could not fill/submit the login form');
-    return;
-  }
-  plog('runCaptchaWalledLogin: form submitted, waiting for OTP step');
-  // A fresh challenge can appear on submit — solve it before the OTP wait.
-  await solveCaptchas(page);
-  // The headless attempt gives up the OTP wait fast — if the portal's bot
-  // check rejected the submit, no SMS is coming and the run should fall back
-  // to a visible window quickly rather than sitting here. The visible attempt
-  // waits longer, since a real SMS to the user can genuinely take a minute.
-  const otpTimeout = humanCanHelp ? 120_000 : 45_000;
-  onProgress?.('Login submitted — waiting for the SMS verification step…');
-  const otpAppeared = await page
-    .waitForSelector(OTP_FIELD_SELECTOR, { timeout: otpTimeout })
-    .then(() => true)
-    .catch(() => false);
-  if (!otpAppeared) {
-    plog('runCaptchaWalledLogin: OTP step never appeared');
-    return;
-  }
-  plog('runCaptchaWalledLogin: OTP step reached');
-  onProgress?.('Enter the SMS verification code Hon just triggered…');
-  const code = await onOtpNeeded();
-  onProgress?.('Submitting the verification code…');
-  await enterOtpCode(page, (code ?? '').trim());
-  // Let the portal finish authenticating before the caller reads balances.
-  await delay(7000);
 }
 
 /**

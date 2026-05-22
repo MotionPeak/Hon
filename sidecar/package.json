@@ -21,7 +21,6 @@
     "node-llama-cpp": "^3.18.1",
     "puppeteer": "^24.43.1",
     "puppeteer-extra": "^3.3.6",
-    "puppeteer-extra-plugin-recaptcha": "^3.6.8",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
     "snaptrade-typescript-sdk": "^9.0.200"
   },
