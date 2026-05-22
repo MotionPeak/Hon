@@ -17,6 +17,7 @@
 // resumes already logged in — no sign-in at all — until they expire.
 
 import { writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import puppeteerVanilla, { type Browser, type Frame, type Page } from 'puppeteer';
 import { addExtra } from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
@@ -217,21 +218,42 @@ function debugSibling(screenshotPath: string | undefined, suffix: string): strin
  * feeding `jsonResponses` (the dashboard's real balance data, kept for debug).
  * A headless launch sizes the viewport; a visible one lets the OS size the
  * window. CAPTCHA-walled funds launch visible so the user can sign in.
+ *
+ * `profileDir` opts into a persistent Chrome profile: the real installed
+ * Google Chrome (less bot-detectable than the bundled Chromium) reusing a
+ * dedicated on-disk profile, so cookies and reCAPTCHA reputation carry across
+ * runs — the next sync resumes already signed in. Falls back to the bundled
+ * Chromium when Chrome is not installed.
  */
 async function launchPensionBrowser(
   headless: boolean,
   jsonResponses: { url: string; body: string }[],
+  profileDir?: string,
 ): Promise<{ browser: Browser; page: Page }> {
-  const browser = await puppeteer.launch({
+  const launchOptions = {
     headless,
     defaultViewport: headless ? undefined : null,
+    userDataDir: profileDir,
     args: [
       ...SANDBOX_ARGS,
       '--disable-blink-features=AutomationControlled',
       '--lang=he-IL',
       ...(headless ? [] : ['--window-size=1280,960']),
     ],
-  });
+  };
+  let browser: Browser;
+  try {
+    // Prefer the real installed Chrome for a persistent profile.
+    browser = await puppeteer.launch(
+      profileDir ? { ...launchOptions, channel: 'chrome' } : launchOptions,
+    );
+  } catch (err) {
+    if (!profileDir) throw err;
+    // Chrome is not installed — fall back to the bundled Chromium, still with
+    // the persistent profile so cookies survive between runs.
+    plog('launchPensionBrowser: real Chrome unavailable, using bundled Chromium');
+    browser = await puppeteer.launch(launchOptions);
+  }
   const page = await browser.newPage();
   await page.setUserAgent(USER_AGENT);
   if (headless) await page.setViewport({ width: 1280, height: 900 });
@@ -299,9 +321,18 @@ export async function runPensionScrape(
   let page!: Page;
   try {
     onProgress?.('Starting the browser…');
-    // CAPTCHA-walled funds open a visible Chromium window the user signs in
-    // to; the rest run headless (unless HON_PENSION_HEADFUL forces a window).
-    ({ browser, page } = await launchPensionBrowser(!captchaWalled && HEADLESS, jsonResponses));
+    // CAPTCHA-walled funds open a *visible* window the user signs in to, using
+    // a persistent real-Chrome profile so the sign-in (and its reCAPTCHA
+    // reputation) sticks across runs. The rest run headless.
+    const profileDir =
+      captchaWalled && screenshotPath
+        ? join(dirname(screenshotPath), '..', 'browser-profiles', companyId)
+        : undefined;
+    ({ browser, page } = await launchPensionBrowser(
+      !captchaWalled && HEADLESS,
+      jsonResponses,
+      profileDir,
+    ));
 
     // Replay a saved session's cookies before any navigation, so the portal
     // can recognise the session and skip the sign-in.
