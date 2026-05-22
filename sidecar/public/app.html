@@ -638,6 +638,8 @@
   .pick-row { display: flex; align-items: center; gap: 11px; padding: 9px;
     border-radius: 10px; cursor: pointer; }
   .pick-row:hover { background: var(--card-hi); }
+  .pick-row .pr-sub { color: var(--muted); font-size: 11px; font-weight: 500;
+    display: block; margin-top: 2px; }
   .back-btn { background: none; border: none; color: var(--muted); cursor: pointer;
     font-size: 13px; padding: 4px 0; margin-bottom: 6px; }
   .back-btn:hover { color: var(--text); }
@@ -3102,10 +3104,12 @@ function addConnectionModal() {
       modal.innerHTML = "<h2>Pension funds</h2>"
         + '<button class="back-btn" data-x="back">‹ All categories</button>'
         + '<p class="hint">Connect a fund to pull its balance automatically — or '
-        + "enter a pension by hand.</p>"
+        + "add a custom account and enter the balance yourself.</p>"
         + '<div class="pick-list">' + list
         + '<div class="pick-row" data-manual="1"><span class="logo">✍️</span>'
-        + "<div>Enter a pension manually</div></div></div>"
+        + "<div>Custom pension account"
+        + '<span class="pr-sub">Type the provider and balance yourself — for any '
+        + "fund Hon can't sync</span></div></div></div>"
         + '<div class="modal-actions"><button data-x="cancel">Cancel</button></div>';
       modal.querySelectorAll(".pick-row").forEach((el) => {
         el.addEventListener("click", () => {
@@ -3399,7 +3403,8 @@ function addConnectionModal() {
     const renderAssetStep = () => {
       const isPension = category === "pension";
       modal.innerHTML = "<h2>Add " + (isPension ? "a pension" : "an asset") + "</h2>"
-        + '<button class="back-btn" data-x="back">‹ All options</button>'
+        + '<button class="back-btn" data-x="back">‹ '
+        + (isPension ? "Pension funds" : "All options") + "</button>"
         + '<p class="hint">' + (isPension
             ? "Track a retirement fund — the amount accumulated counts toward "
               + "your net worth."
@@ -3413,7 +3418,7 @@ function addConnectionModal() {
               + '<option value="other">Other</option></select></div>')
         + '<div class="field"><label>Name</label>'
         + '<input id="as-name" type="text" placeholder="'
-        + (isPension ? "Menora, Migdal, Clal…" : "Apartment, emergency fund…")
+        + (isPension ? "Altshuler, Meitav, Menora…" : "Apartment, emergency fund…")
         + '" autocomplete="off"></div>'
         + '<div class="grid2">'
         + '<div class="field"><label>'
@@ -3462,7 +3467,10 @@ function addConnectionModal() {
         }
       });
       modal.querySelector('[data-x="back"]')
-        .addEventListener("click", () => { category = ""; render2(); });
+        .addEventListener("click", () => {
+          if (isPension) return renderPensionStep();
+          category = ""; render2();
+        });
       bindCancel();
     };
 
