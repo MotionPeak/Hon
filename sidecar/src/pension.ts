@@ -480,7 +480,8 @@ export async function runPensionScrape(
         // The automated attempt did not complete — reset to a clean login
         // page and fall through to the interactive poll loop below.
         onProgress?.(
-          'Automated sign-in did not go through — please finish in the browser window.',
+          `Automatic sign-in to ${fund.name} was blocked — falling back: ` +
+            'please finish the sign-in in the browser window.',
         );
         try {
           await page.goto(fund.loginUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 });
@@ -791,8 +792,44 @@ async function fillAndSubmitLogin(
 }
 
 /**
+ * Clears a bot wall standing in front of a portal's own login form. Menora
+ * routes an automated browser through a Radware (perfdrive.com) interstitial
+ * that serves an hCaptcha *before* the portal login is reached; Meitav puts a
+ * reCAPTCHA on the login form itself. This repeatedly runs the solver and
+ * waits for the portal's ID field to appear, for up to ~2.5 minutes. Returns
+ * true once the login form is on the page.
+ */
+async function passBotWall(
+  page: Page,
+  fund: PensionFund,
+  onProgress: ((message: string) => void) | undefined,
+): Promise<boolean> {
+  if (!fund.idSelector) return false;
+  const deadline = Date.now() + 150_000;
+  let round = 0;
+  while (Date.now() < deadline) {
+    // The login form is already here (Meitav, or Radware already cleared).
+    if (await page.$(fund.idSelector)) return true;
+    round += 1;
+    onProgress?.(
+      round === 1
+        ? 'Solving the security check automatically — this can take a minute…'
+        : 'Still clearing the security check…',
+    );
+    await solveCaptchas(page);
+    // Give a solved challenge time to redirect through to the real login.
+    const appeared = await page
+      .waitForSelector(fund.idSelector, { timeout: 15_000 })
+      .then(() => true)
+      .catch(() => false);
+    if (appeared) return true;
+  }
+  return false;
+}
+
+/**
  * Best-effort fully automated login for a CAPTCHA-walled fund (Meitav/Menora),
- * used when a CapSolver key is set: solves the CAPTCHA, fills and submits the
+ * used when a CapSolver key is set: clears the bot wall, fills and submits the
  * form, relays the SMS code through the OTP callback, and enters it. Returns
  * quietly on any miss — the caller then polls for balances and, failing that,
  * falls back to the user finishing the sign-in by hand.
@@ -804,7 +841,8 @@ async function runCaptchaWalledLogin(
   onProgress: ((message: string) => void) | undefined,
   onOtpNeeded: OtpCallback,
 ): Promise<void> {
-  await solveCaptchas(page);
+  if (!(await passBotWall(page, fund, onProgress))) return;
+  onProgress?.('Signing in automatically…');
   if (!(await fillAndSubmitLogin(page, fund, credentials))) return;
   // A fresh challenge can appear on submit — solve it before the OTP wait.
   await solveCaptchas(page);
@@ -813,7 +851,7 @@ async function runCaptchaWalledLogin(
     .then(() => true)
     .catch(() => false);
   if (!otpAppeared) return;
-  onProgress?.('Enter the SMS verification code…');
+  onProgress?.('Enter the SMS verification code Hon just triggered…');
   const code = await onOtpNeeded();
   onProgress?.('Submitting the verification code…');
   await enterOtpCode(page, (code ?? '').trim());
