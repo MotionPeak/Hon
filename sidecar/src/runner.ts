@@ -108,18 +108,21 @@ export class ScrapeRunner {
       } else if (isPensionCompany(args.companyId)) {
         // Pension funds have no scraper library, so a custom Puppeteer routine
         // drives the portal login (and any SMS one-time code) itself. Apply
-        // the user's CapSolver settings first — the API key is a vault secret.
-        let solverKey = '';
+        // the user's solver settings first — both API keys are vault secrets.
+        let capSolverKey = '';
+        let twoCaptchaKey = '';
         try {
           if (this.vault.unlocked) {
-            solverKey = this.vault.loadSecret('capsolver_key') ?? '';
+            capSolverKey = this.vault.loadSecret('capsolver_key') ?? '';
+            twoCaptchaKey = this.vault.loadSecret('twocaptcha_key') ?? '';
           }
         } catch {
-          solverKey = '';
+          /* a missing or unreadable secret leaves that key empty */
         }
         setPensionSolverConfig({
           enabled: this.repo.getMeta('capsolver_enabled') === '1',
-          apiKey: solverKey,
+          capSolverKey,
+          twoCaptchaKey,
         });
         outcome = await runPensionScrape(
           args.companyId,

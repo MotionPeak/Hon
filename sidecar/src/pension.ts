@@ -32,33 +32,45 @@ import RecaptchaPlugin from 'puppeteer-extra-plugin-recaptcha';
 import type { CompanyInfo, NormalizedAccount, ScrapeOutcome } from './scrapers.js';
 import type { OtpCallback } from './otp.js';
 
-// CapSolver config for the Meitav/Menora automated-login attempt. These are
-// set per scrape by runPensionScrape from the user's stored settings; the
-// HON_CAPSOLVER_KEY env var seeds a default, mainly for development.
+// Solver config for the Meitav/Menora automated-login attempt, set per scrape
+// by runPensionScrape from the user's stored settings. Two services are used,
+// because no single one covers both walls: CapSolver solves the reCAPTCHA on
+// Meitav, but its API rejects hCaptcha — so Menora's hCaptcha goes to 2captcha.
+// The HON_CAPSOLVER_KEY / HON_2CAPTCHA_KEY env vars seed defaults for dev.
 let capSolverKey = (process.env.HON_CAPSOLVER_KEY ?? '').trim();
-let solverEnabled = capSolverKey.length > 0;
-const CAPSOLVER_API = 'https://api.capsolver.com';
+let twoCaptchaKey = (process.env.HON_2CAPTCHA_KEY ?? '').trim();
+let solverEnabled = capSolverKey.length > 0 || twoCaptchaKey.length > 0;
 
-/** Applies the user's CapSolver settings for the run about to start. */
-export function setPensionSolverConfig(config: { enabled: boolean; apiKey: string }): void {
-  capSolverKey = (config.apiKey ?? '').trim() || (process.env.HON_CAPSOLVER_KEY ?? '').trim();
-  solverEnabled = Boolean(config.enabled) && capSolverKey.length > 0;
+const CAPSOLVER_API = 'https://api.capsolver.com';
+const TWOCAPTCHA_API = 'https://api.2captcha.com';
+
+/** Applies the user's solver settings for the run about to start. */
+export function setPensionSolverConfig(config: {
+  enabled: boolean;
+  capSolverKey: string;
+  twoCaptchaKey: string;
+}): void {
+  capSolverKey =
+    (config.capSolverKey ?? '').trim() || (process.env.HON_CAPSOLVER_KEY ?? '').trim();
+  twoCaptchaKey =
+    (config.twoCaptchaKey ?? '').trim() || (process.env.HON_2CAPTCHA_KEY ?? '').trim();
+  solverEnabled =
+    Boolean(config.enabled) && (capSolverKey.length > 0 || twoCaptchaKey.length > 0);
 }
 
 // Wrap the project's puppeteer with stealth (masks automation tells, helps all
-// funds) and the CAPTCHA solver plugin pointed at CapSolver via a custom
-// provider. The plugin is always registered — solveCaptchas() is a no-op
-// unless the user enabled the solver and a key is set. puppeteer-extra's
-// bundled types lag the installed puppeteer; the cast keeps the call site
-// clean — the runtimes are compatible.
+// funds) and the CAPTCHA solver plugin with a custom provider. The plugin is
+// always registered — solveCaptchas() is a no-op unless the user enabled the
+// solver and a key is set. puppeteer-extra's bundled types lag the installed
+// puppeteer; the cast keeps the call site clean — the runtimes are compatible.
 const puppeteer = addExtra(puppeteerVanilla as unknown as Parameters<typeof addExtra>[0]);
 puppeteer.use(StealthPlugin());
 puppeteer.use(
   RecaptchaPlugin.default({
     visualFeedback: false,
     // 'custom' lets the plugin's findRecaptchas/enterRecaptchaSolutions stay,
-    // while solveWithCapSolver does the actual token fetch from CapSolver.
-    provider: { id: 'capsolver', fn: solveWithCapSolver },
+    // while solveCaptchaTasks fetches the tokens from CapSolver / 2captcha.
+    provider: { id: 'hon-solver', fn: solveCaptchaTasks },
   }),
 );
 
@@ -85,9 +97,9 @@ interface CaptchaSolution {
   error?: string;
 }
 
-/** POSTs JSON to a CapSolver endpoint and returns the parsed body. */
-async function capSolverPost(path: string, body: unknown): Promise<any> {
-  const res = await fetch(`${CAPSOLVER_API}${path}`, {
+/** POSTs JSON to an Anti-Captcha-style solver endpoint and returns the body. */
+async function solverPost(apiBase: string, path: string, body: unknown): Promise<any> {
+  const res = await fetch(`${apiBase}${path}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
@@ -96,88 +108,101 @@ async function capSolverPost(path: string, body: unknown): Promise<any> {
 }
 
 /**
- * Custom solver provider for puppeteer-extra-plugin-recaptcha, backed by
- * CapSolver. The plugin detects the challenge (reCAPTCHA v2 / Enterprise or
- * hCaptcha) and hands the sitekey + page URL here; this submits a proxyless
- * task to CapSolver, polls for the token, and returns it for the plugin to
- * inject. Errors are captured per-captcha so a miss surfaces as a failed login
- * downstream rather than throwing.
+ * Solves one detected challenge. Routes by vendor: reCAPTCHA (Meitav) →
+ * CapSolver; hCaptcha (Menora, behind Radware) → 2captcha, since CapSolver's
+ * API does not support hCaptcha. Both services share the Anti-Captcha-style
+ * createTask / getTaskResult shape. An error is captured on the solution so a
+ * miss surfaces as a failed login downstream rather than throwing.
  */
-async function solveWithCapSolver(
+async function solveOneCaptcha(captcha: CaptchaInfo): Promise<CaptchaSolution> {
+  const isHcaptcha = captcha._vendor === 'hcaptcha';
+  const solution: CaptchaSolution = {
+    _vendor: captcha._vendor ?? 'recaptcha',
+    provider: isHcaptcha ? '2captcha' : 'capsolver',
+    id: captcha.id,
+    requestAt: new Date(),
+  };
+  try {
+    if (!captcha.sitekey || !captcha.url || !captcha.id) {
+      throw new Error('Missing captcha data (sitekey/url/id)');
+    }
+    // hCaptcha → 2captcha; reCAPTCHA → CapSolver.
+    const apiBase = isHcaptcha ? TWOCAPTCHA_API : CAPSOLVER_API;
+    const clientKey = isHcaptcha ? twoCaptchaKey : capSolverKey;
+    const serviceName = isHcaptcha ? '2captcha' : 'CapSolver';
+    if (!clientKey) {
+      throw new Error(
+        isHcaptcha
+          ? 'No 2captcha key set — needed for Menora\'s hCaptcha'
+          : 'No CapSolver key set — needed for reCAPTCHA',
+      );
+    }
+    let task: Record<string, unknown>;
+    if (isHcaptcha) {
+      task = {
+        type: 'HCaptchaTaskProxyless',
+        websiteURL: captcha.url,
+        websiteKey: captcha.sitekey,
+        userAgent: USER_AGENT,
+      };
+    } else {
+      task = {
+        type: captcha.isEnterprise
+          ? 'ReCaptchaV2EnterpriseTaskProxyLess'
+          : 'ReCaptchaV2TaskProxyLess',
+        websiteURL: captcha.url,
+        websiteKey: captcha.sitekey,
+      };
+      if (captcha.action) task.pageAction = captcha.action;
+      if (captcha.s) task.enterprisePayload = { s: captcha.s };
+    }
+    plog(`${serviceName} task`, task.type, 'sitekey=' + String(captcha.sitekey).slice(0, 14));
+    const created = await solverPost(apiBase, '/createTask', { clientKey, task });
+    if (created.errorId || !created.taskId) {
+      throw new Error(
+        `${serviceName} createTask: ${created.errorDescription ?? created.errorCode ?? 'unknown error'}`,
+      );
+    }
+    // Solves typically land in 10–30s; poll up to ~120s.
+    const deadline = Date.now() + 120_000;
+    let token = '';
+    while (Date.now() < deadline && !token) {
+      await delay(3000);
+      const result = await solverPost(apiBase, '/getTaskResult', {
+        clientKey,
+        taskId: created.taskId,
+      });
+      if (result.errorId) {
+        throw new Error(
+          `${serviceName} getTaskResult: ${result.errorDescription ?? result.errorCode ?? 'unknown error'}`,
+        );
+      }
+      if (result.status === 'ready') {
+        token = result.solution?.gRecaptchaResponse ?? result.solution?.token ?? '';
+        if (!token) throw new Error(`${serviceName} returned no token`);
+      }
+    }
+    if (!token) throw new Error(`${serviceName} timed out`);
+    solution.text = token;
+    solution.responseAt = new Date();
+    solution.hasSolution = true;
+    plog(`${serviceName} solved, token length`, token.length);
+  } catch (err) {
+    solution.error = err instanceof Error ? err.message : String(err);
+    plog('solve failed:', solution.error);
+  }
+  return solution;
+}
+
+/**
+ * Custom solver provider for puppeteer-extra-plugin-recaptcha. The plugin
+ * detects the challenges and hands them here; each is solved via solveOneCaptcha
+ * (which routes by vendor) and the tokens are returned for the plugin to inject.
+ */
+async function solveCaptchaTasks(
   captchas: CaptchaInfo[] = [],
 ): Promise<{ solutions: CaptchaSolution[]; error?: unknown }> {
-  const solutions = await Promise.all(
-    captchas.map(async (captcha): Promise<CaptchaSolution> => {
-      const solution: CaptchaSolution = {
-        _vendor: captcha._vendor ?? 'recaptcha',
-        provider: 'capsolver',
-        id: captcha.id,
-        requestAt: new Date(),
-      };
-      try {
-        if (!captcha.sitekey || !captcha.url || !captcha.id) {
-          throw new Error('Missing captcha data (sitekey/url/id)');
-        }
-        let task: Record<string, unknown>;
-        if (captcha._vendor === 'hcaptcha') {
-          task = {
-            type: 'HCaptchaTaskProxyLess',
-            websiteURL: captcha.url,
-            websiteKey: captcha.sitekey,
-            userAgent: USER_AGENT,
-          };
-        } else {
-          task = {
-            type: captcha.isEnterprise
-              ? 'ReCaptchaV2EnterpriseTaskProxyLess'
-              : 'ReCaptchaV2TaskProxyLess',
-            websiteURL: captcha.url,
-            websiteKey: captcha.sitekey,
-          };
-          if (captcha.action) task.pageAction = captcha.action;
-          if (captcha.s) task.enterprisePayload = { s: captcha.s };
-        }
-        plog('CapSolver task', task.type, 'sitekey=' + String(captcha.sitekey).slice(0, 14));
-        const created = await capSolverPost('/createTask', {
-          clientKey: capSolverKey,
-          task,
-        });
-        if (created.errorId || !created.taskId) {
-          throw new Error(
-            `CapSolver createTask: ${created.errorDescription ?? created.errorCode ?? 'unknown error'}`,
-          );
-        }
-        // CapSolver solves typically land in 10–30s; poll up to ~120s.
-        const deadline = Date.now() + 120_000;
-        let token = '';
-        while (Date.now() < deadline && !token) {
-          await delay(3000);
-          const result = await capSolverPost('/getTaskResult', {
-            clientKey: capSolverKey,
-            taskId: created.taskId,
-          });
-          if (result.errorId) {
-            throw new Error(
-              `CapSolver getTaskResult: ${result.errorDescription ?? result.errorCode ?? 'unknown error'}`,
-            );
-          }
-          if (result.status === 'ready') {
-            token = result.solution?.gRecaptchaResponse ?? result.solution?.token ?? '';
-            if (!token) throw new Error('CapSolver returned no token');
-          }
-        }
-        if (!token) throw new Error('CapSolver timed out');
-        solution.text = token;
-        solution.responseAt = new Date();
-        solution.hasSolution = true;
-        plog('CapSolver solved, token length', token.length);
-      } catch (err) {
-        solution.error = err instanceof Error ? err.message : String(err);
-        plog('CapSolver failed:', solution.error);
-      }
-      return solution;
-    }),
-  );
+  const solutions = await Promise.all(captchas.map((c) => solveOneCaptcha(c)));
   return { solutions, error: solutions.find((s) => s.error) };
 }
 
@@ -367,7 +392,7 @@ function plog(...parts: unknown[]): void {
  * caller can tell a "solver can't handle this" stall apart from progress.
  */
 async function solveCaptchas(page: Page): Promise<{ found: number; solved: number }> {
-  if (!solverEnabled || !capSolverKey) return { found: 0, solved: 0 };
+  if (!solverEnabled) return { found: 0, solved: 0 };
   try {
     const result = (await (
       page as unknown as { solveRecaptchas: () => Promise<any> }
@@ -1199,86 +1224,47 @@ async function readHarelBalances(
   page: Page,
   frameDumpPath?: string,
 ): Promise<NormalizedAccount[]> {
-  // The portal greets a fresh session with a privacy-policy modal and a cookie
-  // banner that sit over (and can stall) the client-view widget — clear them.
-  for (let i = 0; i < 3; i += 1) {
-    const dismissed = await clickByText(page, [
-      'הבנתי, תודה', 'הבנתי', 'אישור', 'סגירה', 'סגור', 'קיבלתי',
-    ]);
-    if (!dismissed) break;
-    await delay(800);
-  }
-
-  // The client-view widget is a single-spa micro-frontend inside a cross-origin
-  // iframe; its tiles render well after the iframe document loads. Poll every
-  // frame until one actually shows a shekel-sized figure (up to ~40s).
-  let frame: Frame | undefined;
-  for (let attempt = 0; attempt < 40 && !frame; attempt += 1) {
-    const candidates = page
-      .frames()
-      .filter((f) => /client-view|digital\.harel/.test(f.url()));
-    for (const candidate of candidates) {
-      const hasMoney = await candidate
-        .evaluate(() => /[\d][\d.,]{3,}/.test(document.body?.innerText || ''))
-        .catch(() => false);
-      if (hasMoney) {
-        frame = candidate;
-        break;
-      }
-    }
-    if (!frame) await delay(1000);
-  }
-  if (!frame) frame = page.frames().find((f) => f.url().includes('client-view'));
-  if (!frame) return [];
-  await delay(2000); // let any last tile settle
-
-  let found: { label: string; balance: number }[] = [];
-  try {
-    // The callback avoids named helper consts on purpose — that keeps esbuild
-    // from injecting a `__name` wrapper, which need not exist in this frame.
-    found = (await frame.evaluate((keywords: string[]) => {
-      const results: { label: string; balance: number }[] = [];
-      const blocks: any[] = Array.from(
-        document.querySelectorAll('div, section, li, article'),
-      );
-      for (const block of blocks) {
-        const text: string = (block.innerText || '').replace(/\s+/g, ' ').trim();
-        if (!text || text.length > 200) continue;
-        if (!keywords.some((k) => text.includes(k))) continue;
-        let largest = 0;
-        for (const match of text.match(/[\d][\d.,]{3,}/g) || []) {
-          const value = parseFloat(match.replace(/[^\d.,]/g, '').replace(/,/g, ''));
-          if (Number.isFinite(value) && value > largest) largest = value;
+  // Pulls the product tiles out of the client-view widget frame: tries the
+  // keyword-matched blocks first, then falls back to any block carrying a
+  // shekel-sized figure so a single-product account still reports a balance.
+  // The frame.evaluate callbacks stay inline and anonymous on purpose — that
+  // keeps esbuild from injecting a `__name` wrapper, which need not exist in
+  // this cross-origin frame.
+  const extractTiles = async (
+    frame: Frame,
+  ): Promise<{ label: string; balance: number }[]> => {
+    let hits: { label: string; balance: number }[] = [];
+    try {
+      hits = (await frame.evaluate((keywords: string[]) => {
+        const results: { label: string; balance: number }[] = [];
+        const blocks: any[] = Array.from(
+          document.querySelectorAll('div, section, li, article'),
+        );
+        for (const block of blocks) {
+          const text: string = (block.innerText || '').replace(/\s+/g, ' ').trim();
+          if (!text || text.length > 200) continue;
+          if (!keywords.some((k) => text.includes(k))) continue;
+          let largest = 0;
+          for (const match of text.match(/[\d][\d.,]{3,}/g) || []) {
+            const value = parseFloat(match.replace(/[^\d.,]/g, '').replace(/,/g, ''));
+            if (Number.isFinite(value) && value > largest) largest = value;
+          }
+          if (largest < 1000) continue;
+          const label = text
+            .replace(/[\d][\d.,]*\s*₪?|₪/g, '')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, 50);
+          results.push({ label: label || 'חיסכון', balance: largest });
         }
-        if (largest < 1000) continue;
-        const label = text
-          .replace(/[\d][\d.,]*\s*₪?|₪/g, '')
-          .replace(/\s+/g, ' ')
-          .trim()
-          .slice(0, 50);
-        results.push({ label: label || 'חיסכון', balance: largest });
-      }
-      return results;
-    }, PRODUCT_KEYWORDS)) as { label: string; balance: number }[];
-  } catch {
-    found = [];
-  }
-
-  // Always dump the widget frame's rendered HTML — if the reader missed, this
-  // is the material to map the tile structure precisely on the next pass.
-  if (frameDumpPath) {
-    try {
-      writeFileSync(frameDumpPath, await frame.content(), 'utf8');
+        return results;
+      }, PRODUCT_KEYWORDS)) as { label: string; balance: number }[];
     } catch {
-      /* best effort */
+      hits = [];
     }
-  }
-
-  // No keyword hit — fall back to any block carrying a shekel-sized figure, so
-  // a single-product account (e.g. only קרנות פנסיה) still reports a balance.
-  if (found.length === 0) {
+    if (hits.length > 0) return hits;
     try {
-      found = (await frame.evaluate(() => {
+      hits = (await frame.evaluate(() => {
         const results: { label: string; balance: number }[] = [];
         const blocks: any[] = Array.from(document.querySelectorAll('div, section, li, article'));
         for (const block of blocks) {
@@ -1301,7 +1287,44 @@ async function readHarelBalances(
         return results;
       })) as { label: string; balance: number }[];
     } catch {
-      found = [];
+      hits = [];
+    }
+    return hits;
+  };
+
+  // The client-view widget is a single-spa micro-frontend inside a cross-origin
+  // iframe; after sign-in Harel shows a loading screen first and the balance
+  // tiles render well after the iframe document loads. Poll the widget by
+  // running the real reader until it actually pulls a balance (up to ~75s) —
+  // a check that just looks for "any number" matches the loading screen's own
+  // digits and made the connector give up with a false "needs mapping".
+  const deadline = Date.now() + 75_000;
+  let frame: Frame | undefined;
+  let found: { label: string; balance: number }[] = [];
+  while (Date.now() < deadline) {
+    // The portal greets a fresh session with a privacy-policy modal and a
+    // cookie banner that sit over (and can stall) the widget. They can also
+    // appear late, so clear them on every pass rather than just once.
+    await clickByText(page, [
+      'הבנתי, תודה', 'הבנתי', 'אישור', 'סגירה', 'סגור', 'קיבלתי',
+    ]);
+    frame = page
+      .frames()
+      .find((f) => /client-view|digital\.harel/.test(f.url()));
+    if (frame) {
+      found = await extractTiles(frame);
+      if (found.length > 0) break;
+    }
+    await delay(1500);
+  }
+
+  // Always dump the widget frame's rendered HTML — if the reader missed, this
+  // is the material to map the tile structure precisely on the next pass.
+  if (frameDumpPath && frame) {
+    try {
+      writeFileSync(frameDumpPath, await frame.content(), 'utf8');
+    } catch {
+      /* best effort */
     }
   }
 

@@ -3881,9 +3881,9 @@ function settingsModal() {
       + setCard(160, "🤝", "Splitwise", '<div id="set-splitwise"></div>')
       + setCard(200, "🤖", "Pension auto sign-in", '<div id="set-capsolver"></div>'
           + '<p class="sub-hint" style="margin-top:9px">Meitav and Menora are '
-          + "behind a CAPTCHA. With a CapSolver key, Hon tries to sign in to "
-          + "them automatically — and if the CAPTCHA blocks it, you just finish "
-          + "in the browser window that opens.</p>")
+          + "behind a CAPTCHA. With the solver keys below, Hon tries to sign in "
+          + "to them automatically — and if a CAPTCHA still blocks it, you just "
+          + "finish in the browser window that opens.</p>")
       + '<div class="modal-actions"><button data-x="cancel">Cancel</button>'
       + '<button class="primary" data-x="save">Save settings</button></div>';
     llmPanelMode = null; // re-sync the engine panel to the saved mode
@@ -3913,12 +3913,14 @@ function settingsModal() {
       if (csOn) {
         const payload = { enabled: csOn.checked };
         const csKey = (modal.querySelector("#set-capsolver-key").value || "").trim();
-        if (csKey) payload.apiKey = csKey;
+        const tcKey = (modal.querySelector("#set-twocaptcha-key").value || "").trim();
+        if (csKey) payload.capSolverKey = csKey;
+        if (tcKey) payload.twoCaptchaKey = tcKey;
         try {
           await api("/settings/pension-solver", "PUT", payload);
         } catch (e) {
           toast(e instanceof VaultLocked
-            ? "Unlock Hon first to save the CapSolver key."
+            ? "Unlock Hon first to save the solver keys."
             : e.message, true);
         }
       }
@@ -4315,13 +4317,13 @@ function fillSplitwiseSection() {
   }
 }
 
-// Paints the CapSolver section of the Settings modal — an enable switch and an
-// API-key field. The key itself is never sent back to the browser; the server
-// reports only whether one is saved.
+// Paints the pension-solver section of the Settings modal — an enable switch
+// and two API-key fields. The keys themselves are never sent back to the
+// browser; the server reports only whether each one is saved.
 async function fillCapsolverSection() {
   const host = document.getElementById("set-capsolver");
   if (!host) return;
-  let cfg = { enabled: false, hasKey: false };
+  let cfg = { enabled: false, hasCapSolverKey: false, hasTwoCaptchaKey: false };
   try { cfg = await api("/settings/pension-solver"); } catch (e) {}
   host.innerHTML =
     setRow("Solve the CAPTCHA automatically",
@@ -4329,11 +4331,18 @@ async function fillCapsolverSection() {
       + "step in if the CAPTCHA wall blocks it.",
       setSwitch("set-capsolver-on", cfg.enabled))
     + setRow("CapSolver API key",
-      cfg.hasKey
-        ? "A key is saved — leave blank to keep it, or paste a new one."
-        : "Paste your CapSolver key — it starts with CAP-.",
+      "Solves Meitav's reCAPTCHA. " + (cfg.hasCapSolverKey
+        ? "A key is saved — leave blank to keep it."
+        : "Paste your CapSolver key (starts with CAP-)."),
       '<input id="set-capsolver-key" type="password" autocomplete="off" placeholder="'
-      + (cfg.hasKey ? "saved — leave blank to keep it" : "CAP-…") + '">',
+      + (cfg.hasCapSolverKey ? "saved — leave blank to keep it" : "CAP-…") + '">',
+      true)
+    + setRow("2captcha API key",
+      "Solves Menora's hCaptcha — CapSolver can't. " + (cfg.hasTwoCaptchaKey
+        ? "A key is saved — leave blank to keep it."
+        : "Paste your 2captcha key."),
+      '<input id="set-twocaptcha-key" type="password" autocomplete="off" placeholder="'
+      + (cfg.hasTwoCaptchaKey ? "saved — leave blank to keep it" : "32-character key") + '">',
       true);
 }
 
