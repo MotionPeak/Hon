@@ -155,6 +155,39 @@ app.get('/connections', async (_req, reply) => {
   return { connections: repo.listConnections() };
 });
 
+// --- Pension CAPTCHA-solver settings ---------------------------------------
+// Whether Hon attempts an automated CapSolver-backed sign-in for the
+// CAPTCHA-walled pension funds (Meitav/Menora). The enabled flag lives in the
+// `meta` table; the API key is a secret kept in the vault.
+
+app.get('/settings/pension-solver', async (_req, reply) => {
+  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+  let hasKey = false;
+  try {
+    if (vault?.unlocked) hasKey = Boolean(vault.loadSecret('capsolver_key'));
+  } catch {
+    hasKey = false;
+  }
+  return { enabled: repo.getMeta('capsolver_enabled') === '1', hasKey };
+});
+
+app.put('/settings/pension-solver', async (req, reply) => {
+  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+  const body = (req.body ?? {}) as { enabled?: boolean; apiKey?: string };
+  // Only touch the stored key when the request carries an apiKey field — the
+  // UI omits it to keep the saved key, and storing it needs an unlocked vault.
+  if (typeof body.apiKey === 'string') {
+    if (!vault?.unlocked) {
+      return reply.code(409).send({ error: 'the credential vault is locked' });
+    }
+    const key = body.apiKey.trim();
+    if (key) vault.saveSecret('capsolver_key', key);
+    else vault.clearSecret('capsolver_key');
+  }
+  repo.setMeta('capsolver_enabled', body.enabled ? '1' : '0');
+  return { ok: true };
+});
+
 // Serves an institution's logo, fetched from its own website and cached.
 // An explicit `?domain=` is used for SnapTrade brokerages, which are not in
 // the scraper catalog (e.g. Interactive Brokers).

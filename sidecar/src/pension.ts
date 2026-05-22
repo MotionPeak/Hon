@@ -6,20 +6,177 @@
 // portal in a Hon-controlled Puppeteer browser, completes the SMS one-time-code
 // step, and reads the accumulated balance of every product the member holds.
 //
-// The supported portals are all single-page apps behind a WAF, and all use
+// The automated portals are single-page apps behind a WAF, and use
 // **passwordless OTP login** — no static password:
 //   • Migdal — ID number → a code is sent to the number on file.
 //   • Harel  — ID number + phone number → a code is sent by SMS.
 //   • Clal   — ID number + phone number, pick SMS delivery → a code by SMS.
-// Their post-login dashboards differ; the balance reader is precise for the
-// mapped portals and a best-effort heuristic otherwise, and it always dumps
-// the rendered page + JSON responses to <dataDir>/debug — the material needed
-// to tighten it after a real login.
+// Hon fills the form, relays the SMS code, and reads the balances.
+//
+// Meitav and Menora sit behind CAPTCHA bot-walls (reCAPTCHA Enterprise /
+// Radware + hCaptcha) and always run in a *visible* browser window.
+//
+// When a CapSolver API key is configured (HON_CAPSOLVER_KEY) the connector
+// first attempts the whole login automatically — a puppeteer-extra stealth
+// browser drives the form and a CapSolver-backed plugin solves the CAPTCHA.
+// Whether that attempt lands or not, Hon then polls the balance API while the
+// window stays open, so a blocked attempt falls back to the user finishing the
+// sign-in by hand in the same run. Without a key, those funds are interactive
+// only — the user clears the CAPTCHA and does the OTP themselves.
 
 import { writeFileSync } from 'node:fs';
-import puppeteer, { type Browser, type Frame, type Page } from 'puppeteer';
+import puppeteerVanilla, { type Browser, type Frame, type Page } from 'puppeteer';
+import { addExtra } from 'puppeteer-extra';
+import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+import RecaptchaPlugin from 'puppeteer-extra-plugin-recaptcha';
 import type { CompanyInfo, NormalizedAccount, ScrapeOutcome } from './scrapers.js';
 import type { OtpCallback } from './otp.js';
+
+// CapSolver config for the Meitav/Menora automated-login attempt. These are
+// set per scrape by runPensionScrape from the user's stored settings; the
+// HON_CAPSOLVER_KEY env var seeds a default, mainly for development.
+let capSolverKey = (process.env.HON_CAPSOLVER_KEY ?? '').trim();
+let solverEnabled = capSolverKey.length > 0;
+const CAPSOLVER_API = 'https://api.capsolver.com';
+
+/** Applies the user's CapSolver settings for the run about to start. */
+export function setPensionSolverConfig(config: { enabled: boolean; apiKey: string }): void {
+  capSolverKey = (config.apiKey ?? '').trim() || (process.env.HON_CAPSOLVER_KEY ?? '').trim();
+  solverEnabled = Boolean(config.enabled) && capSolverKey.length > 0;
+}
+
+// Wrap the project's puppeteer with stealth (masks automation tells, helps all
+// funds) and the CAPTCHA solver plugin pointed at CapSolver via a custom
+// provider. The plugin is always registered — solveCaptchas() is a no-op
+// unless the user enabled the solver and a key is set. puppeteer-extra's
+// bundled types lag the installed puppeteer; the cast keeps the call site
+// clean — the runtimes are compatible.
+const puppeteer = addExtra(puppeteerVanilla as unknown as Parameters<typeof addExtra>[0]);
+puppeteer.use(StealthPlugin());
+puppeteer.use(
+  RecaptchaPlugin.default({
+    visualFeedback: false,
+    // 'custom' lets the plugin's findRecaptchas/enterRecaptchaSolutions stay,
+    // while solveWithCapSolver does the actual token fetch from CapSolver.
+    provider: { id: 'capsolver', fn: solveWithCapSolver },
+  }),
+);
+
+/** A captcha the recaptcha plugin detected on a page (fields it may omit). */
+interface CaptchaInfo {
+  _vendor?: 'recaptcha' | 'hcaptcha';
+  id?: string;
+  sitekey?: string;
+  url?: string;
+  isEnterprise?: boolean;
+  action?: string;
+  s?: string;
+}
+
+/** A solution in the shape the recaptcha plugin expects back from a provider. */
+interface CaptchaSolution {
+  _vendor: 'recaptcha' | 'hcaptcha';
+  provider: string;
+  id?: string;
+  text?: string;
+  hasSolution?: boolean;
+  requestAt?: Date;
+  responseAt?: Date;
+  error?: string;
+}
+
+/** POSTs JSON to a CapSolver endpoint and returns the parsed body. */
+async function capSolverPost(path: string, body: unknown): Promise<any> {
+  const res = await fetch(`${CAPSOLVER_API}${path}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return res.json();
+}
+
+/**
+ * Custom solver provider for puppeteer-extra-plugin-recaptcha, backed by
+ * CapSolver. The plugin detects the challenge (reCAPTCHA v2 / Enterprise or
+ * hCaptcha) and hands the sitekey + page URL here; this submits a proxyless
+ * task to CapSolver, polls for the token, and returns it for the plugin to
+ * inject. Errors are captured per-captcha so a miss surfaces as a failed login
+ * downstream rather than throwing.
+ */
+async function solveWithCapSolver(
+  captchas: CaptchaInfo[] = [],
+): Promise<{ solutions: CaptchaSolution[]; error?: unknown }> {
+  const solutions = await Promise.all(
+    captchas.map(async (captcha): Promise<CaptchaSolution> => {
+      const solution: CaptchaSolution = {
+        _vendor: captcha._vendor ?? 'recaptcha',
+        provider: 'capsolver',
+        id: captcha.id,
+        requestAt: new Date(),
+      };
+      try {
+        if (!captcha.sitekey || !captcha.url || !captcha.id) {
+          throw new Error('Missing captcha data (sitekey/url/id)');
+        }
+        let task: Record<string, unknown>;
+        if (captcha._vendor === 'hcaptcha') {
+          task = {
+            type: 'HCaptchaTaskProxyLess',
+            websiteURL: captcha.url,
+            websiteKey: captcha.sitekey,
+            userAgent: USER_AGENT,
+          };
+        } else {
+          task = {
+            type: captcha.isEnterprise
+              ? 'ReCaptchaV2EnterpriseTaskProxyLess'
+              : 'ReCaptchaV2TaskProxyLess',
+            websiteURL: captcha.url,
+            websiteKey: captcha.sitekey,
+          };
+          if (captcha.action) task.pageAction = captcha.action;
+          if (captcha.s) task.enterprisePayload = { s: captcha.s };
+        }
+        const created = await capSolverPost('/createTask', {
+          clientKey: capSolverKey,
+          task,
+        });
+        if (created.errorId || !created.taskId) {
+          throw new Error(
+            `CapSolver createTask: ${created.errorDescription ?? created.errorCode ?? 'unknown error'}`,
+          );
+        }
+        // CapSolver solves typically land in 10–30s; poll up to ~120s.
+        const deadline = Date.now() + 120_000;
+        let token = '';
+        while (Date.now() < deadline && !token) {
+          await delay(3000);
+          const result = await capSolverPost('/getTaskResult', {
+            clientKey: capSolverKey,
+            taskId: created.taskId,
+          });
+          if (result.errorId) {
+            throw new Error(
+              `CapSolver getTaskResult: ${result.errorDescription ?? result.errorCode ?? 'unknown error'}`,
+            );
+          }
+          if (result.status === 'ready') {
+            token = result.solution?.gRecaptchaResponse ?? result.solution?.token ?? '';
+            if (!token) throw new Error('CapSolver returned no token');
+          }
+        }
+        if (!token) throw new Error('CapSolver timed out');
+        solution.text = token;
+        solution.responseAt = new Date();
+        solution.hasSolution = true;
+      } catch (err) {
+        solution.error = err instanceof Error ? err.message : String(err);
+      }
+      return solution;
+    }),
+  );
+  return { solutions, error: solutions.find((s) => s.error) };
+}
 
 // page.evaluate runs its callback in the browser, where these globals exist.
 declare const document: any;
@@ -36,20 +193,27 @@ interface PensionFund {
   loginUrl: string;
   /** Credentials the user supplies — rendered as fields in the Add flow. */
   loginFields: string[];
-  /** CSS selector for the ID-number input on the login form. */
-  idSelector: string;
+  /** CSS selector for the ID-number input. */
+  idSelector?: string;
   /** CSS selector for the phone-number input, when the portal needs one. */
   phoneSelector?: string;
+  /** CSS selector for a phone-prefix <select> (050/052/…), when split out. */
+  phonePrefixSelector?: string;
   /** CSS selector for the "send the code by SMS" radio, clicked to be sure. */
   smsRadioSelector?: string;
   /** CSS selector for a "I agree to the terms" checkbox that gates submit. */
   termsCheckboxSelector?: string;
-  /** Text on the button that submits the form and triggers the SMS code. */
-  submitLabels: string[];
+  /** Text on the button that submits the form — omitted for interactive funds. */
+  submitLabels?: string[];
   /** Page to open after login to reach the product balances, when separate. */
   productsUrl?: string;
   /** Visible button text to click first to reveal the login form (Harel). */
   openLoginLabel?: string;
+  /** When set, the portal is behind a CAPTCHA / bot wall. Hon always opens a
+   *  visible browser for it; with a CapSolver key it attempts the login
+   *  automatically, otherwise the user signs in by hand. Either way the
+   *  connector reads balances from the portal's API. */
+  interactive?: boolean;
 }
 
 const FUNDS: Record<string, PensionFund> = {
@@ -92,7 +256,45 @@ const FUNDS: Record<string, PensionFund> = {
     productsUrl:
       'https://www.harel-group.co.il/personal-info/my-harel/Pages/client-view.aspx',
   },
+  // Meitav and Menora sit behind CAPTCHA bot-walls (reCAPTCHA Enterprise /
+  // Radware + hCaptcha). With a CapSolver key set Hon attempts an automated
+  // login and the solver plugin clears the CAPTCHA; the submitLabels below are
+  // only used on that automated path. Without a key they are interactive only.
+  meitav: {
+    id: 'meitav',
+    name: 'Meitav (מיטב)',
+    domain: 'meitav.co.il',
+    loginUrl: 'https://customers.meitav.co.il/v2/login/loginAmit',
+    loginFields: ['id', 'phone'],
+    idSelector: '#id-identity-input',
+    // Meitav's phone is split: a prefix <select> (050/052/…) + a 7-digit number.
+    phonePrefixSelector: 'select[name="prefixPhone"]',
+    phoneSelector: '[name="phoneNumber"]',
+    submitLabels: ['כניסה', 'התחברות', 'המשך', 'שליחה', 'שלח', 'אישור'],
+    interactive: true,
+  },
+  menora: {
+    id: 'menora',
+    name: 'Menora Mivtachim (מנורה מבטחים)',
+    domain: 'menoramivt.co.il',
+    loginUrl: 'https://www.menoramivt.co.il/customer-login/',
+    loginFields: ['id', 'phone'],
+    idSelector: '#id-num',
+    phoneSelector: '#email-phone-num',
+    submitLabels: ['כניסה', 'התחברות', 'המשך', 'שליחה', 'שלח', 'אישור'],
+    interactive: true,
+  },
 };
+
+/**
+ * Whether a fund opens a visible browser the user may need to act in. A
+ * CAPTCHA-walled fund always does: even with a solver key set, the automated
+ * attempt runs in a visible window so it can fall back to a hand sign-in if
+ * the bot wall blocks it.
+ */
+function isInteractive(fund: PensionFund): boolean {
+  return Boolean(fund.interactive);
+}
 
 /** Catalog entries so the pension funds appear in the Add-connection picker. */
 export const PENSION_COMPANIES: CompanyInfo[] = Object.values(FUNDS).map((fund) => ({
@@ -101,6 +303,7 @@ export const PENSION_COMPANIES: CompanyInfo[] = Object.values(FUNDS).map((fund) 
   loginFields: fund.loginFields,
   type: 'pension',
   domain: fund.domain,
+  interactive: isInteractive(fund),
 }));
 
 export function isPensionCompany(companyId: string): boolean {
@@ -110,6 +313,10 @@ export function isPensionCompany(companyId: string): boolean {
 // Set HON_PENSION_HEADFUL=1 to scrape with a visible browser — useful when a
 // portal's WAF or bot-detection rejects a headless session.
 const HEADLESS = process.env.HON_PENSION_HEADFUL !== '1';
+
+// How long an interactive fund waits for the user to finish signing in (and
+// pass the CAPTCHA + OTP) in the visible browser window before giving up.
+const INTERACTIVE_LOGIN_TIMEOUT_MS = 5 * 60_000;
 
 // In a container Chromium runs as root with no user namespace, so its sandbox
 // cannot start — the Docker image sets HON_BROWSER_NO_SANDBOX=1 to drop it
@@ -145,6 +352,20 @@ function fail(errorType: string, errorMessage: string): ScrapeOutcome {
   return { success: false, accounts: [], errorType, errorMessage };
 }
 
+/**
+ * Best-effort CAPTCHA solve via the CapSolver-backed plugin. A no-op when no
+ * key is configured or the page carries no challenge; a solver miss is
+ * swallowed so the login simply fails downstream rather than throwing here.
+ */
+async function solveCaptchas(page: Page): Promise<void> {
+  if (!solverEnabled || !capSolverKey) return;
+  try {
+    await (page as unknown as { solveRecaptchas: () => Promise<unknown> }).solveRecaptchas();
+  } catch {
+    // best-effort — fall through to the normal login-failure handling
+  }
+}
+
 /** Derives a debug-file path next to the run's failure screenshot. */
 function debugSibling(screenshotPath: string | undefined, suffix: string): string | undefined {
   return screenshotPath ? screenshotPath.replace(/\.png$/i, suffix) : undefined;
@@ -164,12 +385,21 @@ export async function runPensionScrape(
 ): Promise<ScrapeOutcome> {
   const fund = FUNDS[companyId];
   if (!fund) return fail('CONFIG', `Unknown pension fund: ${companyId}`);
+  // CAPTCHA-walled funds (Meitav/Menora) run in a visible window; with a
+  // CapSolver key set, Hon first attempts the login automatically.
+  const captchaWalled = Boolean(fund.interactive);
+  const attemptAutomated = captchaWalled && solverEnabled;
 
-  if (!(credentials.id ?? '').trim()) {
-    return fail('CONFIG', 'This pension connection needs an ID number.');
-  }
-  if (fund.phoneSelector && !(credentials.phone ?? '').trim()) {
-    return fail('CONFIG', 'This pension connection needs a phone number.');
+  // A non-CAPTCHA fund is driven entirely by Hon, so its credentials are
+  // required up front. A CAPTCHA-walled fund can always fall back to a hand
+  // sign-in, so missing credentials there are not fatal.
+  if (!captchaWalled) {
+    if (!(credentials.id ?? '').trim()) {
+      return fail('CONFIG', 'This pension connection needs an ID number.');
+    }
+    if (fund.phoneSelector && !(credentials.phone ?? '').trim()) {
+      return fail('CONFIG', 'This pension connection needs a phone number.');
+    }
   }
 
   const htmlPath = debugSibling(screenshotPath, '-pension.html');
@@ -180,12 +410,20 @@ export async function runPensionScrape(
   try {
     onProgress?.('Starting the browser…');
     browser = await puppeteer.launch({
-      headless: HEADLESS,
-      args: [...SANDBOX_ARGS, '--disable-blink-features=AutomationControlled', '--lang=he-IL'],
+      // A CAPTCHA-walled fund must be visible — the automated attempt may need
+      // to fall back to the user finishing the sign-in in the same window.
+      headless: captchaWalled ? false : HEADLESS,
+      defaultViewport: captchaWalled ? null : undefined,
+      args: [
+        ...SANDBOX_ARGS,
+        '--disable-blink-features=AutomationControlled',
+        '--lang=he-IL',
+        ...(captchaWalled ? ['--window-size=1280,960'] : []),
+      ],
     });
     const page = await browser.newPage();
     await page.setUserAgent(USER_AGENT);
-    await page.setViewport({ width: 1280, height: 900 });
+    if (!captchaWalled) await page.setViewport({ width: 1280, height: 900 });
     await page.setExtraHTTPHeaders({ 'Accept-Language': 'he-IL,he;q=0.9,en;q=0.8' });
     // tsx/esbuild rewrites this file's functions with a `__name` helper. When a
     // function is handed to page.evaluate it runs in the browser, where that
@@ -210,9 +448,84 @@ export async function runPensionScrape(
     });
 
     onProgress?.('Opening the pension portal…');
-    await page.goto(fund.loginUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+    try {
+      await page.goto(fund.loginUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+    } catch (err) {
+      // A CAPTCHA-walled fund's bot-wall may re-navigate the page during goto;
+      // the visible window can recover, so that race is harmless. For an
+      // automated fund a goto failure is real — rethrow it.
+      if (!captchaWalled) throw err;
+    }
+
+    // CAPTCHA-walled funds (Meitav/Menora). With a solver key, Hon first
+    // attempts the whole login automatically; whether that lands or not it
+    // then polls the balance API while the visible window stays open — so a
+    // blocked automated attempt falls back to the user finishing the sign-in
+    // by hand, in the same run, with no dead-end error.
+    if (captchaWalled) {
+      if (attemptAutomated) {
+        onProgress?.('Attempting automated sign-in…');
+        await runCaptchaWalledLogin(page, fund, credentials, onProgress, onOtpNeeded).catch(
+          () => {},
+        );
+        // If the automated attempt authenticated the session, the balance API
+        // already answers — return straight away.
+        const auto = await readBalances(companyId, page, screenshotPath).catch(() => []);
+        if (auto.length > 0) {
+          await saveDebug(page, screenshotPath, htmlPath, dataPath, jsonResponses).catch(
+            () => {},
+          );
+          return { success: true, accounts: auto };
+        }
+        // The automated attempt did not complete — reset to a clean login
+        // page and fall through to the interactive poll loop below.
+        onProgress?.(
+          'Automated sign-in did not go through — please finish in the browser window.',
+        );
+        try {
+          await page.goto(fund.loginUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+        } catch {
+          // the user can reload the visible window themselves if needed
+        }
+      }
+
+      onProgress?.(
+        `A browser window is open — clear the security check on ${fund.name}. ` +
+          'Hon fills in your ID and phone; you then submit and enter the SMS code.',
+      );
+      // Fill the ID/phone when the login form appears — fire-and-forget so the
+      // balance poll runs concurrently. When the automated attempt already
+      // signed in, no login form appears and this simply never fires.
+      void prefillCredentials(page, fund, credentials).catch(() => {});
+      onProgress?.('Waiting for you to finish signing in…');
+      const deadline = Date.now() + INTERACTIVE_LOGIN_TIMEOUT_MS;
+      let accounts: NormalizedAccount[] = [];
+      while (Date.now() < deadline) {
+        await delay(5000);
+        if (page.isClosed()) break;
+        try {
+          accounts = await readBalances(companyId, page, screenshotPath);
+        } catch {
+          accounts = []; // a navigation mid-read — try again next tick
+        }
+        if (accounts.length > 0) break;
+      }
+      await saveDebug(page, screenshotPath, htmlPath, dataPath, jsonResponses).catch(
+        () => {},
+      );
+      if (accounts.length === 0) {
+        return fail(
+          'INTERACTIVE_TIMEOUT',
+          `Sign-in to ${fund.name} was not completed in the browser window. ` +
+            'Open the connection again and finish signing in.',
+        );
+      }
+      return { success: true, accounts };
+    }
 
     onProgress?.('Logging in…');
+    // Clear any CAPTCHA rendered on the login page before touching the form.
+    await solveCaptchas(page);
     if (!(await fillAndSubmitLogin(page, fund, credentials))) {
       await saveDebug(page, screenshotPath, htmlPath, dataPath, jsonResponses);
       return fail(
@@ -226,6 +539,8 @@ export async function runPensionScrape(
     // the live DOM for the code boxes, surviving the headless re-renders that
     // made an evaluate-based page check unreliable.
     onProgress?.('Waiting for the verification code…');
+    // A fresh challenge can appear on submit — solve it before the OTP wait.
+    await solveCaptchas(page);
     const otpAppeared = await page
       .waitForSelector(OTP_FIELD_SELECTOR, { timeout: 90_000 })
       .then(() => true)
@@ -259,16 +574,7 @@ export async function runPensionScrape(
     }
     onProgress?.('Reading your balances…');
     await delay(4000); // let the products page render its data
-    let accounts: NormalizedAccount[];
-    if (companyId === 'migdal') {
-      accounts = await readMigdalBalances(page);
-    } else if (companyId === 'harel') {
-      accounts = await readHarelBalances(page, debugSibling(screenshotPath, '-harel-frame.html'));
-    } else if (companyId === 'clal') {
-      accounts = await readClalBalances(page);
-    } else {
-      accounts = await readGenericBalances(page);
-    }
+    const accounts = await readBalances(companyId, page, screenshotPath);
     await saveDebug(page, screenshotPath, htmlPath, dataPath, jsonResponses);
 
     if (accounts.length === 0) {
@@ -370,6 +676,38 @@ async function clickByText(page: Page, labels: string[]): Promise<boolean> {
 }
 
 /**
+ * Fills a fund's phone field(s) from a raw phone string. Normalises to a local
+ * 0XXXXXXXXX form, then either fills a single field or splits across a prefix
+ * <select> (050/052/…) plus a 7-digit number field when the portal needs that.
+ */
+async function fillPhone(page: Page, fund: PensionFund, rawPhone: string): Promise<void> {
+  if (!fund.phoneSelector) return;
+  let phone = (rawPhone ?? '').replace(/\D/g, '');
+  if (phone.startsWith('972')) phone = `0${phone.slice(3)}`;
+  if (phone.length === 9 && phone.startsWith('5')) phone = `0${phone}`;
+  if (fund.phonePrefixSelector && phone.length >= 4) {
+    await page
+      .evaluate(
+        (sel: string, value: string) => {
+          const el: any = document.querySelector(sel);
+          if (!el) return;
+          el.value = value;
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        },
+        fund.phonePrefixSelector,
+        phone.slice(0, 3),
+      )
+      .catch(() => {});
+    await fillField(page, fund.phoneSelector, phone.slice(3)).catch(() => false);
+  } else {
+    await fillField(page, fund.phoneSelector, phone || (rawPhone ?? '').trim()).catch(
+      () => false,
+    );
+  }
+}
+
+/**
  * Fills the login form (ID number, plus phone where the portal needs it),
  * makes sure the code goes by SMS, and submits — which triggers the SMS code.
  */
@@ -378,6 +716,8 @@ async function fillAndSubmitLogin(
   fund: PensionFund,
   credentials: Record<string, string>,
 ): Promise<boolean> {
+  // Only automated funds reach here; interactive funds carry no selectors.
+  if (!fund.idSelector || !fund.submitLabels) return false;
   // Harel hides its login form behind a CTA button. The page also renders a
   // zero-size duplicate of that button, so target the *visible* one (real
   // bounding box) and click its centre with a real mouse click — page.click's
@@ -420,7 +760,7 @@ async function fillAndSubmitLogin(
     return false;
   }
   if (fund.phoneSelector) {
-    await fillField(page, fund.phoneSelector, (credentials.phone ?? '').trim());
+    await fillPhone(page, fund, credentials.phone ?? '');
   }
   if (fund.smsRadioSelector) {
     // A JS click checks the radio even when it is a visually-hidden custom
@@ -441,11 +781,70 @@ async function fillAndSubmitLogin(
       }, fund.termsCheckboxSelector)
       .catch(() => {});
   }
+  // Solve a CAPTCHA that gates the submit button (Meitav/Menora) before submit.
+  await solveCaptchas(page);
   await delay(800); // let Angular validate the form and enable the button
   if (!(await clickByText(page, fund.submitLabels))) {
     await page.keyboard.press('Enter');
   }
   return true;
+}
+
+/**
+ * Best-effort fully automated login for a CAPTCHA-walled fund (Meitav/Menora),
+ * used when a CapSolver key is set: solves the CAPTCHA, fills and submits the
+ * form, relays the SMS code through the OTP callback, and enters it. Returns
+ * quietly on any miss — the caller then polls for balances and, failing that,
+ * falls back to the user finishing the sign-in by hand.
+ */
+async function runCaptchaWalledLogin(
+  page: Page,
+  fund: PensionFund,
+  credentials: Record<string, string>,
+  onProgress: ((message: string) => void) | undefined,
+  onOtpNeeded: OtpCallback,
+): Promise<void> {
+  await solveCaptchas(page);
+  if (!(await fillAndSubmitLogin(page, fund, credentials))) return;
+  // A fresh challenge can appear on submit — solve it before the OTP wait.
+  await solveCaptchas(page);
+  const otpAppeared = await page
+    .waitForSelector(OTP_FIELD_SELECTOR, { timeout: 90_000 })
+    .then(() => true)
+    .catch(() => false);
+  if (!otpAppeared) return;
+  onProgress?.('Enter the SMS verification code…');
+  const code = await onOtpNeeded();
+  onProgress?.('Submitting the verification code…');
+  await enterOtpCode(page, (code ?? '').trim());
+  // Let the portal finish authenticating before the caller reads balances.
+  await delay(7000);
+}
+
+/**
+ * Assists an interactive login: waits for the login form to appear — the user
+ * is clearing the portal's CAPTCHA during that wait — then fills the ID and
+ * phone fields with the stored credentials. The user still does the CAPTCHA,
+ * the submit and the OTP; Hon only types the details it already holds. A no-op
+ * when the fund exposes no selectors or no credentials were stored.
+ */
+async function prefillCredentials(
+  page: Page,
+  fund: PensionFund,
+  credentials: Record<string, string>,
+): Promise<void> {
+  const id = (credentials.id ?? '').trim();
+  if (!fund.idSelector || !id) return;
+  // This wait spans the time the user spends on the CAPTCHA — the login form
+  // only renders once they clear it.
+  const formAppeared = await page
+    .waitForSelector(fund.idSelector, { timeout: INTERACTIVE_LOGIN_TIMEOUT_MS })
+    .then(() => true)
+    .catch(() => false);
+  if (!formAppeared) return;
+  await delay(900); // let the form settle
+  await fillField(page, fund.idSelector, id).catch(() => false);
+  await fillPhone(page, fund, credentials.phone ?? '');
 }
 
 /**
@@ -558,6 +957,27 @@ async function enterOtpCode(page: Page, code: string): Promise<void> {
     return false;
   });
   if (!submitted) await page.keyboard.press('Enter');
+}
+
+/**
+ * Dispatches to the per-fund balance reader, falling back to a generic
+ * heuristic. Used by both the automated flow and the interactive poll loop —
+ * for an interactive fund this is called repeatedly and returns an empty list
+ * until the user's sign-in authenticates the session.
+ */
+async function readBalances(
+  companyId: string,
+  page: Page,
+  screenshotPath: string | undefined,
+): Promise<NormalizedAccount[]> {
+  if (companyId === 'migdal') return readMigdalBalances(page);
+  if (companyId === 'harel') {
+    return readHarelBalances(page, debugSibling(screenshotPath, '-harel-frame.html'));
+  }
+  if (companyId === 'clal') return readClalBalances(page);
+  if (companyId === 'meitav') return readMeitavBalances(page);
+  if (companyId === 'menora') return readMenoraBalances(page);
+  return readGenericBalances(page);
 }
 
 /**
@@ -797,6 +1217,111 @@ async function readClalBalances(page: Page): Promise<NormalizedAccount[]> {
       transactions: [],
     };
   });
+}
+
+interface MeitavRow {
+  name: string;
+  accountNum: string | number | null;
+  balance: number | null;
+}
+
+/**
+ * Reads balances from Meitav's member portal API (interactive fund — the user
+ * signs in by hand first). GET /v2/api/AllAccounts/GetAllAmitAccounts returns
+ * `{ t: { CustomPensionAccountMain[], CustomAccountMain[] } }`; each fund row
+ * carries `AccountNumForShow` (name) and `YitrotAccountSum` (current balance).
+ * The same fund recurs once per period — dedup by account number, keeping the
+ * largest (latest) balance. Returns [] until the session is authenticated.
+ */
+async function readMeitavBalances(page: Page): Promise<NormalizedAccount[]> {
+  let raw: { pension: MeitavRow[]; other: MeitavRow[] } | null = null;
+  try {
+    raw = (await page.evaluate(async () => {
+      const res = await fetch('/v2/api/AllAccounts/GetAllAmitAccounts', {
+        credentials: 'include',
+      });
+      if (!res.ok) return null;
+      const data: any = await res.json();
+      const t: any = data && data.t ? data.t : data;
+      const pick = (arr: any[]): any[] =>
+        (arr || []).map((p: any) => ({
+          name: p.AccountNumForShow,
+          accountNum: p.AccountNum,
+          balance: p.YitrotAccountSum,
+        }));
+      return { pension: pick(t.CustomPensionAccountMain), other: pick(t.CustomAccountMain) };
+    })) as { pension: MeitavRow[]; other: MeitavRow[] } | null;
+  } catch {
+    return [];
+  }
+  if (!raw) return [];
+  const byAccount = new Map<string, { name: string; balance: number }>();
+  for (const row of [...raw.pension, ...raw.other]) {
+    const balance = Number(row.balance);
+    const name = (row.name ?? '').trim();
+    if (!name || !Number.isFinite(balance)) continue;
+    const key = String(row.accountNum ?? name);
+    const prev = byAccount.get(key);
+    if (!prev || balance > prev.balance) byAccount.set(key, { name, balance });
+  }
+  return [...byAccount.values()].map((p) => ({
+    accountNumber: `meitav:${p.name}`,
+    label: p.name,
+    balance: Math.round(p.balance * 100) / 100,
+    currency: 'ILS',
+    transactions: [],
+  }));
+}
+
+/**
+ * Reads balances from Menora Mivtachim's dashboard API (interactive fund — the
+ * user signs in by hand first). POST /personal/dashboard/api/v1/customer-
+ * summary/active returns `{ data: { pension[], socialBenefit[], managerFund[],
+ * annuity[], … } }`; `socialBenefit` holds both gemel and study (השתלמות)
+ * funds. Each savings row carries `title` (name) and `cashSurrenderValue`
+ * (accrued balance). Insurance arrays and `forecastPension` (a projected
+ * monthly payout, not a balance) are ignored. Returns [] until authenticated.
+ */
+async function readMenoraBalances(page: Page): Promise<NormalizedAccount[]> {
+  let rows: { name: string; balance: number }[] | null = null;
+  try {
+    rows = (await page.evaluate(async () => {
+      const uuid =
+        Math.random().toString(16).slice(2) + Math.random().toString(16).slice(2);
+      const res = await fetch(
+        '/personal/dashboard/api/v1/customer-summary/active?counter=1&uuid=' + uuid,
+        { method: 'POST', credentials: 'include' },
+      );
+      if (!res.ok) return null;
+      const body: any = await res.json();
+      const d: any = body && body.data ? body.data : {};
+      const pick = (arr: any[]): any[] =>
+        (arr || []).map((p: any) => ({ name: p.title, balance: p.cashSurrenderValue }));
+      return ([] as any[]).concat(
+        pick(d.pension),
+        pick(d.socialBenefit),
+        pick(d.managerFund),
+        pick(d.annuity),
+      );
+    })) as { name: string; balance: number }[] | null;
+  } catch {
+    return [];
+  }
+  if (!rows) return [];
+  const out: NormalizedAccount[] = [];
+  for (const row of rows) {
+    const balance = Number(row.balance);
+    const name = (row.name ?? '').trim();
+    if (!name || !Number.isFinite(balance) || balance <= 0) continue;
+    out.push({
+      accountNumber: `menora:${name}`,
+      label: name,
+      balance: Math.round(balance * 100) / 100,
+      currency: 'ILS',
+      transactions: [],
+    });
+  }
+  return out;
 }
 
 /**

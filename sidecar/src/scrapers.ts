@@ -24,6 +24,9 @@ export interface CompanyInfo {
   type: CompanyType;
   /** Website host, used to show the institution's favicon as a logo. */
   domain?: string;
+  /** When true, syncing opens a visible browser for the user to sign in
+   *  themselves (the portal is behind a CAPTCHA). No credentials are stored. */
+  interactive?: boolean;
 }
 
 export interface NormalizedTransaction {

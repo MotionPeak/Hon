@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import type { Repo } from './repo.js';
 import type { Vault } from './vault.js';
 import { isSnapTrade, runSnapTradeSync } from './snaptrade.js';
-import { isPensionCompany, runPensionScrape } from './pension.js';
+import { isPensionCompany, runPensionScrape, setPensionSolverConfig } from './pension.js';
 import { runInteractiveScrape, runScrape, type ScrapeOutcome } from './scrapers.js';
 
 export interface StartArgs {
@@ -107,7 +107,20 @@ export class ScrapeRunner {
         });
       } else if (isPensionCompany(args.companyId)) {
         // Pension funds have no scraper library, so a custom Puppeteer routine
-        // drives the portal login (and any SMS one-time code) itself.
+        // drives the portal login (and any SMS one-time code) itself. Apply
+        // the user's CapSolver settings first — the API key is a vault secret.
+        let solverKey = '';
+        try {
+          if (this.vault.unlocked) {
+            solverKey = this.vault.loadSecret('capsolver_key') ?? '';
+          }
+        } catch {
+          solverKey = '';
+        }
+        setPensionSolverConfig({
+          enabled: this.repo.getMeta('capsolver_enabled') === '1',
+          apiKey: solverKey,
+        });
         outcome = await runPensionScrape(
           args.companyId,
           args.credentials,

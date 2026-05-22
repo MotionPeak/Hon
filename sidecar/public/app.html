@@ -3149,7 +3149,13 @@ function addConnectionModal() {
       modal.innerHTML = "<h2>Add an account</h2>"
         + '<button class="back-btn" data-x="back">‹ ' + esc(categoryLabel(company.type))
         + "s</button>"
-        + '<p class="hint">Credentials are encrypted in your local vault.</p>'
+        + '<p class="hint">' + (company.interactive
+            ? esc(company.name) + " is behind a security check that needs a "
+              + "person. Enter your ID and phone — stored encrypted in your "
+              + "local vault. On sync, a browser window opens: you clear the "
+              + "security check, Hon fills your details, you finish the SMS code."
+            : "Credentials are encrypted in your local vault.")
+        + "</p>"
         + fields
         + '<div class="modal-err" id="ac-err" hidden></div>'
         + '<div class="modal-actions"><button data-x="cancel">Cancel</button>'
@@ -3873,11 +3879,17 @@ function settingsModal() {
             + esc((settings.cardProviders || []).join("\n")) + "</textarea>",
             true))
       + setCard(160, "🤝", "Splitwise", '<div id="set-splitwise"></div>')
+      + setCard(200, "🤖", "Pension auto sign-in", '<div id="set-capsolver"></div>'
+          + '<p class="sub-hint" style="margin-top:9px">Meitav and Menora are '
+          + "behind a CAPTCHA. With a CapSolver key, Hon tries to sign in to "
+          + "them automatically — and if the CAPTCHA blocks it, you just finish "
+          + "in the browser window that opens.</p>")
       + '<div class="modal-actions"><button data-x="cancel">Cancel</button>'
       + '<button class="primary" data-x="save">Save settings</button></div>';
     llmPanelMode = null; // re-sync the engine panel to the saved mode
     fillModelSection();
     fillSplitwiseSection();
+    fillCapsolverSection();
 
     const seg = modal.querySelector("#set-incomescope");
     seg.addEventListener("click", (e) => {
@@ -3897,6 +3909,19 @@ function settingsModal() {
       settings.cardProviders = modal.querySelector("#set-providers").value
         .split("\n").map((s) => s.trim()).filter(Boolean);
       saveSettings();
+      const csOn = modal.querySelector("#set-capsolver-on");
+      if (csOn) {
+        const payload = { enabled: csOn.checked };
+        const csKey = (modal.querySelector("#set-capsolver-key").value || "").trim();
+        if (csKey) payload.apiKey = csKey;
+        try {
+          await api("/settings/pension-solver", "PUT", payload);
+        } catch (e) {
+          toast(e instanceof VaultLocked
+            ? "Unlock Hon first to save the CapSolver key."
+            : e.message, true);
+        }
+      }
       state.activityMonth = null;   // re-pick against the new cycle
       closeOverlay();
       toast("Settings saved.");
@@ -4288,6 +4313,28 @@ function fillSplitwiseSection() {
       }
     });
   }
+}
+
+// Paints the CapSolver section of the Settings modal — an enable switch and an
+// API-key field. The key itself is never sent back to the browser; the server
+// reports only whether one is saved.
+async function fillCapsolverSection() {
+  const host = document.getElementById("set-capsolver");
+  if (!host) return;
+  let cfg = { enabled: false, hasKey: false };
+  try { cfg = await api("/settings/pension-solver"); } catch (e) {}
+  host.innerHTML =
+    setRow("Solve the CAPTCHA automatically",
+      "When on, Hon attempts the Meitav and Menora sign-in itself; you only "
+      + "step in if the CAPTCHA wall blocks it.",
+      setSwitch("set-capsolver-on", cfg.enabled))
+    + setRow("CapSolver API key",
+      cfg.hasKey
+        ? "A key is saved — leave blank to keep it, or paste a new one."
+        : "Paste your CapSolver key — it starts with CAP-.",
+      '<input id="set-capsolver-key" type="password" autocomplete="off" placeholder="'
+      + (cfg.hasKey ? "saved — leave blank to keep it" : "CAP-…") + '">',
+      true);
 }
 
 // The sheet for splitting one transaction onto Splitwise: pick a friend or
