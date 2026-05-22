@@ -1048,8 +1048,14 @@ async function runCaptchaWalledLogin(
   plog('runCaptchaWalledLogin: form submitted, waiting for OTP step');
   // A fresh challenge can appear on submit — solve it before the OTP wait.
   await solveCaptchas(page);
+  // The headless attempt gives up the OTP wait fast — if the portal's bot
+  // check rejected the submit, no SMS is coming and the run should fall back
+  // to a visible window quickly rather than sitting here. The visible attempt
+  // waits longer, since a real SMS to the user can genuinely take a minute.
+  const otpTimeout = humanCanHelp ? 120_000 : 45_000;
+  onProgress?.('Login submitted — waiting for the SMS verification step…');
   const otpAppeared = await page
-    .waitForSelector(OTP_FIELD_SELECTOR, { timeout: 90_000 })
+    .waitForSelector(OTP_FIELD_SELECTOR, { timeout: otpTimeout })
     .then(() => true)
     .catch(() => false);
   if (!otpAppeared) {
