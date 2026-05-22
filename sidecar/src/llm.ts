@@ -3,7 +3,10 @@ import { join } from 'node:path';
 import {
   createModelDownloader,
   getLlama,
+  LlamaChatSession,
   type Llama,
+  type LlamaContext,
+  type LlamaGrammar,
   type LlamaModel,
   type ModelDownloader,
 } from 'node-llama-cpp';
@@ -22,7 +25,7 @@ export const MODEL_CATALOG: ModelCatalogEntry[] = [
   {
     id: 'qwen2.5-3b',
     name: 'Qwen2.5 3B Instruct',
-    description: 'Balanced — solid Hebrew and English, runs on any modern Mac.',
+    description: 'Balanced — solid Hebrew and English, runs on any modern machine.',
     uri: 'hf:bartowski/Qwen2.5-3B-Instruct-GGUF:Q4_K_M',
     approxSizeBytes: 2_100_000_000,
     recommended: true,
@@ -45,6 +48,9 @@ export type LlmState =
   | 'ready'
   | 'error';
 
+/** Where inference runs: a downloaded on-device model, or a remote Ollama server. */
+export type LlmMode = 'local' | 'ollama';
+
 export interface LlmStatus {
   state: LlmState;
   modelId: string | null;
@@ -60,13 +66,129 @@ interface PersistedModel {
   filePath: string;
 }
 
+/** Connection details for an Ollama server — a local install or Ollama Cloud. */
+export interface OllamaConfig {
+  baseUrl: string; // e.g. http://localhost:11434 or https://ollama.com
+  apiKey: string; // optional — required for Ollama Cloud's free tier
+  model: string; // e.g. qwen2.5:3b
+}
+
+interface PersistedProvider {
+  mode: LlmMode;
+  ollama: OllamaConfig;
+}
+
 /**
- * Manages the on-device LLM: downloading a GGUF model (with progress), loading
- * it into memory, and reporting status. The model never leaves the machine.
+ * A single, short-lived inference handle. Each `prompt` is independent — no
+ * conversation carries over — so the same handle serves a whole batch of
+ * classifications. `dispose` releases any native resources.
+ */
+export interface LlmSession {
+  prompt(text: string, opts?: PromptOptions): Promise<string>;
+  dispose(): void;
+}
+
+export interface PromptOptions {
+  /** Constrain the output to this JSON schema (grammar locally, `format` on Ollama). */
+  jsonSchema?: object;
+  /** Soft cap on generated tokens. */
+  maxTokens?: number;
+}
+
+type GrammarSchema = Parameters<Llama['createGrammarForJsonSchema']>[0];
+
+/** Drops a trailing slash so `${url}/api/chat` never doubles up. */
+function normalizeUrl(url: string): string {
+  return (url ?? '').trim().replace(/\/+$/, '');
+}
+
+/** An inference handle backed by the on-device llama.cpp model. */
+class LocalSession implements LlmSession {
+  private readonly grammars = new Map<string, Promise<LlamaGrammar>>();
+
+  constructor(
+    private readonly llama: Llama,
+    private readonly context: LlamaContext,
+    private readonly session: LlamaChatSession,
+  ) {}
+
+  private grammarFor(schema: object): Promise<LlamaGrammar> {
+    const key = JSON.stringify(schema);
+    let g = this.grammars.get(key);
+    if (!g) {
+      g = this.llama.createGrammarForJsonSchema(schema as GrammarSchema);
+      this.grammars.set(key, g);
+    }
+    return g;
+  }
+
+  async prompt(text: string, opts?: PromptOptions): Promise<string> {
+    const grammar = opts?.jsonSchema ? await this.grammarFor(opts.jsonSchema) : undefined;
+    const response = await this.session.prompt(text, {
+      grammar,
+      maxTokens: opts?.maxTokens,
+    });
+    // Each prompt stands alone — clear history so the next one starts clean.
+    this.session.resetChatHistory();
+    return response;
+  }
+
+  dispose(): void {
+    this.context.dispose();
+  }
+}
+
+/** An inference handle that calls a remote Ollama server over HTTP. */
+class OllamaSession implements LlmSession {
+  constructor(
+    private readonly cfg: OllamaConfig,
+    private readonly system: string,
+  ) {}
+
+  async prompt(text: string, opts?: PromptOptions): Promise<string> {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (this.cfg.apiKey) headers.Authorization = `Bearer ${this.cfg.apiKey}`;
+
+    const body: Record<string, unknown> = {
+      model: this.cfg.model,
+      messages: [
+        { role: 'system', content: this.system },
+        { role: 'user', content: text },
+      ],
+      stream: false,
+    };
+    if (opts?.jsonSchema) body.format = opts.jsonSchema;
+    if (opts?.maxTokens) body.options = { num_predict: opts.maxTokens };
+
+    const res = await fetch(`${this.cfg.baseUrl}/api/chat`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(120_000),
+    });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      throw new Error(`Ollama replied HTTP ${res.status}${detail ? `: ${detail.slice(0, 200)}` : ''}`);
+    }
+    const data = (await res.json()) as { message?: { content?: string } };
+    return (data.message?.content ?? '').trim();
+  }
+
+  dispose(): void {
+    // Stateless HTTP — nothing to release.
+  }
+}
+
+/**
+ * Manages how Hon runs AI: either an on-device GGUF model (downloaded with
+ * progress, never leaving the machine) or a remote Ollama server — a local
+ * install or Ollama Cloud's free tier — for machines that can't run a model
+ * locally. The active choice and Ollama details persist across restarts.
  */
 export class LlmManager {
   private readonly modelsDir: string;
   private readonly stateFile: string;
+  private readonly providerFile: string;
 
   private status: LlmStatus = {
     state: 'not-downloaded',
@@ -77,6 +199,9 @@ export class LlmManager {
     totalBytes: 0,
   };
 
+  private mode: LlmMode = 'local';
+  private ollama: OllamaConfig = { baseUrl: '', apiKey: '', model: '' };
+
   private abortController: AbortController | null = null;
   private llama: Llama | null = null;
   private model: LlamaModel | null = null;
@@ -85,19 +210,121 @@ export class LlmManager {
   constructor(dataDir: string) {
     this.modelsDir = join(dataDir, 'models');
     this.stateFile = join(this.modelsDir, 'active-model.json');
+    this.providerFile = join(dataDir, 'llm-provider.json');
     try {
       mkdirSync(this.modelsDir, { recursive: true });
+      this.restoreProvider();
       this.restoreState();
     } catch {
       // start fresh if the models directory can't be prepared
     }
   }
 
-  getStatus(): LlmStatus & { catalog: ModelCatalogEntry[]; modelsDir: string } {
-    return { ...this.status, catalog: MODEL_CATALOG, modelsDir: this.modelsDir };
+  getStatus(): LlmStatus & {
+    catalog: ModelCatalogEntry[];
+    modelsDir: string;
+    mode: LlmMode;
+    ready: boolean;
+    ollama: { baseUrl: string; model: string; hasKey: boolean };
+  } {
+    return {
+      ...this.status,
+      catalog: MODEL_CATALOG,
+      modelsDir: this.modelsDir,
+      mode: this.mode,
+      ready: this.isReady(),
+      // The API key is never echoed back — only whether one is stored.
+      ollama: {
+        baseUrl: this.ollama.baseUrl,
+        model: this.ollama.model,
+        hasKey: !!this.ollama.apiKey,
+      },
+    };
   }
 
-  /** The loaded model, for inference. Null until the state is `ready`. */
+  /** True when inference can run right now under the active provider. */
+  isReady(): boolean {
+    if (this.mode === 'ollama') {
+      return !!(this.ollama.baseUrl && this.ollama.model);
+    }
+    return this.status.state === 'ready' && !!this.model;
+  }
+
+  /**
+   * Opens an inference handle for the active provider. Throws when the provider
+   * is not ready — callers should gate on `isReady()` first.
+   */
+  async openSession(opts: { system: string; contextSize?: number }): Promise<LlmSession> {
+    if (this.mode === 'ollama') {
+      if (!this.ollama.baseUrl || !this.ollama.model) {
+        throw new Error('Ollama is not configured.');
+      }
+      return new OllamaSession(this.ollama, opts.system);
+    }
+    if (!this.llama || !this.model) {
+      throw new Error('No on-device AI model is loaded.');
+    }
+    const context = await this.model.createContext({ contextSize: opts.contextSize ?? 2048 });
+    const session = new LlamaChatSession({
+      contextSequence: context.getSequence(),
+      systemPrompt: opts.system,
+    });
+    return new LocalSession(this.llama, context, session);
+  }
+
+  /** Switches the active provider and persists the choice. */
+  setProvider(next: { mode: LlmMode; ollama?: Partial<OllamaConfig> }): void {
+    this.mode = next.mode === 'ollama' ? 'ollama' : 'local';
+    if (next.ollama) {
+      this.ollama = {
+        baseUrl: normalizeUrl(next.ollama.baseUrl ?? this.ollama.baseUrl),
+        // An absent key keeps the stored one — the UI omits it to avoid
+        // round-tripping the secret through the browser.
+        apiKey: next.ollama.apiKey ?? this.ollama.apiKey,
+        model: (next.ollama.model ?? this.ollama.model).trim(),
+      };
+    }
+    this.persistProvider();
+  }
+
+  /** Checks an Ollama server is reachable and lists the models it offers. */
+  async testOllama(opts: { baseUrl: string; apiKey?: string }): Promise<{
+    ok: boolean;
+    models: string[];
+    message: string;
+  }> {
+    const baseUrl = normalizeUrl(opts.baseUrl);
+    if (!baseUrl) return { ok: false, models: [], message: 'Enter the Ollama server URL first.' };
+    // An omitted key falls back to the stored one, so a test can run without
+    // re-typing the secret.
+    const apiKey = opts.apiKey ?? this.ollama.apiKey;
+    try {
+      const headers: Record<string, string> = {};
+      if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+      const res = await fetch(`${baseUrl}/api/tags`, {
+        headers,
+        signal: AbortSignal.timeout(8_000),
+      });
+      if (!res.ok) {
+        return { ok: false, models: [], message: `Server replied HTTP ${res.status}.` };
+      }
+      const data = (await res.json()) as { models?: Array<{ name?: string; model?: string }> };
+      const models = (data.models ?? [])
+        .map((m) => m.name ?? m.model ?? '')
+        .filter(Boolean);
+      return {
+        ok: true,
+        models,
+        message: models.length
+          ? `Connected — ${models.length} model${models.length === 1 ? '' : 's'} available.`
+          : 'Connected to the server.',
+      };
+    } catch {
+      return { ok: false, models: [], message: 'Could not reach the server — check the URL and key.' };
+    }
+  }
+
+  /** The loaded on-device model, for direct inference. Null unless local + ready. */
   getModel(): LlamaModel | null {
     return this.model;
   }
@@ -214,5 +441,29 @@ export class LlmManager {
     };
     // Load in the background so sidecar startup is not blocked.
     void this.load();
+  }
+
+  private persistProvider(): void {
+    try {
+      const data: PersistedProvider = { mode: this.mode, ollama: this.ollama };
+      writeFileSync(this.providerFile, JSON.stringify(data, null, 2), 'utf8');
+    } catch {
+      // non-fatal: the choice still holds for this session
+    }
+  }
+
+  private restoreProvider(): void {
+    if (!existsSync(this.providerFile)) return;
+    try {
+      const saved = JSON.parse(readFileSync(this.providerFile, 'utf8')) as PersistedProvider;
+      this.mode = saved.mode === 'ollama' ? 'ollama' : 'local';
+      this.ollama = {
+        baseUrl: normalizeUrl(saved.ollama?.baseUrl ?? ''),
+        apiKey: saved.ollama?.apiKey ?? '',
+        model: (saved.ollama?.model ?? '').trim(),
+      };
+    } catch {
+      // ignore a corrupt provider file — defaults to the local model
+    }
   }
 }

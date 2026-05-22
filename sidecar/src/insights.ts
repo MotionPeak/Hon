@@ -1,4 +1,3 @@
-import { LlamaChatSession } from 'node-llama-cpp';
 import { buildBudgetReport, type BudgetReport } from './budget.js';
 import { buildAnalytics, type Analytics } from './analytics.js';
 import type { LlmManager } from './llm.js';
@@ -55,9 +54,8 @@ export class InsightsGenerator {
 
   private async run(): Promise<void> {
     try {
-      const model = this.llm.getModel();
-      if (!model) {
-        this.fail('Download the AI model first to generate insights.');
+      if (!this.llm.isReady()) {
+        this.fail('Set up an AI model first to generate insights.');
         return;
       }
 
@@ -68,12 +66,11 @@ export class InsightsGenerator {
       }
       const analytics = buildAnalytics(this.repo);
 
-      const context = await model.createContext({ contextSize: 4096 });
+      const session = await this.llm.openSession({
+        system: SYSTEM_PROMPT,
+        contextSize: 4096,
+      });
       try {
-        const session = new LlamaChatSession({
-          contextSequence: context.getSequence(),
-          systemPrompt: SYSTEM_PROMPT,
-        });
         const text = await session.prompt(buildPrompt(report, analytics), {
           maxTokens: 480,
         });
@@ -84,7 +81,7 @@ export class InsightsGenerator {
           message: '',
         };
       } finally {
-        context.dispose();
+        session.dispose();
       }
     } catch (err) {
       this.fail(err instanceof Error ? err.message : String(err));

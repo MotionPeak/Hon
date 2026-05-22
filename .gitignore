@@ -22,3 +22,7 @@ npm-debug.log*
 *.db-wal
 *.db-shm
 data/
+
+# Secrets — the deployment token. Commit .env.example, never .env.
+.env
+.env.local

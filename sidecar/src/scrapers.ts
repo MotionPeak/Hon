@@ -6,6 +6,15 @@ import { SNAPTRADE_COMPANY_ID, snaptradeCompany } from './snaptrade.js';
 import { PENSION_COMPANIES, isPensionCompany } from './pension.js';
 import { watchForOtp, type OtpCallback } from './otp.js';
 
+// Extra Chromium flags for the scraper browser. Inside a container Chromium
+// runs as root with no user namespace, so its sandbox cannot start — the Docker
+// image sets HON_BROWSER_NO_SANDBOX=1 to drop it. On a normal desktop the
+// sandbox stays on (the array is empty).
+const BROWSER_ARGS: string[] =
+  process.env.HON_BROWSER_NO_SANDBOX === '1'
+    ? ['--no-sandbox', '--disable-setuid-sandbox']
+    : [];
+
 export type CompanyType = 'bank' | 'card' | 'brokerage' | 'pension';
 
 export interface CompanyInfo {
@@ -128,6 +137,7 @@ export async function runScrape(
     showBrowser: false,
     timeout: 90_000,
     defaultTimeout: 60_000,
+    args: BROWSER_ARGS,
     // On failure, save a screenshot of the stuck page for diagnosis.
     storeFailureScreenShotPath: screenshotPath,
   });
@@ -179,7 +189,7 @@ export async function runInteractiveScrape(
 ): Promise<ScrapeOutcome> {
   let browser: Browser | undefined;
   try {
-    browser = await puppeteer.launch({ headless: true });
+    browser = await puppeteer.launch({ headless: true, args: BROWSER_ARGS });
     const launched = browser;
 
     // Capture the page israeli-bank-scrapers creates on our browser.

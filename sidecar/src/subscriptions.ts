@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto';
-import { LlamaChatSession } from 'node-llama-cpp';
 import type { LlmManager } from './llm.js';
 
 // A lapsed subscription is not always cancelled — banks often re-bill the same
@@ -50,33 +49,28 @@ export class SubscriptionMatcher {
     const cached = this.cache.get(key);
     if (cached) return { ready: true, aliases: cached };
 
-    const llama = this.llm.getLlama();
-    const model = this.llm.getModel();
-    if (!llama || !model) return { ready: false, aliases: {} };
+    if (!this.llm.isReady()) return { ready: false, aliases: {} };
 
-    const context = await model.createContext({ contextSize: 2048 });
+    const session = await this.llm.openSession({
+      system:
+        SYSTEM_PROMPT +
+        '\n\nActive subscriptions:\n' +
+        activeNames.map((name) => `- ${name}`).join('\n'),
+      contextSize: 2048,
+    });
+    const schema = {
+      type: 'object',
+      properties: { sameAs: { enum: [...activeNames, NONE] } },
+    } as const;
     const aliases: Record<string, string> = {};
     try {
-      const session = new LlamaChatSession({
-        contextSequence: context.getSequence(),
-        systemPrompt:
-          SYSTEM_PROMPT +
-          '\n\nActive subscriptions:\n' +
-          activeNames.map((name) => `- ${name}`).join('\n'),
-      });
-      const grammar = await llama.createGrammarForJsonSchema({
-        type: 'object',
-        properties: { sameAs: { enum: [...activeNames, NONE] } },
-      } as const);
-
       for (const name of deadNames) {
         try {
           const response = await session.prompt(
             `Lapsed subscription: "${name}". Which active subscription is the same service?`,
-            { grammar },
+            { jsonSchema: schema },
           );
-          const parsed = grammar.parse(response) as { sameAs?: string };
-          session.resetChatHistory();
+          const parsed = JSON.parse(response) as { sameAs?: string };
           if (parsed.sameAs && parsed.sameAs !== NONE && activeNames.includes(parsed.sameAs)) {
             aliases[name] = parsed.sameAs;
           }
@@ -85,7 +79,7 @@ export class SubscriptionMatcher {
         }
       }
     } finally {
-      context.dispose();
+      session.dispose();
     }
 
     this.cache.set(key, aliases);

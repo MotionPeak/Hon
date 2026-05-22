@@ -106,8 +106,16 @@ export interface PiggyBank {
   monthlyAmount: number;
   currency: string;
   sortOrder: number;
+  onHold: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+// SQLite has no boolean type, so `onHold` arrives as 0 | 1.
+type PiggyBankRow = Omit<PiggyBank, 'onHold'> & { onHold: number };
+
+function toPiggyBank(row: PiggyBankRow): PiggyBank {
+  return { ...row, onHold: row.onHold !== 0 };
 }
 
 /** A single month's set-aside for one piggy bank. */
@@ -562,18 +570,21 @@ export class Repo {
 
   private static readonly PIGGY_COLS =
     'id, name, emoji, target_amount AS targetAmount, monthly_amount AS monthlyAmount, ' +
-    'currency, sort_order AS sortOrder, created_at AS createdAt, updated_at AS updatedAt';
+    'currency, sort_order AS sortOrder, on_hold AS onHold, ' +
+    'created_at AS createdAt, updated_at AS updatedAt';
 
   listPiggyBanks(): PiggyBank[] {
-    return this.db
+    const rows = this.db
       .prepare(`SELECT ${Repo.PIGGY_COLS} FROM piggy_banks ORDER BY sort_order, created_at`)
-      .all() as PiggyBank[];
+      .all() as PiggyBankRow[];
+    return rows.map(toPiggyBank);
   }
 
   getPiggyBank(id: string): PiggyBank | undefined {
-    return this.db
+    const row = this.db
       .prepare(`SELECT ${Repo.PIGGY_COLS} FROM piggy_banks WHERE id = ?`)
-      .get(id) as PiggyBank | undefined;
+      .get(id) as PiggyBankRow | undefined;
+    return row ? toPiggyBank(row) : undefined;
   }
 
   createPiggyBank(input: {
@@ -612,7 +623,13 @@ export class Repo {
 
   updatePiggyBank(
     id: string,
-    fields: Partial<{ name: string; emoji: string; targetAmount: number; monthlyAmount: number }>,
+    fields: Partial<{
+      name: string;
+      emoji: string;
+      targetAmount: number;
+      monthlyAmount: number;
+      onHold: boolean;
+    }>,
   ): void {
     const sets: string[] = [];
     const values: unknown[] = [];
@@ -631,6 +648,10 @@ export class Repo {
     if (fields.monthlyAmount !== undefined) {
       sets.push('monthly_amount = ?');
       values.push(fields.monthlyAmount);
+    }
+    if (fields.onHold !== undefined) {
+      sets.push('on_hold = ?');
+      values.push(fields.onHold ? 1 : 0);
     }
     if (sets.length === 0) return;
     sets.push('updated_at = ?');

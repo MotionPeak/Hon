@@ -1,0 +1,26 @@
+# Run the Hon engine on a NAS or home server.
+#
+#   1. cp .env.example .env   and put a long random secret in HON_TOKEN
+#   2. docker compose up -d --build
+#
+# Reach it at  http://<server>:4000/#token=<your HON_TOKEN>
+#
+# Keep <server> on your LAN or a private VPN (Tailscale, WireGuard) — do not
+# port-forward this to the public internet. See the README's NAS section.
+services:
+  hon:
+    build: .
+    container_name: hon
+    restart: unless-stopped
+    ports:
+      # host:container — change the host side to move it off 4000.
+      - "4000:4000"
+    environment:
+      # Required. Compose aborts if HON_TOKEN is missing from .env.
+      HON_TOKEN: ${HON_TOKEN:?set HON_TOKEN in .env — see .env.example}
+    volumes:
+      # The vault, SQLite database and downloaded AI models persist here.
+      - hon-data:/data
+
+volumes:
+  hon-data:

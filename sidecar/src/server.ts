@@ -22,6 +22,7 @@ import { Vault } from './vault.js';
 import { LlmManager } from './llm.js';
 import { Categorizer, CATEGORIES } from './categorize.js';
 import { buildBudgetReport } from './budget.js';
+import { persistPiggyMonth } from './piggy.js';
 import { InsightsGenerator } from './insights.js';
 import { SubscriptionMatcher } from './subscriptions.js';
 import { totalInILS } from './fx.js';
@@ -35,6 +36,12 @@ const token = process.env.HON_TOKEN ?? '';
 const dataDir =
   process.env.HON_DATA_DIR ?? join(homedir(), 'Library', 'Application Support', 'Hon');
 const port = Number(process.env.HON_PORT ?? 0); // 0 => OS picks a free port
+// The interface to bind. Loopback by default — nothing leaves the machine.
+// A NAS/server deployment sets HON_HOST=0.0.0.0 so the LAN (or a VPN such as
+// Tailscale) can reach it.
+const host = process.env.HON_HOST ?? '127.0.0.1';
+const isLoopbackHost =
+  host === '127.0.0.1' || host === 'localhost' || host === '::1';
 
 function log(msg: string): void {
   process.stdout.write(msg + '\n');
@@ -790,6 +797,40 @@ app.post('/llm/cancel', async () => {
   return { ok: true };
 });
 
+// Switches between the on-device model and a remote Ollama server. The API key
+// is stored server-side and never echoed back; an absent key keeps the saved
+// one, so the browser need not round-trip the secret.
+app.post('/llm/provider', async (req) => {
+  const body = (req.body ?? {}) as {
+    mode?: string;
+    ollamaUrl?: string;
+    ollamaKey?: string;
+    ollamaModel?: string;
+  };
+  // Only forward fields the request actually carried — an omitted field keeps
+  // its stored value, so switching to the local model never wipes the Ollama
+  // details (and vice versa).
+  const ollama: Record<string, string> = {};
+  if (body.ollamaUrl !== undefined) ollama.baseUrl = body.ollamaUrl;
+  if (body.ollamaKey !== undefined) ollama.apiKey = body.ollamaKey;
+  if (body.ollamaModel !== undefined) ollama.model = body.ollamaModel;
+  llm.setProvider({
+    mode: body.mode === 'ollama' ? 'ollama' : 'local',
+    ollama,
+  });
+  return llm.getStatus();
+});
+
+// Probes an Ollama server (without committing it) so the UI can confirm the
+// URL and key work before the user saves them.
+app.post('/llm/ollama/test', async (req) => {
+  const body = (req.body ?? {}) as { ollamaUrl?: string; ollamaKey?: string };
+  return llm.testOllama({
+    baseUrl: body.ollamaUrl ?? '',
+    ...(body.ollamaKey !== undefined ? { apiKey: body.ollamaKey } : {}),
+  });
+});
+
 app.post('/categorize', async (_req, reply) => {
   if (!categorizer) return reply.code(503).send({ error: 'database unavailable' });
   categorizer.start();
@@ -804,14 +845,35 @@ app.get('/categorize', async (_req, reply) => {
 app.get('/budget', async (req, reply) => {
   if (!repo) return reply.code(503).send({ error: 'database unavailable' });
   // The web app scopes the budget to the user's billing cycle by passing its
-  // ISO bounds; fall back to the calendar month when they are absent.
-  const q = (req.query ?? {}) as { start?: string; end?: string };
+  // ISO bounds; fall back to the calendar month when they are absent. It also
+  // passes its recurring projection (expected income, smoothed fixed bills) so
+  // piggy banks are settled against expected — not just actual — income.
+  const q = (req.query ?? {}) as {
+    start?: string;
+    end?: string;
+    expectedIncome?: string;
+    expectedFixed?: string;
+  };
   const iso = /^\d{4}-\d{2}-\d{2}$/;
   const range =
     q.start && q.end && iso.test(q.start) && iso.test(q.end)
       ? { start: q.start, end: q.end, label: q.start.slice(0, 7) }
       : undefined;
-  return buildBudgetReport(repo, range);
+  const num = (v: string | undefined): number | undefined => {
+    const n = Number(v);
+    return v !== undefined && Number.isFinite(n) ? n : undefined;
+  };
+  const expectedIncome = num(q.expectedIncome);
+  const expectedFixed = num(q.expectedFixed);
+  const projection =
+    expectedIncome !== undefined || expectedFixed !== undefined
+      ? { expectedIncome, expectedFixed }
+      : undefined;
+  const report = buildBudgetReport(repo, range, projection);
+  // `/budget` is the one caller that commits the piggy ledger — so a report
+  // built elsewhere (insights) cannot overwrite it with stale figures.
+  persistPiggyMonth(repo, report.piggy);
+  return report;
 });
 
 app.put('/budgets', async (req, reply) => {
@@ -869,12 +931,14 @@ app.put('/piggy/:id', async (req, reply) => {
     emoji?: string;
     targetAmount?: number;
     monthlyAmount?: number;
+    onHold?: boolean;
   };
   const fields: Partial<{
     name: string;
     emoji: string;
     targetAmount: number;
     monthlyAmount: number;
+    onHold: boolean;
   }> = {};
   if (body.name !== undefined) {
     const name = body.name.trim();
@@ -896,6 +960,7 @@ app.put('/piggy/:id', async (req, reply) => {
     }
     fields.monthlyAmount = v;
   }
+  if (body.onHold !== undefined) fields.onHold = !!body.onHold;
   repo.updatePiggyBank(id, fields);
   return { piggy: repo.getPiggyBank(id) };
 });
@@ -932,12 +997,23 @@ app.post('/subscriptions/aliases', async (req, reply) => {
 });
 
 async function main(): Promise<void> {
+  // Binding beyond loopback with no token would expose an unauthenticated API
+  // to the whole network — refuse rather than do that silently.
+  if (!isLoopbackHost && !token) {
+    const msg =
+      `Refusing to start: HON_HOST is ${host} (not loopback) but HON_TOKEN is ` +
+      'empty. That would expose the API without authentication. Set HON_TOKEN ' +
+      'to a long random secret first.';
+    emit({ event: 'error', message: msg });
+    log(msg);
+    process.exit(1);
+  }
   try {
-    await app.listen({ host: '127.0.0.1', port });
+    await app.listen({ host, port });
     const addr = app.server.address();
     const actualPort = typeof addr === 'object' && addr ? addr.port : port;
     emit({ event: 'ready', port: actualPort, pid: process.pid, version: VERSION });
-    log(`listening on 127.0.0.1:${actualPort}`);
+    log(`listening on ${host}:${actualPort}`);
   } catch (err) {
     emit({ event: 'error', message: (err as Error).message });
     process.exit(1);

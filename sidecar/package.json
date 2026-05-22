@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node --import tsx src/server.ts",
     "dev": "node --import tsx --watch src/server.ts",
-    "web": "./web.sh",
+    "web": "node web.mjs",
     "typecheck": "tsc --noEmit",
     "postinstall": "patch-package"
   },

@@ -1,19 +1,22 @@
 # Hon
 
-**A local-first personal finance aggregator for macOS.** Hon pulls balances and
+**A local-first personal finance aggregator.** Hon pulls balances and
 transactions from Israeli banks, credit cards, brokerages and pension funds,
-categorizes spending with an on-device AI model, and builds budgets and
-insights — entirely on your own machine. **No financial data ever leaves the
-Mac.** There is no Hon server, no account, no telemetry.
+categorizes spending with AI, and builds budgets and insights — entirely on
+your own machine. **No financial data ever leaves your computer.** There is no
+Hon server, no account, no telemetry.
+
+Hon runs on **macOS, Linux, and Windows** as a local web app; macOS also gets a
+native desktop shell.
 
 Hon has two parts:
 
 - **Hon app** (`Hon/`) — a native SwiftUI macOS app. It supervises the engine
-  and hosts the dashboard in a `WKWebView`.
+  and hosts the dashboard in a `WKWebView`. macOS only.
 - **Sidecar** (`sidecar/`) — a local Node engine that does the scraping,
-  encrypted storage (SQLite), categorization and on-device LLM work. It speaks
-  HTTP on `127.0.0.1` only and also serves the complete web UI, so Hon can run
-  without Xcode at all.
+  encrypted storage (SQLite), categorization and AI work. It speaks HTTP on
+  `127.0.0.1` only and also serves the complete web UI, so Hon runs on any OS
+  with Node — no Xcode needed.
 
 ---
 
@@ -22,10 +25,11 @@ Hon has two parts:
 - [What Hon does](#what-hon-does)
 - [Security — the credential vault](#security--the-credential-vault)
 - [Splitwise integration](#splitwise-integration)
-- [On-device AI](#on-device-ai)
+- [AI engine](#ai-engine)
 - [Tech stack & tools](#tech-stack--tools)
 - [Requirements](#requirements)
-- [Run it — web app](#run-it--web-app-no-xcode)
+- [Run it — web app](#run-it--web-app-macos-linux-windows)
+- [Run it — NAS or home server](#run-it--nas-or-home-server)
 - [Run it — native macOS app](#run-it--native-macos-app)
 - [Setup inside the app](#setup-inside-the-app)
 - [Where data lives](#where-data-lives)
@@ -116,19 +120,27 @@ split straight from a transaction (`sidecar/src/splitwise.ts`):
 
 ---
 
-## On-device AI
+## AI engine
 
-A local **GGUF** model (run via [`node-llama-cpp`](https://github.com/withcatai/node-llama-cpp))
-powers three things, all fully offline:
+AI powers three things:
 
 1. **Categorization** — classifies transactions the rule map can't, constrained
-   to the fixed category list with a JSON-schema grammar.
+   to the fixed category list with a JSON schema.
 2. **Insights** — an optional written summary of the cycle's spending.
 3. **Subscription matching** — decides whether a lapsed subscription is the same
    merchant as an active one under a renamed descriptor.
 
-The model is not bundled — download one from inside the app (≈2.1 GB). It runs
-entirely on your Mac; nothing is sent anywhere.
+Pick one of two engines in **Settings → AI engine**:
+
+- **On-device model** — a local **GGUF** model run via
+  [`node-llama-cpp`](https://github.com/withcatai/node-llama-cpp). Not bundled;
+  download one from inside the app (≈2.1 GB). Runs entirely on this computer —
+  nothing is sent anywhere. Best for privacy, but needs a reasonably capable
+  machine.
+- **Ollama server** — point Hon at any [Ollama](https://ollama.com) server: a
+  local Ollama install, or **Ollama Cloud's free tier** (paste its API key) for
+  computers that can't run a model locally. Note: transaction descriptions are
+  sent to whichever server you choose.
 
 ---
 
@@ -159,14 +171,14 @@ the Xcode project is generated from `project.yml` with
 
 ## Requirements
 
-- macOS 15 or later
-- [Node.js](https://nodejs.org) 22.12 or later — `brew install node`
-- For the native app only: Xcode, plus
+- [Node.js](https://nodejs.org) 22.12 or later
+- For the native macOS app only: macOS 15+, Xcode, and
   [XcodeGen](https://github.com/yonaskolb/XcodeGen) — `brew install xcodegen`
 
-## Run it — web app (no Xcode)
+## Run it — web app (macOS, Linux, Windows)
 
-The quickest path. The sidecar starts and opens the web UI in your browser.
+The quickest path, and the only one on Linux and Windows. The sidecar starts and
+opens the web UI in your default browser.
 
 ```bash
 cd sidecar
@@ -174,8 +186,57 @@ npm install      # first run is large: builds native modules, downloads Chromium
 npm run web
 ```
 
+`npm run web` is cross-platform. You can also launch it directly:
+
+- **macOS / Linux** — `./web.sh`
+- **Windows** — double-click `web.cmd`, or run `web.cmd` in a terminal
+
 This opens `http://127.0.0.1:4000`. The engine binds to loopback only, and the
 web app is authenticated with a fresh token generated on each run.
+
+> The native desktop shell is macOS-only. On Linux and Windows, Hon runs as the
+> web app above — same engine, same dashboard, in your browser.
+
+## Run it — NAS or home server
+
+Run Hon once on an always-on machine — a Synology/QNAP/Unraid NAS, a home
+server, a Raspberry Pi — and reach the same dashboard from your laptop and
+phone. The shipped Docker setup is the easy path.
+
+```bash
+cd sidecar
+cp .env.example .env          # then put a long random secret in HON_TOKEN
+docker compose up -d --build
+```
+
+Open `http://<server-address>:4000/#token=<your HON_TOKEN>`. The vault, the
+SQLite database and any downloaded AI model persist in the `hon-data` volume,
+so restarts and rebuilds keep your data.
+
+Not using Docker? The engine is plain Node — run it directly on the server:
+
+```bash
+HON_HOST=0.0.0.0 HON_TOKEN=<long-random-secret> npm start
+```
+
+**Reaching it from everywhere — safely.** Hon holds your bank logins, so do
+**not** port-forward it to the public internet. Instead put the server on a
+private VPN and reach Hon through that:
+
+- Install [Tailscale](https://tailscale.com) (free for personal use) on the
+  server and on each device you'll use. Hon then answers on the server's
+  Tailscale address from anywhere, with no ports opened to the internet.
+- WireGuard, your router's built-in VPN, or a NAS feature like Synology VPN
+  Server all work the same way.
+
+Security notes:
+
+- `HON_TOKEN` is the **only** thing gating the API — make it long and random,
+  and treat it like a password. The engine **refuses to start** if it is bound
+  beyond loopback without a token set.
+- Data at rest is still protected by the vault passphrase you set on first run.
+- To move Hon off port 4000, change the host side of the `ports:` mapping in
+  `docker-compose.yml` (e.g. `"8800:4000"`).
 
 ## Run it — native macOS app
 
@@ -206,8 +267,10 @@ Then Build & Run (⌘R). The app launches and supervises the sidecar itself.
 The repo ships with no data and no credentials. You configure these on first
 run:
 
-- **AI model** — used for categorization and insights. Not bundled; download a
-  model from within the app (≈2.1 GB). It runs fully on-device.
+- **AI engine** — used for categorization and insights. In **Settings → AI
+  engine**, either download an on-device model (≈2.1 GB, runs fully offline) or
+  connect an Ollama server — a local Ollama or Ollama Cloud's free tier — for
+  computers that can't run a model locally.
 - **Israeli banks / credit cards** — add an account and enter your login
   credentials. They are stored locally — the macOS Keychain for the native
   app, the password-protected vault for the web app.

@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-export const SCHEMA_VERSION = 11;
+export const SCHEMA_VERSION = 12;
 
 export interface DbHandle {
   db: Database.Database;
@@ -222,6 +222,13 @@ const MIGRATIONS: { version: number; sql: string }[] = [
         PRIMARY KEY (piggy_id, month)
       );
     `,
+  },
+  {
+    // A piggy bank the user has manually paused. While on hold it gets no
+    // monthly set-aside and stops counting as a budget expense, regardless of
+    // headroom — distinct from a bank auto-skipped because the budget is tight.
+    version: 12,
+    sql: `ALTER TABLE piggy_banks ADD COLUMN on_hold INTEGER NOT NULL DEFAULT 0;`,
   },
 ];
 

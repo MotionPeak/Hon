@@ -1,4 +1,3 @@
-import { LlamaChatSession } from 'node-llama-cpp';
 import type { LlmManager } from './llm.js';
 import type { Repo } from './repo.js';
 
@@ -349,27 +348,24 @@ export class Categorizer {
     }
   }
 
-  /** Builds an LLM classifier if a model is loaded; otherwise null (rules only). */
+  /** Builds an LLM classifier if a provider is ready; otherwise null (rules only). */
   private async createLlmClassifier(): Promise<{
     classify: (description: string) => Promise<Category>;
     dispose: () => void;
   } | null> {
-    const llama = this.llm.getLlama();
-    const model = this.llm.getModel();
-    if (!llama || !model) return null;
+    if (!this.llm.isReady()) return null;
 
-    const context = await model.createContext({ contextSize: 2048 });
-    const session = new LlamaChatSession({
-      contextSequence: context.getSequence(),
-      systemPrompt: SYSTEM_PROMPT,
+    const session = await this.llm.openSession({
+      system: SYSTEM_PROMPT,
+      contextSize: 2048,
     });
-    const grammar = await llama.createGrammarForJsonSchema(GRAMMAR_SCHEMA);
 
     const classify = async (description: string): Promise<Category> => {
       try {
-        const response = await session.prompt(`Transaction: "${description}"`, { grammar });
-        const parsed = grammar.parse(response) as { category?: string };
-        session.resetChatHistory();
+        const response = await session.prompt(`Transaction: "${description}"`, {
+          jsonSchema: GRAMMAR_SCHEMA,
+        });
+        const parsed = JSON.parse(response) as { category?: string };
         return parsed.category && CATEGORY_SET.has(parsed.category)
           ? (parsed.category as Category)
           : 'Other';
@@ -378,6 +374,6 @@ export class Categorizer {
       }
     };
 
-    return { classify, dispose: () => context.dispose() };
+    return { classify, dispose: () => session.dispose() };
   }
 }

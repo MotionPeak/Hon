@@ -752,6 +752,109 @@
     border-radius: 10px; cursor: pointer; font-size: 13.5px; }
   .sw-member:hover { background: var(--card-hi); }
   .sw-member input { width: auto; flex: 0 0 auto; accent-color: var(--indigo); }
+
+  /* --- Piggy banks ------------------------------------------------------- */
+  .pgy-head { display: flex; align-items: flex-start; gap: 12px;
+    margin-bottom: 16px; }
+  .pgy-head h2 { font-size: 20px; font-weight: 800; }
+  .pgy-head .pgy-sub { color: var(--muted); font-size: 12.5px; margin-top: 3px;
+    line-height: 1.5; max-width: 440px; }
+  .pgy-head .spacer { flex: 1; }
+  .pgy-headroom { display: flex; gap: 9px; align-items: flex-start;
+    background: var(--card); border: 1px solid var(--hairline);
+    border-radius: 13px; padding: 12px 15px; margin-bottom: 16px;
+    font-size: 12.5px; color: var(--muted); line-height: 1.55; }
+  .pgy-headroom b { color: var(--text); font-weight: 700;
+    font-variant-numeric: tabular-nums; }
+  .pgy-grid { display: grid; gap: 15px;
+    grid-template-columns: repeat(auto-fill, minmax(274px, 1fr)); }
+  .pgy-card { background: var(--card); border: 1px solid var(--hairline);
+    border-radius: 18px; padding: 17px; box-shadow: var(--shadow-sm);
+    display: flex; flex-direction: column; gap: 13px;
+    transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease; }
+  .pgy-card:hover { transform: translateY(-3px); box-shadow: var(--shadow);
+    border-color: var(--hairline-2); }
+  .pgy-card.done { border-color: var(--green); }
+  .pgy-card-top { display: flex; align-items: center; gap: 11px; }
+  .pgy-emoji { width: 44px; height: 44px; flex: none; border-radius: 13px;
+    display: flex; align-items: center; justify-content: center; font-size: 23px;
+    background: var(--indigo-soft); }
+  .pgy-card.done .pgy-emoji { background: rgba(61,220,132,0.16); }
+  .pgy-name { font-size: 14.5px; font-weight: 700; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; }
+  .pgy-monthly { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+  .pgy-body { display: flex; align-items: center; gap: 15px; }
+  .pgy-ring { width: 88px; height: 88px; flex: none; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    transition: background .65s cubic-bezier(.2,.7,.2,1); }
+  .pgy-hole { width: 66px; height: 66px; border-radius: 50%;
+    background: var(--card); display: flex; flex-direction: column;
+    align-items: center; justify-content: center; }
+  .pgy-pct { font: 800 18px/1 ui-rounded, "SF Pro Rounded", system-ui;
+    font-variant-numeric: tabular-nums; }
+  .pgy-pct-lbl { font-size: 8.5px; font-weight: 700; letter-spacing: .5px;
+    text-transform: uppercase; color: var(--faint); margin-top: 3px; }
+  .pgy-figs { flex: 1; min-width: 0; }
+  .pgy-saved { font: 800 18px/1.1 ui-rounded, "SF Pro Rounded", system-ui;
+    font-variant-numeric: tabular-nums; }
+  .pgy-target { font-size: 11px; color: var(--faint); margin-top: 3px;
+    line-height: 1.45; }
+  .pgy-eta { font-size: 11px; color: var(--muted); margin-top: 7px;
+    font-weight: 600; }
+  .pgy-badge { display: flex; gap: 7px; font-size: 11.5px; font-weight: 600;
+    padding: 8px 11px; border-radius: 11px; line-height: 1.4; }
+  .pgy-badge.funded, .pgy-badge.done { background: rgba(61,220,132,0.14);
+    color: var(--green); }
+  .pgy-badge.skipped { background: rgba(245,181,74,0.16); color: var(--amber); }
+  .pgy-badge.onhold { background: var(--card-hi); color: var(--muted); }
+  .pgy-card.onhold .pgy-card-top, .pgy-card.onhold .pgy-body { opacity: .5;
+    transition: opacity .2s ease; }
+  .pgy-actions { display: flex; align-items: center; gap: 6px;
+    border-top: 1px solid var(--hairline); padding-top: 11px; }
+  .pgy-actions .spacer { flex: 1; }
+  /* Piggy modal */
+  .pgy-em-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
+  .pgy-em { width: 38px; height: 38px; flex: none; border-radius: 10px;
+    font-size: 19px; padding: 0; background: var(--bg-elev);
+    border: 1px solid var(--hairline-2); cursor: pointer;
+    transition: transform .12s ease, border-color .12s ease,
+      background-color .12s ease; }
+  .pgy-em:hover { transform: translateY(-2px); }
+  .pgy-em.on { border-color: var(--indigo); background: var(--indigo-soft);
+    transform: translateY(-2px); }
+  .fld-lbl { display: block; font-size: 13px; font-weight: 600;
+    margin-bottom: 6px; }
+  .pgy-amt, .pgy-custom { position: relative; }
+  .pgy-amt { margin-bottom: 13px; }
+  .pgy-custom { margin-top: 8px; }
+  .pgy-amt > span, .pgy-custom > span { position: absolute; left: 11px;
+    top: 50%; transform: translateY(-50%); color: var(--faint);
+    font-size: 14px; pointer-events: none; }
+  .pgy-amt input, .pgy-custom input { padding-left: 24px; }
+  #pgy-plans { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+  .pgy-plan { display: flex; flex-direction: column; gap: 2px;
+    align-items: flex-start; padding: 10px 12px; border-radius: 11px;
+    cursor: pointer; text-align: left; background: var(--bg-elev);
+    border: 1px solid var(--hairline-2);
+    transition: border-color .12s ease, transform .12s ease,
+      background-color .12s ease; }
+  .pgy-plan:hover { transform: translateY(-2px); border-color: var(--indigo); }
+  .pgy-plan.on { border-color: var(--indigo); background: var(--indigo-soft); }
+  .pgy-plan-amt { font: 800 15px/1 ui-rounded, "SF Pro Rounded", system-ui;
+    font-variant-numeric: tabular-nums; }
+  .pgy-plan-sub { font-size: 10.5px; color: var(--muted); font-weight: 600; }
+  .pgy-plan-hint { font-size: 12px; color: var(--faint); padding: 8px 2px;
+    grid-column: 1 / -1; }
+  .pgy-modal-eta { font-size: 12px; color: var(--muted); line-height: 1.5;
+    margin-top: 11px; padding: 9px 12px; border-radius: 10px;
+    background: var(--indigo-soft); }
+  .tab-enter .pgy-card { animation: fade-up .42s cubic-bezier(.2,.8,.2,1) both; }
+  .tab-enter .pgy-card:nth-child(2) { animation-delay: .05s; }
+  .tab-enter .pgy-card:nth-child(3) { animation-delay: .1s; }
+  .tab-enter .pgy-card:nth-child(4) { animation-delay: .15s; }
+  .tab-enter .pgy-card:nth-child(5) { animation-delay: .2s; }
+  .tab-enter .pgy-card:nth-child(n+6) { animation-delay: .25s; }
+  .tab-enter .pgy-ring { animation: pie-in .6s cubic-bezier(.2,.8,.2,1) both; }
 </style>
 </head>
 <body>
@@ -837,15 +940,21 @@ function monthlyEquivalent(amount, freq) {
 }
 const FIELD_LABELS = {
   username: "Username", password: "Password", userCode: "User code",
-  id: "ID number", card6Digits: "Card — last 6 digits", nationalID: "National ID",
-  num: "Account number", clientId: "SnapTrade Client ID",
+  id: "ID number", phone: "Phone number", card6Digits: "Card — last 6 digits",
+  nationalID: "National ID", num: "Account number", clientId: "SnapTrade Client ID",
   consumerKey: "SnapTrade Consumer Key",
 };
 const SECURE_FIELDS = new Set(["password", "consumerKey"]);
 const SNAPTRADE_ID = "snaptrade";
 const TABS = [["overview", "Overview", "📊"], ["assets", "Assets", "🏦"],
   ["activity", "Activity", "🧾"], ["subscriptions", "Subscriptions", "🔁"],
-  ["insights", "Insights", "💡"]];
+  ["piggy", "Piggy banks", "🐷"], ["insights", "Insights", "💡"]];
+
+// Icons offered when naming a piggy bank, and the preset "ready in N months"
+// plans the create form turns into a suggested monthly set-aside.
+const PIGGY_EMOJI = ["🐷", "✈️", "🏖️", "🚗", "🏠", "💍", "🎓", "💻", "📷",
+  "🎁", "🛋️", "🚲", "⛺️", "🎮", "🪙", "❤️"];
+const PIGGY_PLANS = [3, 6, 12, 24];
 
 const state = {
   companies: [], connections: [], accounts: [], transactions: [], assets: [],
@@ -1030,10 +1139,18 @@ function currentCycleRange() {
   return { start: key + "-" + pad2(s),
     end: ny + "-" + pad2(nm + 1) + "-" + pad2(s) };
 }
-// "/budget" scoped to the current billing cycle.
+// "/budget" scoped to the current billing cycle. When recurring projection is
+// on, the expected income and smoothed fixed bills go along too — so the engine
+// settles piggy banks against expected income, not just money in so far.
 function budgetUrl() {
   const r = currentCycleRange();
-  return "/budget?start=" + r.start + "&end=" + r.end;
+  let url = "/budget?start=" + r.start + "&end=" + r.end;
+  const p = budgetProjection();
+  if (p) {
+    if (p.expectedIncome != null) url += "&expectedIncome=" + Math.round(p.expectedIncome);
+    url += "&expectedFixed=" + Math.round(p.expectedFixed || 0);
+  }
+  return url;
 }
 // ILS expense spending in one billing cycle, card-bill totals excluded and
 // refund offsets applied — the figures the Activity tab and Overview share.
@@ -1074,7 +1191,7 @@ function txnRefundAmount(t) {
 async function loadAll() {
   try {
     const [companies, connections, accounts, transactions, assets, summary,
-           budget, insights, llm, merchantFreq] =
+           insights, llm, merchantFreq] =
       await Promise.all([
         api("/companies").then((r) => r.companies),
         api("/connections").then((r) => r.connections),
@@ -1082,15 +1199,17 @@ async function loadAll() {
         api("/transactions?limit=1000").then((r) => r.transactions),
         api("/assets").then((r) => r.assets),
         api("/summary").then((r) => r.summary),
-        api(budgetUrl()),
         api("/insights"),
         api("/llm"),
         api("/merchant-frequencies").then((r) => r.frequencies),
       ]);
     Object.assign(state, {
-      companies, connections, accounts, transactions, assets, summary, budget,
+      companies, connections, accounts, transactions, assets, summary,
       insights, llm, merchantFreq,
     });
+    // The budget is fetched once transactions are in state — its URL carries
+    // the recurring projection, which is derived from those transactions.
+    state.budget = await api(budgetUrl());
     // Drop a stale move target if its transaction is gone.
     if (state.move && !transactions.some((t) => t.id === state.move.txnId)) {
       state.move = null;
@@ -1127,6 +1246,8 @@ function render() {
     content.innerHTML = activityView();
   } else if (state.tab === "subscriptions") {
     content.innerHTML = subscriptionsView();
+  } else if (state.tab === "piggy") {
+    content.innerHTML = piggyView();
   } else if (state.tab === "insights") {
     content.innerHTML = insightsView();
   } else {
@@ -1294,16 +1415,20 @@ function netWorthCard() {
     + '<div class="nw-sub">' + netWorthSub(s) + "</div></section>";
 }
 
-// The on-device AI model lives in Settings. `modelSectionHtml` renders its
-// current state; `fillModelSection` paints that into the open Settings modal
-// and wires the download / cancel buttons directly — modal clicks sit outside
-// the #content delegation that drives the rest of the app's buttons.
-function modelSectionHtml() {
-  const llm = state.llm;
-  if (!llm) return '<div class="meta">AI model status unavailable.</div>';
+// The AI engine lives in Settings. `modelSectionHtml` renders its current
+// state — an on-device model or a remote Ollama server; `fillModelSection`
+// paints that into the open Settings modal and wires its buttons directly —
+// modal clicks sit outside the #content delegation that drives the app.
+
+// Which engine panel the Settings modal is showing. A UI mirror of the saved
+// `state.llm.mode`, switched by the segmented toggle before the user applies.
+let llmPanelMode = null;
+
+// The on-device model catalog / download progress — the `local` panel.
+function llmCatalogHtml(llm) {
   if (llm.state === "ready") {
     return '<div class="meta">Loaded: ' + esc(llm.modelName || llm.modelId)
-      + " — powering smart categorization and insights.</div>";
+      + " — runs entirely on this machine, nothing is sent anywhere.</div>";
   }
   if (llm.state === "downloading" || llm.state === "loading" || llm.state === "downloaded") {
     const pct = llm.totalBytes ? Math.round(100 * llm.downloadedBytes / llm.totalBytes) : 0;
@@ -1319,9 +1444,51 @@ function modelSectionHtml() {
     + "</div></div>"
     + '<button class="mini" data-model-download="' + esc(m.id)
     + '">Download</button></div>').join("");
-  return '<div class="meta">No on-device AI model yet — needed for smart '
-    + 'categorization and insights.</div><div class="list" style="margin-top:8px">'
-    + options + "</div>";
+  return '<div class="meta">No on-device model yet — pick one to download. It '
+    + "runs entirely on this machine.</div>"
+    + '<div class="list" style="margin-top:8px">' + options + "</div>";
+}
+
+// The Ollama server form — the `ollama` panel.
+function ollamaPanelHtml(llm) {
+  const o = llm.ollama || {};
+  return '<div class="field"><label>Server URL</label>'
+    + '<input id="set-ollama-url" type="text" autocomplete="off" '
+    + 'placeholder="http://localhost:11434" value="' + esc(o.baseUrl || "") + '"></div>'
+    + '<div class="field"><label>Model name</label>'
+    + '<input id="set-ollama-model" type="text" autocomplete="off" '
+    + 'placeholder="qwen2.5:3b" value="' + esc(o.model || "") + '"></div>'
+    + '<div class="field"><label>API key</label>'
+    + '<input id="set-ollama-key" type="password" autocomplete="off" placeholder="'
+    + (o.hasKey ? "saved — leave blank to keep it" : "for Ollama Cloud; blank for a local server")
+    + '"></div>'
+    + '<div class="actions"><button class="mini" data-ollama-test>Test connection</button></div>'
+    + '<div class="meta" id="set-ollama-status" style="margin-top:8px"></div>'
+    + '<p class="sub-hint" style="margin-top:9px">Transaction descriptions are '
+    + "sent to this server for the AI to read. Use a server you trust — a local "
+    + "Ollama keeps data on your machine; Ollama Cloud sends it to their servers."
+    + "</p>";
+}
+
+function modelSectionHtml() {
+  const llm = state.llm;
+  if (!llm) return '<div class="meta">AI engine status unavailable.</div>';
+  if (llmPanelMode == null) llmPanelMode = llm.mode || "local";
+  const seg = '<div class="seg" id="set-llm-mode" style="margin-bottom:12px">'
+    + '<button type="button" data-llm-mode="local"'
+    + (llmPanelMode === "local" ? ' class="on"' : "") + ">On-device model</button>"
+    + '<button type="button" data-llm-mode="ollama"'
+    + (llmPanelMode === "ollama" ? ' class="on"' : "") + ">Ollama server</button></div>";
+  const panel = llmPanelMode === "ollama" ? ollamaPanelHtml(llm) : llmCatalogHtml(llm);
+  const active = llm.mode === "ollama"
+    ? "Active: Ollama" + (llm.ollama && llm.ollama.model ? " · " + esc(llm.ollama.model) : "")
+    : "Active: on-device model";
+  const applyLabel = llmPanelMode === "ollama"
+    ? "Use this Ollama server" : "Use the on-device model";
+  return seg + panel
+    + '<div class="actions" style="margin-top:12px;justify-content:space-between;'
+    + 'align-items:center"><span class="meta">' + active + "</span>"
+    + '<button class="mini" data-llm-apply>' + applyLabel + "</button></div>";
 }
 
 function fillModelSection() {
@@ -1332,6 +1499,69 @@ function fillModelSection() {
     b.addEventListener("click", () => downloadModel(b.dataset.modelDownload)));
   const cancel = el.querySelector("[data-model-cancel]");
   if (cancel) cancel.addEventListener("click", cancelModel);
+  el.querySelectorAll("[data-llm-mode]").forEach((b) =>
+    b.addEventListener("click", () => { llmPanelMode = b.dataset.llmMode; fillModelSection(); }));
+  const test = el.querySelector("[data-ollama-test]");
+  if (test) test.addEventListener("click", testOllamaConnection);
+  const apply = el.querySelector("[data-llm-apply]");
+  if (apply) apply.addEventListener("click", applyLlmProvider);
+}
+
+// Reads the Ollama form inputs currently on screen.
+function ollamaFieldValues() {
+  const get = (id) => { const e = document.getElementById(id); return e ? e.value : ""; };
+  return {
+    url: get("set-ollama-url").trim(),
+    model: get("set-ollama-model").trim(),
+    key: get("set-ollama-key"),
+  };
+}
+
+// Probes the Ollama server with the values typed in, without saving them.
+async function testOllamaConnection() {
+  const f = ollamaFieldValues();
+  const statusEl = document.getElementById("set-ollama-status");
+  if (statusEl) statusEl.textContent = "Testing the connection…";
+  try {
+    const body = { ollamaUrl: f.url };
+    if (f.key) body.ollamaKey = f.key;
+    const r = await api("/llm/ollama/test", "POST", body);
+    const list = r.models && r.models.length
+      ? " — " + r.models.slice(0, 6).join(", ")
+        + (r.models.length > 6 ? "…" : "") : "";
+    if (statusEl) statusEl.textContent = r.message + list;
+  } catch (e) {
+    if (statusEl) statusEl.textContent = e.message;
+  }
+}
+
+// Commits the chosen AI engine to the engine — separate from the Settings
+// modal's Save button, like the model download.
+async function applyLlmProvider() {
+  const mode = llmPanelMode || "local";
+  const body = { mode };
+  if (mode === "ollama") {
+    const f = ollamaFieldValues();
+    if (!f.url || !f.model) {
+      toast("Enter the Ollama server URL and model name first.", true);
+      return;
+    }
+    body.ollamaUrl = f.url;
+    body.ollamaModel = f.model;
+    if (f.key) body.ollamaKey = f.key; // blank keeps the saved key
+  }
+  try {
+    state.llm = await api("/llm/provider", "POST", body);
+    llmPanelMode = state.llm.mode;
+    fillModelSection();
+    render();
+    toast(mode === "ollama"
+      ? "Now using your Ollama server for AI."
+      : "Now using the on-device model for AI.");
+  } catch (e) {
+    if (e instanceof VaultLocked) return showGate();
+    toast(e.message, true);
+  }
 }
 
 /* --- Accounts ------------------------------------------------------------ */
@@ -1875,10 +2105,11 @@ function projectedVariable(v) {
   const income = p.expectedIncome != null ? p.expectedIncome : v.income;
   const essential = v.essentialSpent || 0;
   const committed = p.expectedFixed + essential;
-  const disposable = income - committed;
+  const piggy = v.piggyFunded || 0;
+  const disposable = income - committed - piggy;
   return { spent: v.spent, income: income, fixedSpent: p.expectedFixed,
-    essentialSpent: essential, committed: committed, disposable: disposable,
-    allowed: disposable - v.spent, projected: true };
+    essentialSpent: essential, committed: committed, piggyFunded: piggy,
+    disposable: disposable, allowed: disposable - v.spent, projected: true };
 }
 
 // The computed variable / discretionary allowance: whatever this month's
@@ -1918,6 +2149,8 @@ function variableCardHtml(v, currency) {
     + row(v.projected ? "Expected income" : "Money in", money(v.income, currency))
     + row(v.projected ? "Expected fixed + essentials" : "Fixed + essential spend",
         "− " + money(v.committed, currency), true)
+    + (v.piggyFunded
+        ? row("Piggy banks", "− " + money(v.piggyFunded, currency), true) : "")
     + row("Variable spent", "− " + money(v.spent, currency), true)
     + "</div>"
     + (v.projected ? '<div class="bgt-var-note">Projected — fixed bills '
@@ -1951,6 +2184,289 @@ function budgetSection() {
     + esc(b.month) + '</h3><span class="spacer"></span>'
     + '<button class="mini" data-action="edit-budgets">Edit</button></div>'
     + body + "</section>";
+}
+
+/* --- Piggy banks --------------------------------------------------------- */
+
+// The piggy-bank screen. The settled per-bank status (saved so far, whether
+// this month's set-aside fit the budget) rides along in the budget report.
+function piggyView() {
+  const rep = (state.budget && state.budget.piggy)
+    || { banks: [], fundedTotal: 0, headroom: 0 };
+  const banks = rep.banks || [];
+  const cur = (state.budget && state.budget.currency) || "ILS";
+
+  if (!banks.length) {
+    return '<div class="blank"><div class="be">🐷</div>'
+      + "<h2>No piggy banks yet</h2>"
+      + "<p>Create one for something you're saving toward — a trip, a new "
+      + "camera, a rainy-day fund — and Hon sets a little aside each month, "
+      + "counting it as an expense against your budget.</p>"
+      + '<button class="primary" data-action="new-piggy">'
+      + "+ Create your first piggy bank</button></div>";
+  }
+
+  const head = '<div class="pgy-head"><div><h2>Piggy banks</h2>'
+    + '<div class="pgy-sub">Money set aside each month for what you\'re saving '
+    + "up for. It counts as an expense — and pauses automatically on any month "
+    + "it doesn't fit your budget.</div></div><span class=\"spacer\"></span>"
+    + '<button class="primary" data-action="new-piggy">+ New piggy bank</button>'
+    + "</div>";
+
+  const skipped = banks.filter((b) => !b.complete && b.thisMonth.status === "skipped").length;
+  const incomeWord = rep.projected ? "your expected income" : "income";
+  const room = rep.headroom > 0
+    ? "Saving room this month — " + incomeWord + " less fixed bills and "
+      + "essentials: <b>" + money(rep.headroom, cur) + "</b>."
+      + (rep.projected ? " Projected from your recurring income." : "")
+    : "There's no saving room this month — " + incomeWord + " is fully taken "
+      + "up by fixed bills and essentials.";
+  const set = rep.fundedTotal > 0
+    ? " <b>" + money(rep.fundedTotal, cur) + "</b> set aside so far." : "";
+  const pause = skipped
+    ? " " + skipped + (skipped === 1 ? " bank is" : " banks are")
+      + " paused — they don't fit right now." : "";
+  const onHoldCount = banks.filter((b) => b.onHold && !b.complete).length;
+  const held = onHoldCount
+    ? " " + onHoldCount + " on hold." : "";
+  const strip = '<div class="pgy-headroom"><span>🪙</span><span>'
+    + room + set + pause + held + "</span></div>";
+
+  return head + strip + '<div class="pgy-grid">'
+    + banks.map(piggyCard).join("") + "</div>";
+}
+
+function piggyCard(b) {
+  const cur = b.currency || "ILS";
+  const pct = Math.round((b.progress || 0) * 100);
+  const deg = Math.max(0, Math.min(360, (b.progress || 0) * 360));
+  const ringColor = b.complete ? "var(--green)"
+    : b.onHold ? "var(--hairline-2)"
+    : b.thisMonth.status === "skipped" ? "var(--amber)" : "var(--indigo)";
+  const ring = '<div class="pgy-ring" style="background:conic-gradient('
+    + ringColor + " " + deg.toFixed(1) + "deg, var(--card-hi) 0)\">"
+    + '<div class="pgy-hole"><div class="pgy-pct">' + pct + "%</div>"
+    + '<div class="pgy-pct-lbl">saved</div></div></div>';
+
+  let badge;
+  if (b.complete) {
+    badge = '<div class="pgy-badge done"><span>🎉</span><span>Goal reached — '
+      + money(b.targetAmount, cur) + " saved.</span></div>";
+  } else if (b.onHold) {
+    badge = '<div class="pgy-badge onhold"><span>⏸</span><span>On hold — you\'ve '
+      + "paused this piggy bank. Resume it any time to start saving again."
+      + "</span></div>";
+  } else if (b.thisMonth.status === "funded") {
+    badge = '<div class="pgy-badge funded"><span>✓</span><span>'
+      + money(b.thisMonth.amount, cur) + " set aside this month.</span></div>";
+  } else {
+    badge = '<div class="pgy-badge skipped"><span>⏸</span><span>Paused this '
+      + "month — the set-aside doesn't fit your budget right now.</span></div>";
+  }
+
+  let eta = "";
+  if (!b.complete && b.monthsLeft != null) {
+    eta = '<div class="pgy-eta">'
+      + (b.monthsLeft <= 1 ? "About a month to go"
+          : "About " + b.monthsLeft + " months to go")
+      + " · " + money(b.monthlyAmount, cur) + "/mo</div>";
+  }
+
+  return '<div class="pgy-card' + (b.complete ? " done" : "")
+    + (b.onHold && !b.complete ? " onhold" : "") + '">'
+    + '<div class="pgy-card-top"><div class="pgy-emoji">' + esc(b.emoji)
+    + '</div><div style="flex:1;min-width:0"><div class="pgy-name">'
+    + esc(b.name) + '</div><div class="pgy-monthly">'
+    + money(b.monthlyAmount, cur) + " a month</div></div></div>"
+    + '<div class="pgy-body">' + ring
+    + '<div class="pgy-figs"><div class="pgy-saved">' + money(b.saved, cur)
+    + '</div><div class="pgy-target">of ' + money(b.targetAmount, cur)
+    + " goal · " + money(b.remaining, cur) + " to go</div>" + eta + "</div></div>"
+    + badge
+    + '<div class="pgy-actions">'
+    + '<button class="mini" data-action="edit-piggy" data-id="' + esc(b.id)
+    + '">Edit</button>'
+    + (b.complete ? ""
+        : '<button class="mini" data-action="toggle-hold" data-id="' + esc(b.id)
+          + '">' + (b.onHold ? "Resume" : "Hold") + "</button>")
+    + '<span class="spacer"></span>'
+    + '<button class="mini danger" data-action="remove-piggy" data-id="'
+    + esc(b.id) + '">Delete</button></div></div>';
+}
+
+// Create / edit a piggy bank. The target amount drives a few "ready in N
+// months" plans; picking one fills in the monthly set-aside, or type a custom.
+function piggyModal(bank) {
+  openModal((modal) => {
+    const editing = !!bank;
+    const cur = "ILS";
+    const sym = SYMBOLS.ILS;
+    let emoji = bank ? bank.emoji : "🐷";
+    let planSel = "custom"; // a PIGGY_PLANS month count, or "custom"
+
+    const emojiRow = PIGGY_EMOJI.map((e) =>
+      '<button type="button" class="pgy-em' + (e === emoji ? " on" : "")
+      + '" data-emoji="' + esc(e) + '">' + e + "</button>").join("");
+
+    modal.innerHTML = "<h2>" + (editing ? "Edit piggy bank" : "New piggy bank")
+      + "</h2><p class=\"hint\">What are you saving up for? Set a goal, choose "
+      + "how fast to get there, and Hon sets that much aside each month.</p>"
+      + '<label class="fld-lbl">Icon</label>'
+      + '<div class="pgy-em-row">' + emojiRow + "</div>"
+      + '<label class="fld-lbl">Name</label>'
+      + '<input id="pgy-name" type="text" maxlength="40" '
+      + 'placeholder="New camera, summer trip…" value="'
+      + esc(bank ? bank.name : "") + '">'
+      + '<label class="fld-lbl" style="margin-top:13px">Goal amount</label>'
+      + '<div class="pgy-amt"><span>' + sym + '</span>'
+      + '<input id="pgy-target" type="number" min="0" step="50" placeholder="0" '
+      + 'value="' + (bank ? bank.targetAmount : "") + '"></div>'
+      + '<label class="fld-lbl">Monthly set-aside</label>'
+      + '<div id="pgy-plans"></div>'
+      + '<div class="pgy-custom"><span>' + sym + '</span>'
+      + '<input id="pgy-monthly" type="number" min="0" step="10" '
+      + 'placeholder="Custom amount" value="'
+      + (bank ? bank.monthlyAmount : "") + '"></div>'
+      + '<div id="pgy-eta" class="pgy-modal-eta" hidden></div>'
+      + '<div class="modal-actions"><button data-x="cancel">Cancel</button>'
+      + '<button class="primary" data-x="save">'
+      + (editing ? "Save changes" : "Create piggy bank") + "</button></div>";
+
+    const targetInp = modal.querySelector("#pgy-target");
+    const monthlyInp = modal.querySelector("#pgy-monthly");
+    const plansEl = modal.querySelector("#pgy-plans");
+    const etaEl = modal.querySelector("#pgy-eta");
+
+    // The suggested monthly amount to clear `target` in `months`, rounded up
+    // to a tidy multiple of 10.
+    function presetFor(months) {
+      const t = Number(targetInp.value);
+      if (!Number.isFinite(t) || t <= 0) return null;
+      return Math.max(10, Math.ceil(t / months / 10) * 10);
+    }
+    function refreshEta() {
+      const t = Number(targetInp.value);
+      const mo = Number(monthlyInp.value);
+      if (t > 0 && mo > 0) {
+        const months = Math.ceil(t / mo);
+        etaEl.textContent = "At " + money(mo, cur) + " a month you'll reach "
+          + money(t, cur) + " in about " + months
+          + (months === 1 ? " month." : " months.");
+        etaEl.hidden = false;
+      } else {
+        etaEl.hidden = true;
+      }
+    }
+    function refreshPlans() {
+      const t = Number(targetInp.value);
+      if (!Number.isFinite(t) || t <= 0) {
+        plansEl.innerHTML = '<div class="pgy-plan-hint">'
+          + "Enter a goal amount to see monthly options.</div>";
+      } else {
+        plansEl.innerHTML = PIGGY_PLANS.map((m) => {
+          return '<button type="button" class="pgy-plan'
+            + (planSel === m ? " on" : "") + '" data-plan="' + m + '">'
+            + '<span class="pgy-plan-amt">' + money(presetFor(m), cur) + "</span>"
+            + '<span class="pgy-plan-sub">a month · ready in ' + m
+            + " months</span></button>";
+        }).join("");
+      }
+      refreshEta();
+    }
+    refreshPlans();
+
+    targetInp.addEventListener("input", () => {
+      // The presets follow the goal; if one was picked, keep its amount in step.
+      if (typeof planSel === "number") {
+        const pm = presetFor(planSel);
+        if (pm != null) monthlyInp.value = pm;
+      }
+      refreshPlans();
+    });
+    monthlyInp.addEventListener("input", () => {
+      planSel = "custom";
+      plansEl.querySelectorAll(".pgy-plan.on")
+        .forEach((x) => x.classList.remove("on"));
+      refreshEta();
+    });
+    modal.querySelector(".pgy-em-row").addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-emoji]");
+      if (!btn) return;
+      emoji = btn.dataset.emoji;
+      modal.querySelectorAll(".pgy-em")
+        .forEach((x) => x.classList.toggle("on", x === btn));
+    });
+    plansEl.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-plan]");
+      if (!btn) return;
+      planSel = Number(btn.dataset.plan);
+      const pm = presetFor(planSel);
+      if (pm != null) monthlyInp.value = pm;
+      plansEl.querySelectorAll(".pgy-plan")
+        .forEach((x) => x.classList.toggle("on", x === btn));
+      refreshEta();
+    });
+
+    modal.querySelector('[data-x="cancel"]').addEventListener("click", closeOverlay);
+    modal.querySelector('[data-x="save"]').addEventListener("click", async () => {
+      const name = modal.querySelector("#pgy-name").value.trim();
+      const target = Number(targetInp.value);
+      const monthly = Number(monthlyInp.value);
+      if (!name) return toast("Give your piggy bank a name.", true);
+      if (!(target > 0)) return toast("Enter a goal amount.", true);
+      if (!(monthly > 0)) return toast("Choose a monthly set-aside.", true);
+      const body = { name: name, emoji: emoji,
+        targetAmount: target, monthlyAmount: monthly };
+      try {
+        if (editing) await api("/piggy/" + bank.id, "PUT", body);
+        else await api("/piggy", "POST", body);
+        closeOverlay();
+        state.budget = await api(budgetUrl());
+        render();
+        toast(editing ? "Piggy bank updated." : "Piggy bank created — happy saving!");
+      } catch (e) {
+        if (e instanceof VaultLocked) { closeOverlay(); return showGate(); }
+        toast(e.message, true);
+      }
+    });
+  });
+}
+
+// Manually pause or resume a piggy bank. On hold it gets no monthly set-aside
+// and stops counting against the budget, whatever the headroom.
+async function togglePiggyHold(id) {
+  const bank = (((state.budget || {}).piggy || {}).banks || [])
+    .find((b) => b.id === id);
+  if (!bank) return;
+  const onHold = !bank.onHold;
+  try {
+    await api("/piggy/" + id, "PUT", { onHold: onHold });
+    state.budget = await api(budgetUrl());
+    render();
+    toast(onHold
+      ? '"' + bank.name + '" is on hold — no set-aside until you resume it.'
+      : '"' + bank.name + '" resumed — back to saving each month.');
+  } catch (e) {
+    if (e instanceof VaultLocked) return showGate();
+    toast(e.message, true);
+  }
+}
+
+async function removePiggy(id) {
+  const bank = (((state.budget || {}).piggy || {}).banks || [])
+    .find((b) => b.id === id);
+  const label = bank ? '"' + bank.name + '"' : "this piggy bank";
+  if (!confirm("Delete " + label + "? Its saved progress will be lost."))
+    return;
+  try {
+    await api("/piggy/" + id, "DELETE");
+    state.budget = await api(budgetUrl());
+    render();
+    toast("Piggy bank deleted.");
+  } catch (e) {
+    if (e instanceof VaultLocked) return showGate();
+    toast(e.message, true);
+  }
 }
 
 /* --- Sidebar ------------------------------------------------------------- */
@@ -3317,12 +3833,12 @@ function settingsModal() {
           + "</button>").join("") + "</div>";
 
     modal.innerHTML = "<h2>Settings</h2>"
-      + '<p class="hint">Manage the on-device AI model and tune how Hon reads '
+      + '<p class="hint">Choose your AI engine and tune how Hon reads '
       + "your money.</p>"
-      + setCard(0, "🧠", "On-device AI", '<div id="set-model"></div>'
-          + '<p class="sub-hint" style="margin-top:9px">A local model powers '
-          + "smart categorization and insights. It runs entirely on your Mac — "
-          + "nothing is sent anywhere.</p>")
+      + setCard(0, "🧠", "AI engine", '<div id="set-model"></div>'
+          + '<p class="sub-hint" style="margin-top:9px">Smart categorization '
+          + "and insights need an AI model. Run one on this machine, or connect "
+          + "an Ollama server if this computer can't.</p>")
       + setCard(40, "📅", "Billing cycle",
           setRow("Month starts on",
             "Group activity and budgets by your billing cycle instead of the "
@@ -3351,6 +3867,7 @@ function settingsModal() {
       + setCard(160, "🤝", "Splitwise", '<div id="set-splitwise"></div>')
       + '<div class="modal-actions"><button data-x="cancel">Cancel</button>'
       + '<button class="primary" data-x="save">Save settings</button></div>';
+    llmPanelMode = null; // re-sync the engine panel to the saved mode
     fillModelSection();
     fillSplitwiseSection();
 
@@ -3975,6 +4492,15 @@ function handleAction(action, btn) {
       break;
     }
     case "remove-asset": if (id) removeAsset(id); break;
+    case "new-piggy": piggyModal(null); break;
+    case "edit-piggy": {
+      const b = id && (((state.budget || {}).piggy || {}).banks || [])
+        .find((x) => x.id === id);
+      if (b) piggyModal(b);
+      break;
+    }
+    case "toggle-hold": if (id) togglePiggyHold(id); break;
+    case "remove-piggy": if (id) removePiggy(id); break;
     case "month-prev": shiftMonth(1); break;
     case "month-next": shiftMonth(-1); break;
     case "toggle-select":

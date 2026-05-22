@@ -70,6 +70,18 @@ export function currentMonthRange(): MonthRange {
 }
 
 /**
+ * The recurring projection the web app derives client-side: expected income
+ * averaged over recent cycles and fixed bills smoothed to a monthly-equivalent.
+ * When present, piggy-bank set-asides are settled against it rather than the
+ * actual money in so far — so a bank is not paused merely because this month's
+ * salary has not landed yet.
+ */
+export interface BudgetProjection {
+  expectedIncome?: number;
+  expectedFixed?: number;
+}
+
+/**
  * Combines budgets with the spending inside `range` — the user's billing cycle
  * when supplied, otherwise the calendar month. Essential categories each keep
  * their own budget line; fixed bills are summed but not budgeted; the variable
@@ -78,6 +90,7 @@ export function currentMonthRange(): MonthRange {
 export function buildBudgetReport(
   repo: Repo,
   range: MonthRange = currentMonthRange(),
+  projection?: BudgetProjection,
 ): BudgetReport {
   const { start, end, label } = range;
   const budgets = new Map(repo.listBudgets().map((b) => [b.category, b.monthlyAmount]));
@@ -112,7 +125,20 @@ export function buildBudgetReport(
   // Piggy-bank set-asides draw from whatever income is left after the month's
   // fixed bills and essentials, ahead of discretionary spending. Each funded
   // bank is a committed expense; one that does not fit is paused for the month.
-  const piggy = settlePiggyBanks(repo, income - committed, label);
+  // When the web app supplies a recurring projection, the saving room is the
+  // expected income and smoothed fixed bills — so a bank is not paused early in
+  // the month just because the salary has not arrived yet.
+  const useProjection =
+    projection !== undefined &&
+    (projection.expectedIncome !== undefined || projection.expectedFixed !== undefined);
+  const piggyIncome = projection?.expectedIncome ?? income;
+  const piggyFixed = projection?.expectedFixed ?? fixedSpent;
+  const piggy = settlePiggyBanks(
+    repo,
+    piggyIncome - piggyFixed - essentialSpent,
+    label,
+    useProjection,
+  );
 
   const disposable = income - committed - piggy.fundedTotal;
   const variable: VariableBudget = {
