@@ -137,6 +137,7 @@ async function solveWithCapSolver(
           if (captcha.action) task.pageAction = captcha.action;
           if (captcha.s) task.enterprisePayload = { s: captcha.s };
         }
+        plog('CapSolver task', task.type, 'sitekey=' + String(captcha.sitekey).slice(0, 14));
         const created = await capSolverPost('/createTask', {
           clientKey: capSolverKey,
           task,
@@ -169,8 +170,10 @@ async function solveWithCapSolver(
         solution.text = token;
         solution.responseAt = new Date();
         solution.hasSolution = true;
+        plog('CapSolver solved, token length', token.length);
       } catch (err) {
         solution.error = err instanceof Error ? err.message : String(err);
+        plog('CapSolver failed:', solution.error);
       }
       return solution;
     }),
@@ -352,6 +355,11 @@ function fail(errorType: string, errorMessage: string): ScrapeOutcome {
   return { success: false, accounts: [], errorType, errorMessage };
 }
 
+/** Logs a pension-connector diagnostic line to the sidecar console (stderr). */
+function plog(...parts: unknown[]): void {
+  console.error('[pension]', ...parts);
+}
+
 /**
  * Best-effort CAPTCHA solve via the CapSolver-backed plugin. A no-op when no
  * key is configured or the page carries no challenge; a solver miss is
@@ -360,9 +368,22 @@ function fail(errorType: string, errorMessage: string): ScrapeOutcome {
 async function solveCaptchas(page: Page): Promise<void> {
   if (!solverEnabled || !capSolverKey) return;
   try {
-    await (page as unknown as { solveRecaptchas: () => Promise<unknown> }).solveRecaptchas();
-  } catch {
-    // best-effort — fall through to the normal login-failure handling
+    const result = (await (
+      page as unknown as { solveRecaptchas: () => Promise<any> }
+    ).solveRecaptchas()) as {
+      captchas?: unknown[];
+      solutions?: unknown[];
+      solved?: { isSolved?: boolean }[];
+      error?: unknown;
+    };
+    plog(
+      'solveCaptchas:',
+      `found=${result?.captchas?.length ?? 0}`,
+      `solved=${(result?.solved ?? []).filter((s) => s?.isSolved).length}`,
+      result?.error ? `error=${String(result.error)}` : 'ok',
+    );
+  } catch (err) {
+    plog('solveCaptchas threw:', err instanceof Error ? err.message : String(err));
   }
 }
 
@@ -438,6 +459,13 @@ export async function runPensionScrape(
   // CapSolver key set, Hon first attempts the login automatically.
   const captchaWalled = Boolean(fund.interactive);
   const attemptAutomated = captchaWalled && solverEnabled;
+  plog(
+    `start ${companyId}:`,
+    `captchaWalled=${captchaWalled}`,
+    `solverEnabled=${solverEnabled}`,
+    `hasKey=${capSolverKey.length > 0}`,
+    `attemptAutomated=${attemptAutomated}`,
+  );
 
   // A non-CAPTCHA fund is driven entirely by Hon, so its credentials are
   // required up front. A CAPTCHA-walled fund can always fall back to a hand
@@ -509,15 +537,26 @@ export async function runPensionScrape(
         }
       }
 
-      onProgress?.(
-        `A browser window is open — clear the security check on ${fund.name}. ` +
-          'Hon fills in your ID and phone; you then submit and enter the SMS code.',
-      );
-      // Fill the ID/phone when the login form appears — fire-and-forget so the
-      // balance poll runs concurrently. When the automated attempt already
-      // signed in, no login form appears and this simply never fires.
-      void prefillCredentials(page, fund, credentials).catch(() => {});
-      onProgress?.('Waiting for you to finish signing in…');
+      // In the visible window, with the solver on, drive the login again —
+      // a visible browser clears bot detection far better than a headless
+      // one, so the same fill + submit + OTP often gets through here. The
+      // user only steps in if a visible CAPTCHA appears. Without the solver,
+      // Hon just fills the form and the user does the submit + OTP by hand.
+      // Both are fire-and-forget so the balance poll below runs concurrently
+      // and also catches a sign-in the user completes manually.
+      if (attemptAutomated) {
+        onProgress?.(`Finishing the ${fund.name} sign-in in the open window…`);
+        void runCaptchaWalledLogin(page, fund, credentials, onProgress, onOtpNeeded).catch(
+          () => {},
+        );
+      } else {
+        onProgress?.(
+          `A browser window is open — clear the security check on ${fund.name}. ` +
+            'Hon fills in your ID and phone; you then submit and enter the SMS code.',
+        );
+        void prefillCredentials(page, fund, credentials).catch(() => {});
+      }
+      onProgress?.('Waiting for the sign-in to finish…');
       const deadline = Date.now() + INTERACTIVE_LOGIN_TIMEOUT_MS;
       let accounts: NormalizedAccount[] = [];
       while (Date.now() < deadline) {
@@ -607,6 +646,7 @@ export async function runPensionScrape(
     }
     return { success: true, accounts };
   } catch (err) {
+    plog('EXCEPTION in', companyId, '—', err instanceof Error ? err.stack : String(err));
     if (browser) {
       const pages = await browser.pages().catch(() => []);
       if (pages[0]) {
@@ -828,8 +868,12 @@ async function passBotWall(
   let round = 0;
   while (Date.now() < deadline) {
     // The login form is already here (Meitav, or Radware already cleared).
-    if (await page.$(fund.idSelector)) return true;
+    if (await page.$(fund.idSelector)) {
+      plog('passBotWall: login form present at', page.url());
+      return true;
+    }
     round += 1;
+    plog('passBotWall round', round, 'at', page.url());
     onProgress?.(
       round === 1
         ? 'Solving the security check automatically — this can take a minute…'
@@ -841,8 +885,12 @@ async function passBotWall(
       .waitForSelector(fund.idSelector, { timeout: 15_000 })
       .then(() => true)
       .catch(() => false);
-    if (appeared) return true;
+    if (appeared) {
+      plog('passBotWall: login form appeared after round', round);
+      return true;
+    }
   }
+  plog('passBotWall: gave up after', round, 'rounds');
   return false;
 }
 
@@ -860,16 +908,27 @@ async function runCaptchaWalledLogin(
   onProgress: ((message: string) => void) | undefined,
   onOtpNeeded: OtpCallback,
 ): Promise<void> {
-  if (!(await passBotWall(page, fund, onProgress))) return;
+  if (!(await passBotWall(page, fund, onProgress))) {
+    plog('runCaptchaWalledLogin: bot wall not cleared');
+    return;
+  }
   onProgress?.('Signing in automatically…');
-  if (!(await fillAndSubmitLogin(page, fund, credentials))) return;
+  if (!(await fillAndSubmitLogin(page, fund, credentials))) {
+    plog('runCaptchaWalledLogin: could not fill/submit the login form');
+    return;
+  }
+  plog('runCaptchaWalledLogin: form submitted, waiting for OTP step');
   // A fresh challenge can appear on submit — solve it before the OTP wait.
   await solveCaptchas(page);
   const otpAppeared = await page
     .waitForSelector(OTP_FIELD_SELECTOR, { timeout: 90_000 })
     .then(() => true)
     .catch(() => false);
-  if (!otpAppeared) return;
+  if (!otpAppeared) {
+    plog('runCaptchaWalledLogin: OTP step never appeared');
+    return;
+  }
+  plog('runCaptchaWalledLogin: OTP step reached');
   onProgress?.('Enter the SMS verification code Hon just triggered…');
   const code = await onOtpNeeded();
   onProgress?.('Submitting the verification code…');
