@@ -5,6 +5,7 @@ import type { ScraperCredentials, ScraperScrapingResult } from 'israeli-bank-scr
 import { SNAPTRADE_COMPANY_ID, snaptradeCompany } from './snaptrade.js';
 import { PENSION_COMPANIES, isPensionCompany } from './pension.js';
 import { watchForOtp, type OtpCallback } from './otp.js';
+import { persistSession, restoreSession, type SessionHandle } from './session.js';
 
 // Extra Chromium flags for the scraper browser. Inside a container Chromium
 // runs as root with no user namespace, so its sandbox cannot start — the Docker
@@ -125,6 +126,10 @@ export function isSupportedCompany(id: string): boolean {
 /**
  * Logs into one institution and pulls accounts + transactions. Credentials are
  * used in memory only; they are never written to disk by the sidecar.
+ *
+ * The browser is launched by Hon (rather than by the scraper library) so a
+ * saved session's cookies can be replayed before the login runs, and the
+ * resulting cookies captured after it succeeds.
  */
 export async function runScrape(
   companyId: string,
@@ -132,50 +137,61 @@ export async function runScrape(
   startDate: Date,
   onProgress?: (progressType: string) => void,
   screenshotPath?: string,
+  session?: SessionHandle,
 ): Promise<ScrapeOutcome> {
-  const scraper = createScraper({
-    companyId: companyId as CompanyTypes,
-    startDate,
-    combineInstallments: false,
-    showBrowser: false,
-    timeout: 90_000,
-    defaultTimeout: 60_000,
-    args: BROWSER_ARGS,
-    // On failure, save a screenshot of the stuck page for diagnosis.
-    storeFailureScreenShotPath: screenshotPath,
-  });
-
-  if (onProgress) {
-    scraper.onProgress((_company, payload) => onProgress(payload.type));
-  }
-
-  let result: ScraperScrapingResult;
+  let browser: Browser | undefined;
   try {
-    result = await scraper.scrape(credentials as unknown as ScraperCredentials);
-  } catch (err) {
-    return {
-      success: false,
-      accounts: [],
-      errorType: 'EXCEPTION',
-      errorMessage: err instanceof Error ? err.message : String(err),
-    };
-  }
+    browser = await puppeteer.launch({ headless: true, args: BROWSER_ARGS });
+    await restoreSession(browser, session);
 
-  if (!result.success) {
-    return {
-      success: false,
-      accounts: [],
-      errorType: result.errorType ?? 'GENERIC',
-      errorMessage: result.errorMessage ?? 'The scrape did not complete.',
-    };
-  }
+    const scraper = createScraper({
+      companyId: companyId as CompanyTypes,
+      startDate,
+      combineInstallments: false,
+      browser,
+      skipCloseBrowser: true,
+      timeout: 90_000,
+      defaultTimeout: 60_000,
+      // On failure, save a screenshot of the stuck page for diagnosis.
+      storeFailureScreenShotPath: screenshotPath,
+    });
 
-  return {
-    success: true,
-    accounts: (result.accounts ?? []).map((account) =>
-      normalizeAccount(account as unknown as RawAccount),
-    ),
-  };
+    if (onProgress) {
+      scraper.onProgress((_company, payload) => onProgress(payload.type));
+    }
+
+    let result: ScraperScrapingResult;
+    try {
+      result = await scraper.scrape(credentials as unknown as ScraperCredentials);
+    } catch (err) {
+      return {
+        success: false,
+        accounts: [],
+        errorType: 'EXCEPTION',
+        errorMessage: err instanceof Error ? err.message : String(err),
+      };
+    }
+
+    if (!result.success) {
+      return {
+        success: false,
+        accounts: [],
+        errorType: result.errorType ?? 'GENERIC',
+        errorMessage: result.errorMessage ?? 'The scrape did not complete.',
+      };
+    }
+
+    // Login succeeded — keep the session so the next sync can reuse it.
+    await persistSession(browser, session);
+    return {
+      success: true,
+      accounts: (result.accounts ?? []).map((account) =>
+        normalizeAccount(account as unknown as RawAccount),
+      ),
+    };
+  } finally {
+    if (browser) await browser.close().catch(() => {});
+  }
 }
 
 /**
@@ -189,11 +205,15 @@ export async function runInteractiveScrape(
   onProgress: ((progressType: string) => void) | undefined,
   screenshotPath: string | undefined,
   onOtpNeeded: OtpCallback,
+  session?: SessionHandle,
 ): Promise<ScrapeOutcome> {
   let browser: Browser | undefined;
   try {
     browser = await puppeteer.launch({ headless: true, args: BROWSER_ARGS });
     const launched = browser;
+    // Replay a saved session before the scrape: the bank may then trust this
+    // device and skip the SMS step.
+    await restoreSession(launched, session);
 
     // Capture the page israeli-bank-scrapers creates on our browser.
     const pagePromise = new Promise<Page>((resolve) => {
@@ -236,6 +256,8 @@ export async function runInteractiveScrape(
         errorMessage: result.errorMessage ?? 'The scrape did not complete.',
       };
     }
+    // Login succeeded — keep the session so the next sync can reuse it.
+    await persistSession(launched, session);
     return {
       success: true,
       accounts: (result.accounts ?? []).map((account) =>
@@ -305,10 +327,21 @@ function israelDate(iso: string): string {
 }
 
 function normalizeTransaction(txn: RawTransaction): NormalizedTransaction {
-  const hasIdentifier = txn.identifier != null && String(txn.identifier).length > 0;
+  const date = israelDate(txn.date);
+  // An institution's identifier is not unique on its own: banks reuse a
+  // reference number across recurring deposits, and card installments share
+  // one id across months. (A non-numeric reference also parses to NaN.)
+  // Pairing it with the date keeps each occurrence a distinct row instead of
+  // overwriting the previous one through the (account_id, external_id) upsert.
+  const id = txn.identifier;
+  const hasIdentifier =
+    id != null &&
+    String(id).length > 0 &&
+    !(typeof id === 'number' && Number.isNaN(id));
+  const base = hasIdentifier ? String(id) : fingerprint(txn);
   return {
-    externalId: hasIdentifier ? String(txn.identifier) : fingerprint(txn),
-    date: israelDate(txn.date),
+    externalId: `${base}:${date}`,
+    date,
     processedDate: txn.processedDate ? israelDate(txn.processedDate) : undefined,
     amount: txn.chargedAmount,
     currency: txn.chargedCurrency ?? txn.originalCurrency ?? 'ILS',

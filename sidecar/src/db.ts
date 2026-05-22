@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-export const SCHEMA_VERSION = 12;
+export const SCHEMA_VERSION = 13;
 
 export interface DbHandle {
   db: Database.Database;
@@ -229,6 +229,16 @@ const MIGRATIONS: { version: number; sql: string }[] = [
     // headroom — distinct from a bank auto-skipped because the budget is tight.
     version: 12,
     sql: `ALTER TABLE piggy_banks ADD COLUMN on_hold INTEGER NOT NULL DEFAULT 0;`,
+  },
+  {
+    // external_id used to be the institution's bare reference number, which
+    // banks reuse across recurring deposits (and cards reuse across an
+    // installment's monthly legs). Every such occurrence collided on the
+    // (account_id, external_id) upsert, so only the latest survived. The id
+    // now carries the transaction date; append it to existing rows so they
+    // match the new format instead of being re-inserted as duplicates.
+    version: 13,
+    sql: `UPDATE transactions SET external_id = external_id || ':' || date;`,
   },
 ];
 

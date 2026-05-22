@@ -255,6 +255,9 @@ app.delete('/connections/:id', async (req, reply) => {
   if (!repo) return reply.code(503).send({ error: 'database unavailable' });
   const { id } = req.params as { id: string };
   repo.deleteConnection(id);
+  // The saved browser session is a vault secret, so it is not cleared by the
+  // connections-table cascade — drop it explicitly.
+  vault?.clearSecret(`session:${id}`);
   return { ok: true };
 });
 

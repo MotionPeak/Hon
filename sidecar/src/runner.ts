@@ -5,6 +5,7 @@ import type { Vault } from './vault.js';
 import { isSnapTrade, runSnapTradeSync } from './snaptrade.js';
 import { isPensionCompany, runPensionScrape, setPensionSolverConfig } from './pension.js';
 import { runInteractiveScrape, runScrape, type ScrapeOutcome } from './scrapers.js';
+import { openSession } from './session.js';
 
 export interface StartArgs {
   connectionId: string;
@@ -101,6 +102,9 @@ export class ScrapeRunner {
   private async execute(status: RunStatus, args: StartArgs): Promise<void> {
     try {
       let outcome: ScrapeOutcome;
+      // A per-connection browser session, reused across syncs to skip the
+      // sign-in. Encrypted in the vault; a no-op when the vault is locked.
+      const session = openSession(this.vault, args.connectionId);
       if (isSnapTrade(args.companyId)) {
         outcome = await runSnapTradeSync(args.credentials, this.vault, (message) => {
           status.message = message;
@@ -132,6 +136,7 @@ export class ScrapeRunner {
           },
           this.prepareScreenshotPath(args.companyId),
           () => this.requestOtp(status),
+          session,
         );
       } else if (args.interactive) {
         outcome = await runInteractiveScrape(
@@ -143,6 +148,7 @@ export class ScrapeRunner {
           },
           this.prepareScreenshotPath(args.companyId),
           () => this.requestOtp(status),
+          session,
         );
       } else {
         outcome = await runScrape(
@@ -153,6 +159,7 @@ export class ScrapeRunner {
             status.message = humanizeProgress(progress);
           },
           this.prepareScreenshotPath(args.companyId),
+          session,
         );
       }
 
