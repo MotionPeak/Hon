@@ -362,28 +362,27 @@ function plog(...parts: unknown[]): void {
 
 /**
  * Best-effort CAPTCHA solve via the CapSolver-backed plugin. A no-op when no
- * key is configured or the page carries no challenge; a solver miss is
- * swallowed so the login simply fails downstream rather than throwing here.
+ * key is configured or the page carries no challenge. Returns how many
+ * challenges were found on the page and how many were actually solved, so the
+ * caller can tell a "solver can't handle this" stall apart from progress.
  */
-async function solveCaptchas(page: Page): Promise<void> {
-  if (!solverEnabled || !capSolverKey) return;
+async function solveCaptchas(page: Page): Promise<{ found: number; solved: number }> {
+  if (!solverEnabled || !capSolverKey) return { found: 0, solved: 0 };
   try {
     const result = (await (
       page as unknown as { solveRecaptchas: () => Promise<any> }
     ).solveRecaptchas()) as {
       captchas?: unknown[];
-      solutions?: unknown[];
       solved?: { isSolved?: boolean }[];
       error?: unknown;
     };
-    plog(
-      'solveCaptchas:',
-      `found=${result?.captchas?.length ?? 0}`,
-      `solved=${(result?.solved ?? []).filter((s) => s?.isSolved).length}`,
-      result?.error ? `error=${String(result.error)}` : 'ok',
-    );
+    const found = result?.captchas?.length ?? 0;
+    const solved = (result?.solved ?? []).filter((s) => s?.isSolved).length;
+    plog('solveCaptchas:', `found=${found}`, `solved=${solved}`, result?.error ? 'with error' : 'ok');
+    return { found, solved };
   } catch (err) {
     plog('solveCaptchas threw:', err instanceof Error ? err.message : String(err));
+    return { found: 0, solved: 0 };
   }
 }
 
@@ -510,7 +509,7 @@ export async function runPensionScrape(
     if (captchaWalled) {
       if (attemptAutomated) {
         onProgress?.('Attempting automated sign-in in the background…');
-        await runCaptchaWalledLogin(page, fund, credentials, onProgress, onOtpNeeded).catch(
+        await runCaptchaWalledLogin(page, fund, credentials, onProgress, onOtpNeeded, false).catch(
           (e) => plog('runCaptchaWalledLogin (headless) threw:', e instanceof Error ? e.stack : e),
         );
         // If the automated attempt authenticated the session, the balance API
@@ -546,7 +545,7 @@ export async function runPensionScrape(
       // and also catches a sign-in the user completes manually.
       if (attemptAutomated) {
         onProgress?.(`Finishing the ${fund.name} sign-in in the open window…`);
-        void runCaptchaWalledLogin(page, fund, credentials, onProgress, onOtpNeeded).catch(
+        void runCaptchaWalledLogin(page, fund, credentials, onProgress, onOtpNeeded, true).catch(
           (e) => plog('runCaptchaWalledLogin (visible) threw:', e instanceof Error ? e.stack : e),
         );
       } else {
@@ -883,10 +882,12 @@ async function passBotWall(
   page: Page,
   fund: PensionFund,
   onProgress: ((message: string) => void) | undefined,
+  humanCanHelp: boolean,
 ): Promise<boolean> {
   if (!fund.idSelector) return false;
   const deadline = Date.now() + 180_000;
   let round = 0;
+  let solverMisses = 0;
   while (Date.now() < deadline) {
     const url = page.url();
     const onPortal = url.includes(fund.domain);
@@ -916,7 +917,19 @@ async function passBotWall(
         ? 'Solving the security check automatically — this can take a minute…'
         : 'Still clearing the security check…',
     );
-    await solveCaptchas(page);
+    const { found, solved } = await solveCaptchas(page);
+    if (found > 0 && solved === 0) {
+      solverMisses += 1;
+      // No human watching and the solver cannot clear this CAPTCHA (e.g.
+      // CapSolver does not support hCaptcha) — stop fast so the run can fall
+      // back to a visible window rather than spinning for three minutes.
+      if (!humanCanHelp && solverMisses >= 3) {
+        plog('passBotWall: solver cannot clear this CAPTCHA — bailing for visible fallback');
+        return false;
+      }
+    } else {
+      solverMisses = 0;
+    }
     await delay(5000); // let a solved challenge redirect through to the portal
   }
   plog('passBotWall: gave up after', round, 'rounds, url=', page.url());
@@ -936,8 +949,9 @@ async function runCaptchaWalledLogin(
   credentials: Record<string, string>,
   onProgress: ((message: string) => void) | undefined,
   onOtpNeeded: OtpCallback,
+  humanCanHelp: boolean,
 ): Promise<void> {
-  if (!(await passBotWall(page, fund, onProgress))) {
+  if (!(await passBotWall(page, fund, onProgress, humanCanHelp))) {
     plog('runCaptchaWalledLogin: bot wall not cleared');
     return;
   }
