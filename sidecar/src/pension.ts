@@ -808,17 +808,27 @@ async function fillAndSubmitLogin(
       // fall through — the idSelector wait below will fail clearly
     }
   }
-  try {
-    // Wait for the field to exist — not strict "visible". Migdal's login is a
-    // slow Angular SPA and the strict visibility check times out flakily.
-    await page.waitForSelector(fund.idSelector, { timeout: 60_000 });
-  } catch {
-    return false;
+  // Wait for the ID field and fill it. Menora's login can re-render between
+  // the wait and the fill (Radware bot-check, SPA hydration), so the element
+  // found a moment ago can be gone by fill time — retry a few rounds.
+  let idFilled = false;
+  for (let attempt = 1; attempt <= 6 && !idFilled; attempt += 1) {
+    const ready = await page
+      .waitForSelector(fund.idSelector, { timeout: 20_000 })
+      .then(() => true)
+      .catch(() => false);
+    if (!ready) {
+      plog(`fillAndSubmitLogin: idSelector absent, attempt ${attempt}, url=${page.url()}`);
+      continue;
+    }
+    await delay(1500); // let the form finish rendering
+    idFilled = await fillField(page, fund.idSelector, (credentials.id ?? '').trim());
+    if (!idFilled) {
+      plog(`fillAndSubmitLogin: fillField missed, attempt ${attempt}, url=${page.url()}`);
+    }
   }
-  await delay(1800); // let the Angular login form finish rendering
-  if (!(await fillField(page, fund.idSelector, (credentials.id ?? '').trim()))) {
-    return false;
-  }
+  if (!idFilled) return false;
+  plog('fillAndSubmitLogin: ID field filled');
   if (fund.phoneSelector) {
     await fillPhone(page, fund, credentials.phone ?? '');
   }
