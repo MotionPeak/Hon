@@ -372,6 +372,55 @@ function debugSibling(screenshotPath: string | undefined, suffix: string): strin
 }
 
 /**
+ * Launches a Chromium for a pension scrape and prepares a page: user agent,
+ * Hebrew Accept-Language, the tsx `__name` shim, and a JSON-response collector
+ * feeding `jsonResponses` (the dashboard's real balance data, kept for debug).
+ * A headless launch sizes the viewport; a visible one lets the OS size the
+ * window. CAPTCHA-walled funds call this more than once — headless for the
+ * automated attempt, then visible if that attempt is blocked.
+ */
+async function launchPensionBrowser(
+  headless: boolean,
+  jsonResponses: { url: string; body: string }[],
+): Promise<{ browser: Browser; page: Page }> {
+  const browser = await puppeteer.launch({
+    headless,
+    defaultViewport: headless ? undefined : null,
+    args: [
+      ...SANDBOX_ARGS,
+      '--disable-blink-features=AutomationControlled',
+      '--lang=he-IL',
+      ...(headless ? [] : ['--window-size=1280,960']),
+    ],
+  });
+  const page = await browser.newPage();
+  await page.setUserAgent(USER_AGENT);
+  if (headless) await page.setViewport({ width: 1280, height: 900 });
+  await page.setExtraHTTPHeaders({ 'Accept-Language': 'he-IL,he;q=0.9,en;q=0.8' });
+  // tsx/esbuild rewrites this file's functions with a `__name` helper. When a
+  // function is handed to page.evaluate it runs in the browser, where that
+  // helper is undefined — so define it as a no-op in every document.
+  await page.evaluateOnNewDocument(
+    'window.__name = window.__name || function (f) { return f; };',
+  );
+  // Collect JSON API responses — the dashboard's real balance data, and the
+  // best material for tightening the balance reader after a real run.
+  page.on('response', (res) => {
+    const contentType = res.headers()['content-type'] ?? '';
+    if (!contentType.includes('json') || jsonResponses.length >= 60) return;
+    res
+      .text()
+      .then((body) => {
+        if (body && body.length < 200_000) {
+          jsonResponses.push({ url: res.url(), body });
+        }
+      })
+      .catch(() => {});
+  });
+  return { browser, page };
+}
+
+/**
  * Logs into a pension provider's member portal and reads each product's
  * balance. Mirrors runInteractiveScrape's shape (Puppeteer + OTP callback) but
  * drives the whole login itself, since pension funds have no scraper library.
@@ -407,69 +456,37 @@ export async function runPensionScrape(
   const jsonResponses: { url: string; body: string }[] = [];
 
   let browser: Browser | undefined;
+  let page!: Page;
   try {
     onProgress?.('Starting the browser…');
-    browser = await puppeteer.launch({
-      // A CAPTCHA-walled fund must be visible — the automated attempt may need
-      // to fall back to the user finishing the sign-in in the same window.
-      headless: captchaWalled ? false : HEADLESS,
-      defaultViewport: captchaWalled ? null : undefined,
-      args: [
-        ...SANDBOX_ARGS,
-        '--disable-blink-features=AutomationControlled',
-        '--lang=he-IL',
-        ...(captchaWalled ? ['--window-size=1280,960'] : []),
-      ],
-    });
-    const page = await browser.newPage();
-    await page.setUserAgent(USER_AGENT);
-    if (!captchaWalled) await page.setViewport({ width: 1280, height: 900 });
-    await page.setExtraHTTPHeaders({ 'Accept-Language': 'he-IL,he;q=0.9,en;q=0.8' });
-    // tsx/esbuild rewrites this file's functions with a `__name` helper. When a
-    // function is handed to page.evaluate it runs in the browser, where that
-    // helper is undefined — so define it as a no-op in every document.
-    await page.evaluateOnNewDocument(
-      'window.__name = window.__name || function (f) { return f; };',
-    );
-
-    // Collect JSON API responses — the dashboard's real balance data, and the
-    // best material for tightening the balance reader after a real run.
-    page.on('response', (res) => {
-      const contentType = res.headers()['content-type'] ?? '';
-      if (!contentType.includes('json') || jsonResponses.length >= 60) return;
-      res
-        .text()
-        .then((body) => {
-          if (body && body.length < 200_000) {
-            jsonResponses.push({ url: res.url(), body });
-          }
-        })
-        .catch(() => {});
-    });
+    // CAPTCHA-walled funds run the automated attempt headless (in the
+    // background) and relaunch a visible window only if it is blocked; other
+    // funds follow HEADLESS. When the solver is off, a CAPTCHA-walled fund
+    // starts visible straight away for the hand sign-in.
+    const startHeadless = captchaWalled ? attemptAutomated : HEADLESS;
+    ({ browser, page } = await launchPensionBrowser(startHeadless, jsonResponses));
 
     onProgress?.('Opening the pension portal…');
     try {
       await page.goto(fund.loginUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 });
     } catch (err) {
       // A CAPTCHA-walled fund's bot-wall may re-navigate the page during goto;
-      // the visible window can recover, so that race is harmless. For an
-      // automated fund a goto failure is real — rethrow it.
+      // that race is harmless. For an automated fund a goto failure is real.
       if (!captchaWalled) throw err;
     }
 
     // CAPTCHA-walled funds (Meitav/Menora). With a solver key, Hon first
-    // attempts the whole login automatically; whether that lands or not it
-    // then polls the balance API while the visible window stays open — so a
-    // blocked automated attempt falls back to the user finishing the sign-in
-    // by hand, in the same run, with no dead-end error.
+    // attempts the whole login headless, in the background; if that is blocked
+    // it relaunches a visible window and the user finishes the sign-in by
+    // hand — same run, no dead-end error.
     if (captchaWalled) {
       if (attemptAutomated) {
-        onProgress?.('Attempting automated sign-in…');
+        onProgress?.('Attempting automated sign-in in the background…');
         await runCaptchaWalledLogin(page, fund, credentials, onProgress, onOtpNeeded).catch(
           () => {},
         );
         // If the automated attempt authenticated the session, the balance API
-        // already answers — return straight away.
+        // already answers — return straight away, no window ever shown.
         const auto = await readBalances(companyId, page, screenshotPath).catch(() => []);
         if (auto.length > 0) {
           await saveDebug(page, screenshotPath, htmlPath, dataPath, jsonResponses).catch(
@@ -477,12 +494,14 @@ export async function runPensionScrape(
           );
           return { success: true, accounts: auto };
         }
-        // The automated attempt did not complete — reset to a clean login
-        // page and fall through to the interactive poll loop below.
+        // The automated attempt was blocked — swap the hidden browser for a
+        // visible one so the user can finish the sign-in by hand.
         onProgress?.(
-          `Automatic sign-in to ${fund.name} was blocked — falling back: ` +
-            'please finish the sign-in in the browser window.',
+          `Automatic sign-in to ${fund.name} was blocked — opening a window ` +
+            'so you can finish the sign-in by hand.',
         );
+        await browser?.close().catch(() => {});
+        ({ browser, page } = await launchPensionBrowser(false, jsonResponses));
         try {
           await page.goto(fund.loginUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 });
         } catch {
