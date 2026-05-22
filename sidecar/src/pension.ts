@@ -511,7 +511,7 @@ export async function runPensionScrape(
       if (attemptAutomated) {
         onProgress?.('Attempting automated sign-in in the background…');
         await runCaptchaWalledLogin(page, fund, credentials, onProgress, onOtpNeeded).catch(
-          () => {},
+          (e) => plog('runCaptchaWalledLogin (headless) threw:', e instanceof Error ? e.stack : e),
         );
         // If the automated attempt authenticated the session, the balance API
         // already answers — return straight away, no window ever shown.
@@ -547,7 +547,7 @@ export async function runPensionScrape(
       if (attemptAutomated) {
         onProgress?.(`Finishing the ${fund.name} sign-in in the open window…`);
         void runCaptchaWalledLogin(page, fund, credentials, onProgress, onOtpNeeded).catch(
-          () => {},
+          (e) => plog('runCaptchaWalledLogin (visible) threw:', e instanceof Error ? e.stack : e),
         );
       } else {
         onProgress?.(
@@ -776,8 +776,12 @@ async function fillAndSubmitLogin(
   fund: PensionFund,
   credentials: Record<string, string>,
 ): Promise<boolean> {
+  plog('fillAndSubmitLogin: entered for', fund.id);
   // Only automated funds reach here; interactive funds carry no selectors.
-  if (!fund.idSelector || !fund.submitLabels) return false;
+  if (!fund.idSelector || !fund.submitLabels) {
+    plog('fillAndSubmitLogin: no idSelector/submitLabels — bailing');
+    return false;
+  }
   // Harel hides its login form behind a CTA button. The page also renders a
   // zero-size duplicate of that button, so target the *visible* one (real
   // bounding box) and click its centre with a real mouse click — page.click's
