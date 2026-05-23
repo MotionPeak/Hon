@@ -32,6 +32,22 @@ async function loadRates(): Promise<Record<string, number>> {
 }
 
 /**
+ * Returns the current ILS-per-unit rate map (cache or fresh). Returns null
+ * when the network is unavailable so callers can fall back to native-currency
+ * totals. The web app uses this to convert brokerage holdings and equity
+ * series to ILS without hard-coding rates.
+ */
+export async function getIlsRates(): Promise<Record<string, number> | null> {
+  try {
+    return await loadRates();
+  } catch {
+    return null;
+  }
+}
+
+export { normalizeCurrency };
+
+/**
  * Sums per-currency totals into a single ILS figure. Returns null when a rate
  * for a non-ILS currency is unavailable, so the caller can fall back cleanly.
  */

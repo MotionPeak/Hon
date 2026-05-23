@@ -6,6 +6,7 @@ import { SNAPTRADE_COMPANY_ID, snaptradeCompany } from './snaptrade.js';
 import { PENSION_COMPANIES, isPensionCompany } from './pension.js';
 import { watchForOtp, type OtpCallback } from './otp.js';
 import { persistSession, restoreSession, type SessionHandle } from './session.js';
+import { scrapeFibiLoans, supportsBankLoans, type ScrapedLoan } from './bankLoans.js';
 
 // Extra Chromium flags for the scraper browser. Inside a container Chromium
 // runs as root with no user namespace, so its sandbox cannot start — the Docker
@@ -66,11 +67,52 @@ export interface NormalizedAccount {
   holdings?: NormalizedHolding[];
 }
 
+/** A daily equity point on a brokerage's historical chart. */
+export interface PerformancePoint {
+  date: string;
+  value: number;
+  currency?: string;
+}
+
+/** Per-timeframe SnapTrade stats. Rate of return, dividends and contributions
+ *  are all window-scoped, so each pill the user picks (1M / 3M / YTD / 1Y /
+ *  ALL) carries its own copy. The equity series is shared (sliced client-side
+ *  from the ALL window). */
+export interface BrokerageRangeStats {
+  rateOfReturn: number | null;
+  dividendIncome: number | null;
+  contributions: number | null;
+}
+
+/**
+ * The SnapTrade reporting payload Hon caches per brokerage connection. The
+ * web app slices `totalEquity` for 1M / 3M / YTD / 1Y / ALL toggles without
+ * a fresh API call; `byRange` holds the per-window summary numbers so tiles
+ * like "Rate of return" and "Dividends" follow the active pill.
+ */
+export interface BrokeragePerformanceData {
+  totalEquity: PerformancePoint[];
+  contributionsCumulative?: PerformancePoint[];
+  rateOfReturn?: number | null;
+  dividendIncome?: number | null;
+  contributions?: number | null;
+  currency?: string;
+  rangeStart: string;
+  rangeEnd: string;
+  /** Stats keyed by range — '1M' | '3M' | 'YTD' | '1Y' | 'ALL'. */
+  byRange?: Record<string, BrokerageRangeStats>;
+}
+
 export interface ScrapeOutcome {
   success: boolean;
   accounts: NormalizedAccount[];
   errorType?: string;
   errorMessage?: string;
+  /** Optional brokerage performance series, captured during a SnapTrade sync. */
+  brokeragePerformance?: BrokeragePerformanceData;
+  /** Loans pulled from the bank's loans page (FIBI-group today). The runner
+   *  upserts these into the loans table keyed by the connection + bank id. */
+  scrapedLoans?: ScrapedLoan[];
 }
 
 // Institutions excluded from the catalog. OneZero needs an interactive OTP
@@ -198,11 +240,31 @@ export async function runScrape(
 
     // Login succeeded — keep the session so the next sync can reuse it.
     await persistSession(browser, session);
+
+    // FIBI-group banks have a loans page we know how to read; pull it before
+    // the browser closes so the runner can upsert Loan rows alongside the
+    // accounts. A failure here never breaks the main scrape; a debug HTML is
+    // written next to the failure screenshot so a missing anchor can be
+    // diagnosed by inspecting what the scraper actually rendered.
+    let scrapedLoans: ScrapedLoan[] | undefined;
+    if (supportsBankLoans(companyId)) {
+      const loansDebugPath = screenshotPath
+        ? screenshotPath.replace(/\.png$/i, '-loans.html')
+        : undefined;
+      try {
+        scrapedLoans = await scrapeFibiLoans(browser, loansDebugPath);
+      } catch (err) {
+        console.error('[bank-loans] runScrape post-hook threw:', err);
+        scrapedLoans = undefined;
+      }
+    }
+
     return {
       success: true,
       accounts: (result.accounts ?? []).map((account) =>
         normalizeAccount(account as unknown as RawAccount),
       ),
+      scrapedLoans,
     };
   } finally {
     if (browser) await browser.close().catch(() => {});
@@ -273,11 +335,30 @@ export async function runInteractiveScrape(
     }
     // Login succeeded — keep the session so the next sync can reuse it.
     await persistSession(launched, session);
+
+    // Same post-hook as runScrape: pull the bank's loans page for the FIBI
+    // group while we still have an authenticated browser. Failure here never
+    // breaks the main scrape; a debug HTML is dumped beside the failure
+    // screenshot when the anchor cannot be found.
+    let scrapedLoans: ScrapedLoan[] | undefined;
+    if (supportsBankLoans(companyId)) {
+      const loansDebugPath = screenshotPath
+        ? screenshotPath.replace(/\.png$/i, '-loans.html')
+        : undefined;
+      try {
+        scrapedLoans = await scrapeFibiLoans(launched, loansDebugPath);
+      } catch (err) {
+        console.error('[bank-loans] runInteractiveScrape post-hook threw:', err);
+        scrapedLoans = undefined;
+      }
+    }
+
     return {
       success: true,
       accounts: (result.accounts ?? []).map((account) =>
         normalizeAccount(account as unknown as RawAccount),
       ),
+      scrapedLoans,
     };
   } catch (err) {
     return {

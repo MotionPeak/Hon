@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-export const SCHEMA_VERSION = 17;
+export const SCHEMA_VERSION = 20;
 
 export interface DbHandle {
   db: Database.Database;
@@ -303,6 +303,77 @@ const MIGRATIONS: { version: number; sql: string }[] = [
         merchant_key TEXT PRIMARY KEY,
         cancelled_at TEXT NOT NULL
       );
+    `,
+  },
+  {
+    // Per-holding price/value history — one row per (account, symbol, day).
+    // Captured on every brokerage sync so each position can show its own
+    // sparkline trend in the Insights brokerage view.
+    version: 18,
+    sql: `
+      CREATE TABLE holding_value_snapshots (
+        account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        symbol     TEXT NOT NULL,
+        date       TEXT NOT NULL,
+        units      REAL NOT NULL,
+        price      REAL,
+        value      REAL NOT NULL,
+        currency   TEXT NOT NULL,
+        PRIMARY KEY (account_id, symbol, date)
+      );
+    `,
+  },
+  {
+    // Loans the user is paying back — Israeli mortgage tracks (kvua lo-tzmuda,
+    // kvua tzmuda, prime), car loans, personal loans. Each row holds only the
+    // original terms; the current outstanding is computed at read time with a
+    // Spitzer amortization, scaled by the CPI ratio for tzmuda tracks and at
+    // the current BOI prime + the user's margin for prime tracks. cpi_start
+    // is snapshotted at creation so the linkage is fixed. rate_cache memoises
+    // the BOI prime and CBS CPI lookups so the UI does not refetch a value
+    // that has not changed.
+    version: 19,
+    sql: `
+      CREATE TABLE loans (
+        id            TEXT PRIMARY KEY,
+        name          TEXT NOT NULL,
+        principal     REAL NOT NULL,
+        start_date    TEXT NOT NULL,
+        term_months   INTEGER NOT NULL,
+        is_prime      INTEGER NOT NULL DEFAULT 0,
+        is_cpi_linked INTEGER NOT NULL DEFAULT 0,
+        rate_value    REAL NOT NULL,
+        cpi_start     REAL,
+        currency      TEXT NOT NULL DEFAULT 'ILS',
+        excluded      INTEGER NOT NULL DEFAULT 0,
+        notes         TEXT,
+        created_at    TEXT NOT NULL,
+        updated_at    TEXT NOT NULL
+      );
+
+      CREATE TABLE rate_cache (
+        series      TEXT NOT NULL,
+        period      TEXT NOT NULL,
+        value       REAL NOT NULL,
+        fetched_at  TEXT NOT NULL,
+        PRIMARY KEY (series, period)
+      );
+    `,
+  },
+  {
+    // Lets a loan be linked to the bank connection that scraped it, so a
+    // re-sync upserts the same row instead of inserting a duplicate. Both
+    // columns are NULL for hand-entered loans. The partial unique index
+    // enforces one row per (connection, bank loan id) but allows any
+    // number of manual loans alongside.
+    version: 20,
+    sql: `
+      ALTER TABLE loans ADD COLUMN connection_id TEXT
+        REFERENCES connections(id) ON DELETE CASCADE;
+      ALTER TABLE loans ADD COLUMN external_id TEXT;
+      CREATE UNIQUE INDEX idx_loans_connection_external
+        ON loans(connection_id, external_id)
+        WHERE connection_id IS NOT NULL AND external_id IS NOT NULL;
     `,
   },
 ];

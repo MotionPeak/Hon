@@ -79,6 +79,12 @@ export function currentMonthRange(): MonthRange {
 export interface BudgetProjection {
   expectedIncome?: number;
   expectedFixed?: number;
+  /**
+   * Description substrings whose matching bank lines are credit-card bill
+   * totals (already itemised under the card) and should be left out of both
+   * spending and inflow totals.
+   */
+  cardProviders?: string[];
 }
 
 /**
@@ -93,9 +99,10 @@ export function buildBudgetReport(
   projection?: BudgetProjection,
 ): BudgetReport {
   const { start, end, label } = range;
+  const cardProviders = projection?.cardProviders ?? [];
   const budgets = new Map(repo.listBudgets().map((b) => [b.category, b.monthlyAmount]));
   const spending = new Map(
-    repo.monthlySpending(start, end).map((s) => [s.category, s.total]),
+    repo.monthlySpending(start, end, cardProviders).map((s) => [s.category, s.total]),
   );
 
   // Split this month's expenses into the three umbrellas.
@@ -119,7 +126,7 @@ export function buildBudgetReport(
     }))
     .sort((a, b) => b.spent - a.spent);
 
-  const income = repo.monthlyInflow(start, end);
+  const income = repo.monthlyInflow(start, end, cardProviders);
   const committed = fixedSpent + essentialSpent;
 
   // Piggy-bank set-asides draw from whatever income is left after the month's

@@ -1,9 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { Snaptrade } from 'snaptrade-typescript-sdk';
 import type {
+  BrokeragePerformanceData,
+  BrokerageRangeStats,
   CompanyInfo,
   NormalizedAccount,
   NormalizedHolding,
+  PerformancePoint,
   ScrapeOutcome,
 } from './scrapers.js';
 import {
@@ -333,7 +336,14 @@ export async function runSnapTradeSync(
           'SnapTrade returned no accounts. Link a brokerage, or give it a moment to finish syncing.',
       };
     }
-    return { success: true, accounts };
+
+    onProgress?.('Fetching historical performance from SnapTrade…');
+    const brokeragePerformance = await fetchPerformanceHistory(
+      snaptrade,
+      userId,
+      userSecret,
+    );
+    return { success: true, accounts, brokeragePerformance };
   } catch (err) {
     return {
       success: false,
@@ -355,6 +365,151 @@ async function countConnections(
   } catch {
     return 0;
   }
+}
+
+/**
+ * Pulls SnapTrade's full historical equity timeline for every linked account.
+ * One call covers up to 10 years back so the web app's 1M / 3M / YTD / 1Y /
+ * ALL toggles can slice client-side without re-hitting the API. Returns
+ * `undefined` on any failure — the rest of the sync keeps working.
+ */
+const RANGE_KEYS = ['1M', '3M', 'YTD', '1Y', 'ALL'] as const;
+type RangeKey = (typeof RANGE_KEYS)[number];
+
+/** Picks the start date for a named timeframe; ALL is 10 years. */
+function rangeStartDate(range: RangeKey, end: Date): Date {
+  if (range === 'ALL') {
+    const d = new Date(end);
+    d.setFullYear(d.getFullYear() - 10);
+    return d;
+  }
+  if (range === 'YTD') return new Date(end.getFullYear(), 0, 1);
+  const months = range === '1M' ? 1 : range === '3M' ? 3 : 12;
+  const d = new Date(end);
+  d.setMonth(d.getMonth() - months);
+  return d;
+}
+
+/** Pulls one timeframe's reporting payload. Logs and returns null on error. */
+async function fetchRangeReport(
+  snaptrade: Snaptrade,
+  userId: string,
+  userSecret: string,
+  range: RangeKey,
+  end: Date,
+): Promise<unknown | null> {
+  const start = rangeStartDate(range, end);
+  const fmt = (d: Date) => d.toISOString().slice(0, 10);
+  try {
+    const res = await snaptrade.transactionsAndReporting.getReportingCustomRange({
+      userId,
+      userSecret,
+      startDate: fmt(start),
+      endDate: fmt(end),
+      // Detailed mode (denser sampling for the equity timeline) only matters
+      // for the ALL window — that's the one we actually draw. Skipping it on
+      // shorter windows keeps the parallel fetch fast.
+      detailed: range === 'ALL',
+    });
+    return res.data ?? {};
+  } catch (err) {
+    process.stdout.write(
+      `snaptrade performance ${range} failed: ${describeSnapError(err)}\n`,
+    );
+    return null;
+  }
+}
+
+function extractRangeStats(raw: unknown): BrokerageRangeStats {
+  const d = (raw ?? {}) as {
+    rateOfReturn?: number | null;
+    dividendIncome?: number | null;
+    contributions?: { total?: number | null } | number | null;
+  };
+  let contributions: number | null = null;
+  if (typeof d.contributions === 'object' && d.contributions) {
+    contributions = d.contributions.total ?? null;
+  } else if (typeof d.contributions === 'number') {
+    contributions = d.contributions;
+  }
+  return {
+    rateOfReturn: d.rateOfReturn ?? null,
+    dividendIncome: d.dividendIncome ?? null,
+    contributions,
+  };
+}
+
+/**
+ * Pulls SnapTrade's reporting payload for every timeframe the UI exposes —
+ * one call per range, in parallel. The equity timeline comes from the ALL
+ * window (sliced client-side for 1M / 3M / YTD / 1Y); the per-range rate of
+ * return, dividend income and contributions populate `byRange`, so the
+ * matching tile updates instantly when the user flips the pill.
+ */
+async function fetchPerformanceHistory(
+  snaptrade: Snaptrade,
+  userId: string,
+  userSecret: string,
+): Promise<BrokeragePerformanceData | undefined> {
+  const end = new Date();
+  const fmt = (d: Date) => d.toISOString().slice(0, 10);
+
+  const fetched = await Promise.all(
+    RANGE_KEYS.map(async (r) => [r, await fetchRangeReport(snaptrade, userId, userSecret, r, end)] as const),
+  );
+
+  // ALL anchors the equity series; if it failed, the chart has nothing to
+  // draw and we report the whole fetch as a miss. Yahoo backfill will pick
+  // up the slack downstream.
+  const allEntry = fetched.find(([r]) => r === 'ALL');
+  const allData = allEntry ? (allEntry[1] as
+    {
+      totalEquityTimeframe?: unknown;
+      contributionTimeframeCumulative?: unknown;
+      rateOfReturn?: number | null;
+      dividendIncome?: number | null;
+      contributions?: { total?: number | null } | number | null;
+    } | null) : null;
+  if (!allData) return undefined;
+
+  const byRange: Record<string, BrokerageRangeStats> = {};
+  for (const [r, raw] of fetched) {
+    if (raw) byRange[r] = extractRangeStats(raw);
+  }
+
+  const totalEquity = mapPoints(allData.totalEquityTimeframe);
+  const allRange = byRange.ALL ?? extractRangeStats(allData);
+  const startDate = fmt(rangeStartDate('ALL', end));
+  const endDate = fmt(end);
+  if (totalEquity.length === 0) {
+    process.stdout.write(
+      `snaptrade performance: empty totalEquityTimeframe (${startDate}..${endDate})\n`,
+    );
+  }
+
+  return {
+    totalEquity,
+    contributionsCumulative: mapPoints(allData.contributionTimeframeCumulative),
+    rateOfReturn: allRange.rateOfReturn,
+    dividendIncome: allRange.dividendIncome,
+    contributions: allRange.contributions,
+    currency: totalEquity[0]?.currency,
+    rangeStart: startDate,
+    rangeEnd: endDate,
+    byRange,
+  };
+}
+
+function mapPoints(arr: unknown): PerformancePoint[] {
+  if (!Array.isArray(arr)) return [];
+  return arr
+    .map((p): PerformancePoint | null => {
+      const point = p as { date?: string; value?: number; currency?: string };
+      if (!point.date || typeof point.value !== 'number') return null;
+      return { date: point.date, value: point.value, currency: point.currency };
+    })
+    .filter((p): p is PerformancePoint => p !== null)
+    .sort((a, b) => a.date.localeCompare(b.date));
 }
 
 /**

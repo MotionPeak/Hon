@@ -5,6 +5,12 @@ import type {
   NormalizedAccount,
   NormalizedHolding,
 } from './scrapers.js';
+import type { Loan } from './loans.js';
+
+/** Tracks Israeli retail loans recognise: a fixed-rate loan, a prime-linked
+ *  loan (prime + margin, no index linkage), and the CPI-linked variants of
+ *  each (the "tzmuda" tracks common in mortgages). */
+export type RateType = 'fixed' | 'prime' | 'cpi-fixed' | 'cpi-prime';
 
 export interface Connection {
   id: string;
@@ -55,6 +61,16 @@ export interface HoldingRow {
 export interface ValueSnapshotRow {
   accountId: string;
   date: string;
+  value: number;
+  currency: string;
+}
+
+export interface HoldingSnapshotRow {
+  accountId: string;
+  symbol: string;
+  date: string;
+  units: number;
+  price: number | null;
   value: number;
   currency: string;
 }
@@ -288,6 +304,63 @@ export class Repo {
       .all() as HoldingRow[];
   }
 
+  /** Brokerage accounts joined with their connection's company id. */
+  listBrokerageAccounts(snaptradeCompanyId: string): AccountRow[] {
+    return this.listAccounts().filter((a) => a.companyId === snaptradeCompanyId);
+  }
+
+  /**
+   * Returns the date-range bounds of stored history for a single position.
+   * `count` lets the caller skip the Yahoo backfill when enough history is
+   * already in the database.
+   */
+  holdingSnapshotBounds(accountId: string, symbol: string):
+    { count: number; firstDate: string | null; lastDate: string | null } {
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) AS count, MIN(date) AS firstDate, MAX(date) AS lastDate
+         FROM holding_value_snapshots
+         WHERE account_id = ? AND symbol = ?`,
+      )
+      .get(accountId, symbol) as
+        { count: number; firstDate: string | null; lastDate: string | null };
+    return row;
+  }
+
+  /**
+   * Bulk-inserts a historical price series for one position into the per-
+   * holding snapshots table. Existing rows for the same (account, symbol,
+   * date) are left alone — Hon's own daily syncs are the source of truth.
+   */
+  backfillHoldingHistory(
+    accountId: string,
+    symbol: string,
+    units: number,
+    history: { date: string; price: number; currency: string }[],
+  ): number {
+    const insert = this.db.prepare(
+      `INSERT OR IGNORE INTO holding_value_snapshots
+         (account_id, symbol, date, units, price, value, currency)
+       VALUES (@accountId, @symbol, @date, @units, @price, @value, @currency)`,
+    );
+    let inserted = 0;
+    this.db.transaction(() => {
+      for (const point of history) {
+        const r = insert.run({
+          accountId,
+          symbol,
+          date: point.date,
+          units,
+          price: point.price,
+          value: units * point.price,
+          currency: point.currency,
+        });
+        if (r.changes) inserted += 1;
+      }
+    })();
+    return inserted;
+  }
+
   /** Cached SnapTrade performance reports, keyed by connection id. */
   listBrokeragePerformance(): { connectionId: string; data: BrokeragePerformanceData; fetchedAt: string }[] {
     const rows = this.db
@@ -321,6 +394,17 @@ export class Repo {
            data_json = excluded.data_json, fetched_at = excluded.fetched_at`,
       )
       .run(connectionId, JSON.stringify(data), new Date().toISOString());
+  }
+
+  /** Every per-holding price/value snapshot, oldest first. */
+  listHoldingSnapshots(): HoldingSnapshotRow[] {
+    return this.db
+      .prepare(
+        `SELECT account_id AS accountId, symbol, date, units, price, value, currency
+         FROM holding_value_snapshots
+         ORDER BY date`,
+      )
+      .all() as HoldingSnapshotRow[];
   }
 
   /** Every recorded brokerage value snapshot, oldest first. */
@@ -560,6 +644,14 @@ export class Repo {
        ON CONFLICT (account_id, date) DO UPDATE SET
          value = excluded.value, currency = excluded.currency`,
     );
+    const upsertHoldSnapshot = this.db.prepare(
+      `INSERT INTO holding_value_snapshots
+         (account_id, symbol, date, units, price, value, currency)
+       VALUES (@accountId, @symbol, @date, @units, @price, @value, @currency)
+       ON CONFLICT (account_id, symbol, date) DO UPDATE SET
+         units = excluded.units, price = excluded.price,
+         value = excluded.value, currency = excluded.currency`,
+    );
 
     let txnCount = 0;
     const now = new Date().toISOString();
@@ -601,6 +693,21 @@ export class Repo {
               date: today,
               value: account.balance,
               currency: account.currency,
+            });
+          }
+          // Per-holding daily snapshot — feeds each position's own sparkline
+          // when the user expands a holding in the Insights brokerage view.
+          for (const h of account.holdings) {
+            const value = h.price != null ? h.units * h.price : null;
+            if (value == null) continue;
+            upsertHoldSnapshot.run({
+              accountId: row.id,
+              symbol: h.symbol,
+              date: today,
+              units: h.units,
+              price: h.price ?? null,
+              value,
+              currency: h.currency,
             });
           }
         }
@@ -963,16 +1070,22 @@ export class Repo {
   }
 
   /** ILS expense totals per category within [start, end) — ISO date strings. */
-  monthlySpending(start: string, end: string): { category: string; total: number }[] {
+  monthlySpending(
+    start: string,
+    end: string,
+    excludeDescPatterns: string[] = [],
+  ): { category: string; total: number }[] {
+    const params: Record<string, unknown> = { start, end };
+    const exclude = this.buildExcludeClause(excludeDescPatterns, params);
     return this.db
       .prepare(
         `SELECT category, SUM(-amount) AS total
          FROM txn_effective
          WHERE category IS NOT NULL AND amount < 0 AND currency = 'ILS'
-           AND date >= @start AND date < @end
+           AND date >= @start AND date < @end ${exclude}
          GROUP BY category`,
       )
-      .all({ start, end }) as { category: string; total: number }[];
+      .all(params) as { category: string; total: number }[];
   }
 
   /**
@@ -980,17 +1093,46 @@ export class Repo {
    * Transfers only. Positive amounts in expense categories are partial refunds
    * offsetting a purchase, so they are deliberately left out.
    */
-  monthlyInflow(start: string, end: string): number {
+  monthlyInflow(
+    start: string,
+    end: string,
+    excludeDescPatterns: string[] = [],
+  ): number {
+    const params: Record<string, unknown> = { start, end };
+    const exclude = this.buildExcludeClause(excludeDescPatterns, params);
     const row = this.db
       .prepare(
         `SELECT COALESCE(SUM(amount), 0) AS total
          FROM txn_effective
          WHERE amount > 0 AND currency = 'ILS'
            AND category IN ('Income', 'Transfers')
-           AND date >= @start AND date < @end`,
+           AND date >= @start AND date < @end ${exclude}`,
       )
-      .get({ start, end }) as { total: number };
+      .get(params) as { total: number };
     return row.total;
+  }
+
+  /**
+   * Builds the SQL fragment that excludes transactions whose description
+   * contains any of the given substrings (case-insensitive). Patterns shorter
+   * than 2 chars are dropped — they would match almost everything. Adds the
+   * matching @p0, @p1, ... bindings to `params` in place.
+   */
+  private buildExcludeClause(
+    patterns: string[],
+    params: Record<string, unknown>,
+  ): string {
+    const clean = patterns
+      .map((p) => p.trim().toLowerCase())
+      .filter((p) => p.length >= 2);
+    if (clean.length === 0) return '';
+    const parts: string[] = [];
+    clean.forEach((p, i) => {
+      const key = `excl${i}`;
+      params[key] = `%${p}%`;
+      parts.push(`LOWER(description) LIKE @${key}`);
+    });
+    return `AND NOT (${parts.join(' OR ')})`;
   }
 
   listBudgets(): { category: string; monthlyAmount: number }[] {
@@ -1175,4 +1317,207 @@ export class Repo {
       .run();
     return changed;
   }
+
+  // --- Loans ---------------------------------------------------------------
+  // Each loan is stored as its original terms only — start date, principal,
+  // term, rate type, and a CPI snapshot at start when linked. The current
+  // outstanding is recomputed at read time off the cached BOI/CBS rates, so
+  // the figure stays current without a "balance" column to keep in sync.
+
+  private static readonly LOAN_COLS =
+    'id, name, principal, start_date AS startDate, term_months AS termMonths, ' +
+    'is_prime AS isPrime, is_cpi_linked AS isCpiLinked, rate_value AS rateValue, ' +
+    'cpi_start AS cpiStart, currency, excluded, notes, ' +
+    'connection_id AS connectionId, external_id AS externalId, ' +
+    'created_at AS createdAt, updated_at AS updatedAt';
+
+  listLoans(): Loan[] {
+    const rows = this.db
+      .prepare(`SELECT ${Repo.LOAN_COLS} FROM loans ORDER BY created_at`)
+      .all() as LoanRow[];
+    return rows.map(toLoan);
+  }
+
+  getLoan(id: string): Loan | undefined {
+    const row = this.db
+      .prepare(`SELECT ${Repo.LOAN_COLS} FROM loans WHERE id = ?`)
+      .get(id) as LoanRow | undefined;
+    return row ? toLoan(row) : undefined;
+  }
+
+  createLoan(
+    input: Omit<Loan, 'id' | 'createdAt' | 'updatedAt' | 'connectionId' | 'externalId'>
+      & { connectionId?: string | null; externalId?: string | null },
+  ): Loan {
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO loans
+           (id, name, principal, start_date, term_months, is_prime, is_cpi_linked,
+            rate_value, cpi_start, currency, excluded, notes,
+            connection_id, external_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        id,
+        input.name,
+        input.principal,
+        input.startDate,
+        input.termMonths,
+        input.isPrime ? 1 : 0,
+        input.isCpiLinked ? 1 : 0,
+        input.rateValue,
+        input.cpiStart,
+        input.currency,
+        input.excluded ? 1 : 0,
+        input.notes,
+        input.connectionId ?? null,
+        input.externalId ?? null,
+        now,
+        now,
+      );
+    return this.getLoan(id)!;
+  }
+
+  /**
+   * Upserts a loan scraped from a bank's loans page, keyed by the connection
+   * + bank-side loan id. Re-syncs update the same row instead of inserting.
+   * The `excluded` and `notes` columns are preserved across syncs so the
+   * user's choices are not clobbered by the scraper.
+   */
+  upsertBankLoan(
+    connectionId: string,
+    input: Omit<Loan, 'id' | 'connectionId' | 'createdAt' | 'updatedAt' |
+      'excluded' | 'notes' | 'cpiStart'> & { cpiStart?: number | null },
+  ): Loan {
+    const existing = this.db
+      .prepare(
+        `SELECT id FROM loans WHERE connection_id = ? AND external_id = ?`,
+      )
+      .get(connectionId, input.externalId) as { id: string } | undefined;
+    const now = new Date().toISOString();
+    if (existing) {
+      this.db
+        .prepare(
+          `UPDATE loans SET
+             name = ?, principal = ?, start_date = ?, term_months = ?,
+             is_prime = ?, is_cpi_linked = ?, rate_value = ?,
+             currency = ?, updated_at = ?
+           WHERE id = ?`,
+        )
+        .run(
+          input.name,
+          input.principal,
+          input.startDate,
+          input.termMonths,
+          input.isPrime ? 1 : 0,
+          input.isCpiLinked ? 1 : 0,
+          input.rateValue,
+          input.currency,
+          now,
+          existing.id,
+        );
+      return this.getLoan(existing.id)!;
+    }
+    return this.createLoan({
+      ...input,
+      connectionId,
+      cpiStart: input.cpiStart ?? null,
+      excluded: false,
+      notes: null,
+    });
+  }
+
+  updateLoan(
+    id: string,
+    fields: Partial<Omit<Loan, 'id' | 'createdAt' | 'updatedAt'>>,
+  ): void {
+    const sets: string[] = [];
+    const values: unknown[] = [];
+    if (fields.name !== undefined) { sets.push('name = ?'); values.push(fields.name); }
+    if (fields.principal !== undefined) { sets.push('principal = ?'); values.push(fields.principal); }
+    if (fields.startDate !== undefined) { sets.push('start_date = ?'); values.push(fields.startDate); }
+    if (fields.termMonths !== undefined) { sets.push('term_months = ?'); values.push(fields.termMonths); }
+    if (fields.isPrime !== undefined) { sets.push('is_prime = ?'); values.push(fields.isPrime ? 1 : 0); }
+    if (fields.isCpiLinked !== undefined) { sets.push('is_cpi_linked = ?'); values.push(fields.isCpiLinked ? 1 : 0); }
+    if (fields.rateValue !== undefined) { sets.push('rate_value = ?'); values.push(fields.rateValue); }
+    if (fields.cpiStart !== undefined) { sets.push('cpi_start = ?'); values.push(fields.cpiStart); }
+    if (fields.currency !== undefined) { sets.push('currency = ?'); values.push(fields.currency); }
+    if (fields.excluded !== undefined) { sets.push('excluded = ?'); values.push(fields.excluded ? 1 : 0); }
+    if (fields.notes !== undefined) { sets.push('notes = ?'); values.push(fields.notes); }
+    if (sets.length === 0) return;
+    sets.push('updated_at = ?');
+    values.push(new Date().toISOString());
+    values.push(id);
+    this.db
+      .prepare(`UPDATE loans SET ${sets.join(', ')} WHERE id = ?`)
+      .run(...values);
+  }
+
+  deleteLoan(id: string): void {
+    this.db.prepare('DELETE FROM loans WHERE id = ?').run(id);
+  }
+
+  setLoanExcluded(id: string, excluded: boolean): void {
+    this.db
+      .prepare('UPDATE loans SET excluded = ? WHERE id = ?')
+      .run(excluded ? 1 : 0, id);
+  }
+
+  // --- Rate cache (BOI prime, CBS CPI) -------------------------------------
+  // Memoises a published rate by (series, period). The TTL is enforced by the
+  // caller — this layer just stores and retrieves the last-fetched value plus
+  // its timestamp, so a stale-but-cached value is still available when the
+  // live fetch fails.
+
+  getCachedRate(
+    series: string,
+    period: string,
+  ): { value: number; fetchedAt: string } | undefined {
+    return this.db
+      .prepare(
+        'SELECT value, fetched_at AS fetchedAt FROM rate_cache WHERE series = ? AND period = ?',
+      )
+      .get(series, period) as { value: number; fetchedAt: string } | undefined;
+  }
+
+  cacheRate(series: string, period: string, value: number): void {
+    this.db
+      .prepare(
+        `INSERT INTO rate_cache (series, period, value, fetched_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT (series, period) DO UPDATE SET
+           value = excluded.value, fetched_at = excluded.fetched_at`,
+      )
+      .run(series, period, value, new Date().toISOString());
+  }
+}
+
+// SQLite stores the loan booleans as 0|1.
+interface LoanRow {
+  id: string;
+  name: string;
+  principal: number;
+  startDate: string;
+  termMonths: number;
+  isPrime: number;
+  isCpiLinked: number;
+  rateValue: number;
+  cpiStart: number | null;
+  currency: string;
+  excluded: number;
+  notes: string | null;
+  connectionId: string | null;
+  externalId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+function toLoan(row: LoanRow): Loan {
+  return {
+    ...row,
+    isPrime: row.isPrime !== 0,
+    isCpiLinked: row.isCpiLinked !== 0,
+    excluded: row.excluded !== 0,
+  };
 }

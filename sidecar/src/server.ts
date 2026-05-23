@@ -27,9 +27,18 @@ import { InsightsGenerator } from './insights.js';
 import { SubscriptionMatcher } from './subscriptions.js';
 import { totalInILS, getIlsRates } from './fx.js';
 import { lookupVehicle } from './vehicle.js';
+import {
+  composeRateType,
+  computeLoanState,
+  currentYyyyMm,
+  decomposeRateType,
+  fetchCpiForMonth,
+  fetchCurrentPrime,
+} from './loans.js';
+import type { RateType } from './repo.js';
 
 const START = Date.now();
-const VERSION = '0.2.0';
+const VERSION = '0.3.0';
 
 // --- Configuration (from the environment, with dev-friendly fallbacks) ---
 const token = process.env.HON_TOKEN ?? '';
@@ -405,6 +414,7 @@ app.get('/brokerage', async (_req, reply) => {
   return {
     holdings: repo.listHoldings(),
     snapshots: repo.listValueSnapshots(),
+    holdingSnapshots: repo.listHoldingSnapshots(),
     performance: repo.listBrokeragePerformance(),
     ilsRates,
   };
@@ -453,12 +463,43 @@ app.get('/transactions', async (req, reply) => {
 app.get('/summary', async (_req, reply) => {
   if (!repo) return reply.code(503).send({ error: 'database unavailable' });
   const summary = repo.summary();
+
+  // Loans are debt — they subtract from net worth in the loan's own currency.
+  // Computed up front so /summary needs at most one BOI + one CBS fetch per
+  // call, no matter how many loans are listed.
+  const loans = repo.listLoans();
+  const needsPrime = loans.some((l) => !l.excluded && l.isPrime);
+  const needsCpi = loans.some((l) => !l.excluded && l.isCpiLinked);
+  const prime = needsPrime ? await fetchCurrentPrime(repo) : 0;
+  const cpiNow = needsCpi ? await fetchCpiForMonth(repo, currentYyyyMm()) : null;
+  const loanDebtByCurrency = new Map<string, number>();
+  for (const loan of loans) {
+    if (loan.excluded) continue;
+    const state = computeLoanState(loan, prime, cpiNow);
+    loanDebtByCurrency.set(
+      loan.currency,
+      (loanDebtByCurrency.get(loan.currency) ?? 0) + state.outstanding,
+    );
+  }
+
+  // Fold loan debt into the per-currency totals before converting to ILS.
+  const byCurrency = summary.byCurrency.map((r) => ({ ...r }));
+  for (const [currency, debt] of loanDebtByCurrency) {
+    let row = byCurrency.find((r) => r.currency === currency);
+    if (!row) {
+      row = { currency, total: 0, accountCount: 0 };
+      byCurrency.push(row);
+    }
+    row.total -= debt;
+  }
+
   // A single net-worth figure, every currency converted to ILS. Null when the
   // FX lookup fails — the app then falls back to the per-currency breakdown.
-  const netWorthILS = await totalInILS(summary.byCurrency);
+  const netWorthILS = await totalInILS(byCurrency);
 
   // Break the net worth down by source: bank / card / brokerage accounts and
-  // each kind of manual asset, every bucket converted to ILS.
+  // each kind of manual asset, every bucket converted to ILS. Loans contribute
+  // a negative `loan` bucket so the breakdown stacks to net worth.
   const typeOf = new Map(companyCatalog().map((c) => [c.id, c.type]));
   const buckets = new Map<string, Map<string, number>>();
   const addToBucket = (key: string, currency: string, amount: number): void => {
@@ -474,6 +515,9 @@ app.get('/summary', async (_req, reply) => {
     if (asset.excluded) continue;
     addToBucket(`asset:${asset.kind}`, asset.currency, asset.value);
   }
+  for (const [currency, debt] of loanDebtByCurrency) {
+    addToBucket('loan', currency, -debt);
+  }
   const sources: { key: string; amount: number }[] = [];
   for (const [key, byCur] of buckets) {
     const amount = await totalInILS(
@@ -483,7 +527,7 @@ app.get('/summary', async (_req, reply) => {
   }
   sources.sort((a, b) => b.amount - a.amount);
 
-  return { summary: { ...summary, netWorthILS, sources } };
+  return { summary: { ...summary, byCurrency, netWorthILS, sources } };
 });
 
 // Moves one transaction to a different category. With `applyToMerchant`, the
@@ -817,6 +861,190 @@ app.delete('/assets/:id', async (req, reply) => {
   return { ok: true };
 });
 
+// --- Loans ----------------------------------------------------------------
+// CRUD plus a "current state" computation: outstanding, monthly payment and
+// progress, recomputed at read time from the BOI prime + CBS CPI rates so
+// the figure stays in step with the published indices without a write step.
+
+function isValidRateType(v: unknown): v is RateType {
+  return v === 'fixed' || v === 'prime' || v === 'cpi-fixed' || v === 'cpi-prime';
+}
+
+app.get('/loans', async (_req, reply) => {
+  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+  const loans = repo.listLoans();
+  const needsPrime = loans.some((l) => l.isPrime);
+  const needsCpi = loans.some((l) => l.isCpiLinked);
+  const prime = needsPrime ? await fetchCurrentPrime(repo) : 0;
+  const cpiNow = needsCpi ? await fetchCpiForMonth(repo, currentYyyyMm()) : null;
+  return {
+    loans: loans.map((loan) => ({
+      ...loan,
+      rateType: composeRateType(loan),
+      state: computeLoanState(loan, prime, cpiNow),
+    })),
+    rates: { prime: needsPrime ? prime : null, cpiNow },
+  };
+});
+
+app.post('/loans', async (req, reply) => {
+  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+  const body = (req.body ?? {}) as {
+    name?: string;
+    principal?: number;
+    startDate?: string;
+    termMonths?: number;
+    rateType?: string;
+    rateValue?: number;
+    currency?: string;
+    notes?: string;
+  };
+  const name = (body.name ?? '').trim();
+  if (!name) return reply.code(400).send({ error: 'a name is required' });
+  const principal = Number(body.principal);
+  if (!Number.isFinite(principal) || principal <= 0) {
+    return reply.code(400).send({ error: 'principal must be a positive number' });
+  }
+  const startDate = (body.startDate ?? '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate)) {
+    return reply.code(400).send({ error: 'startDate must be YYYY-MM-DD' });
+  }
+  const termMonths = Math.round(Number(body.termMonths));
+  if (!Number.isFinite(termMonths) || termMonths <= 0) {
+    return reply.code(400).send({ error: 'termMonths must be a positive integer' });
+  }
+  if (!isValidRateType(body.rateType)) {
+    return reply.code(400).send({ error: 'rateType must be fixed | prime | cpi-fixed | cpi-prime' });
+  }
+  const rateValue = Number(body.rateValue);
+  if (!Number.isFinite(rateValue)) {
+    return reply.code(400).send({ error: 'rateValue must be a number' });
+  }
+  const { isPrime, isCpiLinked } = decomposeRateType(body.rateType);
+  // Snapshot the CPI at the start month, so the loan's index linkage is
+  // pinned to its own start — a later CPI revision does not retroactively
+  // change the loan's history.
+  const cpiStart = isCpiLinked
+    ? await fetchCpiForMonth(repo, startDate.slice(0, 7))
+    : null;
+  const loan = repo.createLoan({
+    name,
+    principal,
+    startDate,
+    termMonths,
+    isPrime,
+    isCpiLinked,
+    rateValue,
+    cpiStart,
+    currency: (body.currency || 'ILS').toUpperCase(),
+    excluded: false,
+    notes: body.notes?.trim() || null,
+  });
+  return { loan };
+});
+
+app.put('/loans/:id', async (req, reply) => {
+  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+  const { id } = req.params as { id: string };
+  const existing = repo.getLoan(id);
+  if (!existing) return reply.code(404).send({ error: 'loan not found' });
+
+  const body = (req.body ?? {}) as {
+    name?: string;
+    principal?: number;
+    startDate?: string;
+    termMonths?: number;
+    rateType?: string;
+    rateValue?: number;
+    currency?: string;
+    notes?: string | null;
+    excluded?: boolean;
+  };
+
+  const fields: Parameters<typeof repo.updateLoan>[1] = {};
+  if (body.name !== undefined) {
+    const name = body.name.trim();
+    if (!name) return reply.code(400).send({ error: 'name cannot be empty' });
+    fields.name = name;
+  }
+  if (body.principal !== undefined) {
+    const p = Number(body.principal);
+    if (!Number.isFinite(p) || p <= 0) {
+      return reply.code(400).send({ error: 'principal must be a positive number' });
+    }
+    fields.principal = p;
+  }
+  if (body.startDate !== undefined) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(body.startDate)) {
+      return reply.code(400).send({ error: 'startDate must be YYYY-MM-DD' });
+    }
+    fields.startDate = body.startDate;
+  }
+  if (body.termMonths !== undefined) {
+    const t = Math.round(Number(body.termMonths));
+    if (!Number.isFinite(t) || t <= 0) {
+      return reply.code(400).send({ error: 'termMonths must be a positive integer' });
+    }
+    fields.termMonths = t;
+  }
+  if (body.rateType !== undefined) {
+    if (!isValidRateType(body.rateType)) {
+      return reply.code(400).send({ error: 'invalid rateType' });
+    }
+    const { isPrime, isCpiLinked } = decomposeRateType(body.rateType);
+    fields.isPrime = isPrime;
+    fields.isCpiLinked = isCpiLinked;
+    // Track flipped to/from CPI-linked: refresh the start-CPI snapshot.
+    if (isCpiLinked && !existing.isCpiLinked) {
+      const startMonth = (fields.startDate ?? existing.startDate).slice(0, 7);
+      fields.cpiStart = await fetchCpiForMonth(repo, startMonth);
+    } else if (!isCpiLinked && existing.isCpiLinked) {
+      fields.cpiStart = null;
+    }
+  }
+  if (body.rateValue !== undefined) {
+    const r = Number(body.rateValue);
+    if (!Number.isFinite(r)) {
+      return reply.code(400).send({ error: 'rateValue must be a number' });
+    }
+    fields.rateValue = r;
+  }
+  if (body.currency !== undefined) fields.currency = body.currency.toUpperCase();
+  if (body.notes !== undefined) fields.notes = body.notes?.trim() || null;
+  if (body.excluded !== undefined) fields.excluded = body.excluded === true;
+
+  repo.updateLoan(id, fields);
+  return { loan: repo.getLoan(id) };
+});
+
+app.delete('/loans/:id', async (req, reply) => {
+  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+  const { id } = req.params as { id: string };
+  repo.deleteLoan(id);
+  return { ok: true };
+});
+
+app.patch('/loans/:id/excluded', async (req, reply) => {
+  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+  const { id } = req.params as { id: string };
+  const body = (req.body ?? {}) as { excluded?: boolean };
+  if (typeof body.excluded !== 'boolean') {
+    return reply.code(400).send({ error: 'excluded must be a boolean' });
+  }
+  if (!repo.getLoan(id)) return reply.code(404).send({ error: 'loan not found' });
+  repo.setLoanExcluded(id, body.excluded);
+  return { ok: true };
+});
+
+// Current BOI prime + CBS CPI, exposed so the UI can show today's reference
+// numbers and offer a "refresh rates" button.
+app.get('/rates', async (_req, reply) => {
+  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+  const prime = await fetchCurrentPrime(repo);
+  const cpiNow = await fetchCpiForMonth(repo, currentYyyyMm());
+  return { rates: { prime, cpiNow, asOf: new Date().toISOString() } };
+});
+
 // Resolves an Israeli licence plate to the car's make/model/year via the
 // government open-data portal. Registration specs only — no Israeli API
 // returns a market valuation, so the app estimates value itself.
@@ -920,6 +1148,7 @@ app.get('/budget', async (req, reply) => {
     end?: string;
     expectedIncome?: string;
     expectedFixed?: string;
+    cardProvider?: string | string[];
   };
   const iso = /^\d{4}-\d{2}-\d{2}$/;
   const range =
@@ -932,9 +1161,15 @@ app.get('/budget', async (req, reply) => {
   };
   const expectedIncome = num(q.expectedIncome);
   const expectedFixed = num(q.expectedFixed);
+  // Repeated ?cardProvider=… params arrive as a string or an array; normalise.
+  const cardProviders = Array.isArray(q.cardProvider)
+    ? q.cardProvider
+    : q.cardProvider
+      ? [q.cardProvider]
+      : [];
   const projection =
-    expectedIncome !== undefined || expectedFixed !== undefined
-      ? { expectedIncome, expectedFixed }
+    expectedIncome !== undefined || expectedFixed !== undefined || cardProviders.length > 0
+      ? { expectedIncome, expectedFixed, cardProviders }
       : undefined;
   const report = buildBudgetReport(repo, range, projection);
   // `/budget` is the one caller that commits the piggy ledger — so a report

@@ -2,7 +2,8 @@ import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Repo } from './repo.js';
 import type { Vault } from './vault.js';
-import { isSnapTrade, runSnapTradeSync } from './snaptrade.js';
+import { isSnapTrade, runSnapTradeSync, SNAPTRADE_COMPANY_ID } from './snaptrade.js';
+import { fetchYahooHistory } from './marketData.js';
 import { isPensionCompany, runPensionScrape } from './pension.js';
 import { runInteractiveScrape, runScrape, type ScrapeOutcome } from './scrapers.js';
 import { openSession } from './session.js';
@@ -153,8 +154,40 @@ export class ScrapeRunner {
       }
 
       const saved = this.repo.saveScrapeResult(args.connectionId, outcome.accounts);
+      if (outcome.brokeragePerformance) {
+        this.repo.saveBrokeragePerformance(args.connectionId, outcome.brokeragePerformance);
+      }
+      // Loans the scraper pulled from the bank's loans page are upserted
+      // against the same connection so a re-sync updates the existing row
+      // instead of creating duplicates. User-set fields (excluded, notes)
+      // are preserved by repo.upsertBankLoan.
+      if (outcome.scrapedLoans) {
+        for (const loan of outcome.scrapedLoans) {
+          this.repo.upsertBankLoan(args.connectionId, {
+            externalId: loan.externalId,
+            name: loan.name,
+            principal: loan.principal,
+            startDate: loan.startDate,
+            termMonths: loan.termMonths,
+            isPrime: loan.isPrime,
+            isCpiLinked: loan.isCpiLinked,
+            rateValue: loan.rateValue,
+            currency: loan.currency,
+          });
+        }
+      }
       status.accountsCount = saved.accounts;
       status.transactionsCount = saved.transactions;
+
+      // Backfill long-range price history from Yahoo Finance for any holding
+      // that doesn't yet have months of snapshots — runs in the background so
+      // it never blocks the sync's "done" status.
+      if (isSnapTrade(args.companyId)) {
+        void this.backfillBrokerageHistory(status).catch((err) =>
+          process.stdout.write(
+            `yahoo backfill failed: ${(err as Error).message}\n`,
+          ));
+      }
       this.finish(
         status,
         args.connectionId,
@@ -167,6 +200,40 @@ export class ScrapeRunner {
         args.connectionId,
         'error',
         err instanceof Error ? err.message : String(err),
+      );
+    }
+  }
+
+  /**
+   * Walks every position in every brokerage account and, if Hon has fewer
+   * than ~120 days of snapshots for it, pulls a 10-year daily close series
+   * from Yahoo Finance and stores it as units × close. Lets the equity chart
+   * draw a real history on the very first sync, instead of waiting weeks for
+   * Hon's own daily snapshots to accumulate.
+   */
+  private async backfillBrokerageHistory(status: RunStatus): Promise<void> {
+    const brkAccts = this.repo.listBrokerageAccounts(SNAPTRADE_COMPANY_ID);
+    const holdings = this.repo.listHoldings();
+    const inScope = new Set(brkAccts.map((a) => a.id));
+    let touched = 0;
+    for (const h of holdings) {
+      if (!inScope.has(h.accountId)) continue;
+      const bounds = this.repo.holdingSnapshotBounds(h.accountId, h.symbol);
+      if (bounds.count >= 120) continue; // already well-populated
+      status.message = `Backfilling price history for ${h.symbol}…`;
+      const history = await fetchYahooHistory(h.symbol, 365 * 10);
+      if (!history.length) continue;
+      const inserted = this.repo.backfillHoldingHistory(
+        h.accountId,
+        h.symbol,
+        h.units,
+        history.map((p) => ({ date: p.date, price: p.close, currency: p.currency })),
+      );
+      if (inserted > 0) touched += 1;
+    }
+    if (touched > 0) {
+      process.stdout.write(
+        `yahoo backfill: populated history for ${touched} position(s)\n`,
       );
     }
   }
