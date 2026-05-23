@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-export const SCHEMA_VERSION = 13;
+export const SCHEMA_VERSION = 15;
 
 export interface DbHandle {
   db: Database.Database;
@@ -239,6 +239,45 @@ const MIGRATIONS: { version: number; sql: string }[] = [
     // match the new format instead of being re-inserted as duplicates.
     version: 13,
     sql: `UPDATE transactions SET external_id = external_id || ':' || date;`,
+  },
+  {
+    // Lets the user drop an individual account or manual asset out of the
+    // net-worth total (e.g. a joint account, or savings they track but don't
+    // want counted) while keeping it visible on its card.
+    version: 14,
+    sql: `
+      ALTER TABLE accounts ADD COLUMN excluded INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE manual_assets ADD COLUMN excluded INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
+  {
+    // Brokerage support: per-account security positions, and a daily value
+    // snapshot so brokerage trend graphs have a history to draw — SnapTrade
+    // does not hand back historical portfolio values, so Hon records its own.
+    version: 15,
+    sql: `
+      CREATE TABLE holdings (
+        id          TEXT PRIMARY KEY,
+        account_id  TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        symbol      TEXT NOT NULL,
+        description TEXT,
+        units       REAL NOT NULL,
+        price       REAL,
+        currency    TEXT NOT NULL DEFAULT 'USD',
+        cost_basis  REAL,
+        open_pnl    REAL,
+        updated_at  TEXT NOT NULL,
+        UNIQUE (account_id, symbol)
+      );
+
+      CREATE TABLE account_value_snapshots (
+        account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        date       TEXT NOT NULL,
+        value      REAL NOT NULL,
+        currency   TEXT NOT NULL,
+        PRIMARY KEY (account_id, date)
+      );
+    `,
   },
 ];
 

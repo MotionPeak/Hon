@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
-import type { NormalizedAccount } from './scrapers.js';
+import type { NormalizedAccount, NormalizedHolding } from './scrapers.js';
 
 export interface Connection {
   id: string;
@@ -29,6 +29,30 @@ export interface AccountRow {
   balance: number | null;
   currency: string;
   updatedAt: string;
+  /** When true, this account is left out of the net-worth total. */
+  excluded: boolean;
+}
+
+// SQLite has no boolean type, so `excluded` arrives as 0 | 1.
+type AccountRowDb = Omit<AccountRow, 'excluded'> & { excluded: number };
+
+export interface HoldingRow {
+  accountId: string;
+  symbol: string;
+  description: string | null;
+  units: number;
+  price: number | null;
+  currency: string;
+  costBasis: number | null;
+  openPnl: number | null;
+  updatedAt: string;
+}
+
+export interface ValueSnapshotRow {
+  accountId: string;
+  date: string;
+  value: number;
+  currency: string;
 }
 
 export interface TxnRow {
@@ -78,9 +102,15 @@ export interface ManualAsset {
   details: Record<string, unknown> | null;
   createdAt: string;
   updatedAt: string;
+  /** When true, this asset is left out of the net-worth total. */
+  excluded: boolean;
 }
 
-type ManualAssetRow = Omit<ManualAsset, 'details'> & { details: string | null };
+// SQLite stores `details` as JSON text and `excluded` as 0 | 1.
+type ManualAssetRow = Omit<ManualAsset, 'details' | 'excluded'> & {
+  details: string | null;
+  excluded: number;
+};
 
 function toManualAsset(row: ManualAssetRow): ManualAsset {
   let details: Record<string, unknown> | null = null;
@@ -94,7 +124,7 @@ function toManualAsset(row: ManualAssetRow): ManualAsset {
       details = null;
     }
   }
-  return { ...row, details };
+  return { ...row, details, excluded: row.excluded !== 0 };
 }
 
 /** A savings goal — a thing the user is setting money aside for each month. */
@@ -162,7 +192,7 @@ function toSplitwiseLink(row: SplitwiseLinkRow): SplitwiseLink {
 }
 
 // `hasCredentials` reports whether the vault holds credentials for the
-// connection — true for web-app connections, false for Keychain-only ones.
+// connection.
 const CONNECTION_COLS =
   'c.id, c.company_id AS companyId, c.display_name AS displayName, ' +
   'c.created_at AS createdAt, c.last_scrape_at AS lastScrapeAt, ' +
@@ -227,16 +257,42 @@ export class Repo {
   // --- Accounts & transactions ---------------------------------------------
 
   listAccounts(): AccountRow[] {
-    return this.db
+    const rows = this.db
       .prepare(
         `SELECT a.id, a.connection_id AS connectionId, c.company_id AS companyId,
                 c.display_name AS connectionName, a.account_number AS accountNumber,
-                a.label, a.balance, a.currency, a.updated_at AS updatedAt
+                a.label, a.balance, a.currency, a.updated_at AS updatedAt,
+                a.excluded
          FROM accounts a
          JOIN connections c ON c.id = a.connection_id
          ORDER BY c.display_name, a.account_number`,
       )
-      .all() as AccountRow[];
+      .all() as AccountRowDb[];
+    return rows.map((r) => ({ ...r, excluded: r.excluded !== 0 }));
+  }
+
+  /** Every brokerage position across all accounts. */
+  listHoldings(): HoldingRow[] {
+    return this.db
+      .prepare(
+        `SELECT account_id AS accountId, symbol, description, units, price,
+                currency, cost_basis AS costBasis, open_pnl AS openPnl,
+                updated_at AS updatedAt
+         FROM holdings
+         ORDER BY symbol`,
+      )
+      .all() as HoldingRow[];
+  }
+
+  /** Every recorded brokerage value snapshot, oldest first. */
+  listValueSnapshots(): ValueSnapshotRow[] {
+    return this.db
+      .prepare(
+        `SELECT account_id AS accountId, date, value, currency
+         FROM account_value_snapshots
+         ORDER BY date`,
+      )
+      .all() as ValueSnapshotRow[];
   }
 
   listTransactions(opts: { accountId?: string; limit?: number }): TxnRow[] {
@@ -260,6 +316,13 @@ export class Repo {
     this.db
       .prepare('UPDATE accounts SET balance = ?, updated_at = ? WHERE id = ?')
       .run(balance, new Date().toISOString(), id);
+  }
+
+  /** Includes or excludes one account from the net-worth total. */
+  setAccountExcluded(id: string, excluded: boolean): void {
+    this.db
+      .prepare('UPDATE accounts SET excluded = ? WHERE id = ?')
+      .run(excluded ? 1 : 0, id);
   }
 
   // --- Refund / reimbursement links ----------------------------------------
@@ -370,16 +433,17 @@ export class Repo {
   }
 
   summary(): Summary {
+    // Net-worth totals skip anything the user has excluded.
     const accountTotals = this.db
       .prepare(
         `SELECT currency, COALESCE(SUM(balance), 0) AS total, COUNT(*) AS accountCount
-         FROM accounts GROUP BY currency`,
+         FROM accounts WHERE excluded = 0 GROUP BY currency`,
       )
       .all() as { currency: string; total: number; accountCount: number }[];
     const assetTotals = this.db
       .prepare(
         `SELECT currency, COALESCE(SUM(value), 0) AS total, COUNT(*) AS n
-         FROM manual_assets GROUP BY currency`,
+         FROM manual_assets WHERE excluded = 0 GROUP BY currency`,
       )
       .all() as { currency: string; total: number; n: number }[];
 
@@ -442,8 +506,25 @@ export class Repo {
          kind = excluded.kind, status = excluded.status, raw_json = excluded.raw_json`,
     );
 
+    const deleteHoldings = this.db.prepare('DELETE FROM holdings WHERE account_id = ?');
+    const insertHolding = this.db.prepare(
+      `INSERT INTO holdings
+         (id, account_id, symbol, description, units, price, currency,
+          cost_basis, open_pnl, updated_at)
+       VALUES
+         (@id, @accountId, @symbol, @description, @units, @price, @currency,
+          @costBasis, @openPnl, @updatedAt)`,
+    );
+    const upsertSnapshot = this.db.prepare(
+      `INSERT INTO account_value_snapshots (account_id, date, value, currency)
+       VALUES (@accountId, @date, @value, @currency)
+       ON CONFLICT (account_id, date) DO UPDATE SET
+         value = excluded.value, currency = excluded.currency`,
+    );
+
     let txnCount = 0;
     const now = new Date().toISOString();
+    const today = now.slice(0, 10);
 
     this.db.transaction(() => {
       for (const account of accounts) {
@@ -456,6 +537,34 @@ export class Repo {
           currency: account.currency,
           updatedAt: now,
         }) as { id: string };
+
+        // Brokerage accounts carry a holdings list — replace the prior
+        // positions wholesale, and record today's value for trend graphs.
+        if (account.holdings) {
+          deleteHoldings.run(row.id);
+          for (const h of account.holdings) {
+            insertHolding.run({
+              id: randomUUID(),
+              accountId: row.id,
+              symbol: h.symbol,
+              description: h.description ?? null,
+              units: h.units,
+              price: h.price ?? null,
+              currency: h.currency,
+              costBasis: h.costBasis ?? null,
+              openPnl: h.openPnl ?? null,
+              updatedAt: now,
+            });
+          }
+          if (account.balance != null) {
+            upsertSnapshot.run({
+              accountId: row.id,
+              date: today,
+              value: account.balance,
+              currency: account.currency,
+            });
+          }
+        }
 
         for (const txn of account.transactions) {
           upsertTxn.run({
@@ -486,7 +595,7 @@ export class Repo {
   // institution to scrape. They count toward net worth via summary().
 
   private static readonly ASSET_COLS =
-    'id, kind, name, value, currency, details, ' +
+    'id, kind, name, value, currency, details, excluded, ' +
     'created_at AS createdAt, updated_at AS updatedAt';
 
   listManualAssets(): ManualAsset[] {
@@ -537,6 +646,7 @@ export class Repo {
       name: string;
       value: number;
       details: Record<string, unknown> | null;
+      excluded: boolean;
     }>,
   ): void {
     const sets: string[] = [];
@@ -552,6 +662,10 @@ export class Repo {
     if (fields.details !== undefined) {
       sets.push('details = ?');
       values.push(fields.details ? JSON.stringify(fields.details) : null);
+    }
+    if (fields.excluded !== undefined) {
+      sets.push('excluded = ?');
+      values.push(fields.excluded ? 1 : 0);
     }
     if (sets.length === 0) return;
     sets.push('updated_at = ?');
@@ -970,5 +1084,27 @@ export class Repo {
     if (sets.length === 0) return;
     values.push(id);
     this.db.prepare(`UPDATE scrape_runs SET ${sets.join(', ')} WHERE id = ?`).run(...values);
+  }
+
+  /**
+   * Closes any run still marked `running`. A run is only `running` while the
+   * sidecar that owns it is alive (its live status is in memory). On a fresh
+   * start that process is gone, so such a row is stale — e.g. the app quit
+   * mid-sync. Left alone it shows as "syncing" forever; here it is reconciled
+   * to an error. Returns the number of runs closed.
+   */
+  reconcileInterruptedRuns(): number {
+    const now = new Date().toISOString();
+    const changed = this.db
+      .prepare(
+        "UPDATE scrape_runs SET status = 'error', finished_at = ?, " +
+          "message = 'Sync was interrupted before it finished.' " +
+          "WHERE status = 'running'",
+      )
+      .run(now).changes;
+    this.db
+      .prepare("UPDATE connections SET last_status = 'error' WHERE last_status = 'running'")
+      .run();
+    return changed;
   }
 }

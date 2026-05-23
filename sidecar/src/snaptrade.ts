@@ -1,6 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { Snaptrade } from 'snaptrade-typescript-sdk';
-import type { CompanyInfo, NormalizedAccount, ScrapeOutcome } from './scrapers.js';
+import type {
+  CompanyInfo,
+  NormalizedAccount,
+  NormalizedHolding,
+  ScrapeOutcome,
+} from './scrapers.js';
 import {
   clearSnapTradeUser,
   loadSnapTradeUser,
@@ -304,16 +309,20 @@ export async function runSnapTradeSync(
     const res = await snaptrade.accountInformation.listUserAccounts({ userId, userSecret });
     const raw = Array.isArray(res.data) ? res.data : [];
 
-    const accounts: NormalizedAccount[] = raw.map((account) => {
+    const accounts: NormalizedAccount[] = [];
+    for (const account of raw) {
       const amount = account.balance?.total?.amount;
-      return {
+      const accountId = account.id;
+      onProgress?.(`Fetching holdings for ${accountLabel(account)}…`);
+      accounts.push({
         accountNumber: account.number || account.id,
         label: accountLabel(account),
         balance: typeof amount === 'number' ? amount : undefined,
         currency: account.balance?.total?.currency ?? 'USD',
         transactions: [],
-      };
-    });
+        holdings: await fetchHoldings(snaptrade, userId, userSecret, accountId),
+      });
+    }
 
     if (accounts.length === 0) {
       return {
@@ -345,6 +354,69 @@ async function countConnections(
     return Array.isArray(res.data) ? res.data.length : 0;
   } catch {
     return 0;
+  }
+}
+
+/**
+ * Pulls the securities held in one brokerage account. A failed fetch (a
+ * brokerage still doing its initial sync, an unsupported account type) must
+ * not sink the whole sync — the error is logged and the list returns empty.
+ */
+async function fetchHoldings(
+  snaptrade: Snaptrade,
+  userId: string,
+  userSecret: string,
+  accountId: string,
+): Promise<NormalizedHolding[]> {
+  try {
+    const res = await snaptrade.accountInformation.getUserAccountPositions({
+      userId,
+      userSecret,
+      accountId,
+    });
+    const positions = Array.isArray(res.data) ? res.data : [];
+    const normalized = positions
+      .map((p): NormalizedHolding | null => {
+        // SnapTrade nests the security info in `symbol.symbol` (a
+        // UniversalSymbol). Some brokerages return the universal symbol
+        // directly under `symbol`, so try both.
+        const inner = p.symbol?.symbol ?? p.symbol;
+        const ticker =
+          inner?.symbol || inner?.raw_symbol || p.symbol?.description;
+        const units = typeof p.units === 'number'
+          ? p.units
+          : typeof p.fractional_units === 'number'
+            ? p.fractional_units
+            : null;
+        if (!ticker || units == null) return null;
+        return {
+          symbol: String(ticker),
+          description: inner?.description ?? p.symbol?.description ?? undefined,
+          units,
+          price: typeof p.price === 'number' ? p.price : undefined,
+          currency: p.currency?.code ?? inner?.currency?.code ?? 'USD',
+          costBasis:
+            typeof p.average_purchase_price === 'number'
+              ? p.average_purchase_price
+              : undefined,
+          openPnl: typeof p.open_pnl === 'number' ? p.open_pnl : undefined,
+        };
+      })
+      .filter((h): h is NormalizedHolding => h !== null);
+    if (positions.length > 0 && normalized.length === 0) {
+      // Brokerage returned positions but every one was unparseable — log a
+      // sample so we can tell whether the shape changed.
+      process.stdout.write(
+        `snaptrade holdings: ${positions.length} positions for ${accountId} ` +
+          `but none parseable; sample=${JSON.stringify(positions[0]).slice(0, 400)}\n`,
+      );
+    }
+    return normalized;
+  } catch (err) {
+    process.stdout.write(
+      `snaptrade holdings fetch failed for ${accountId}: ${describeSnapError(err)}\n`,
+    );
+    return [];
   }
 }
 

@@ -43,12 +43,27 @@ export interface NormalizedTransaction {
   raw?: unknown;
 }
 
+/** A single brokerage security position (stock / ETF / crypto / fund). */
+export interface NormalizedHolding {
+  symbol: string;
+  description?: string;
+  units: number;
+  price?: number;
+  currency: string;
+  /** Average purchase price per share, when the brokerage reports it. */
+  costBasis?: number;
+  /** Unrealized profit/loss on the position, as reported by the brokerage. */
+  openPnl?: number;
+}
+
 export interface NormalizedAccount {
   accountNumber: string;
   label?: string;
   balance?: number;
   currency: string;
   transactions: NormalizedTransaction[];
+  /** Set for brokerage accounts — the securities held in the account. */
+  holdings?: NormalizedHolding[];
 }
 
 export interface ScrapeOutcome {

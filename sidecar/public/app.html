@@ -184,6 +184,20 @@
   .bal-edit { cursor: pointer; border-radius: 6px; padding: 3px 6px;
     margin: -3px -6px; transition: background-color .14s; }
   .bal-edit:hover { background: var(--card-hi); }
+  .row-end { display: flex; align-items: center; gap: 10px; }
+  .nw-pill { display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11px; font-weight: 600; color: var(--muted);
+    padding: 4px 9px 4px 7px; border-radius: 999px; cursor: pointer;
+    border: 1px solid var(--hairline-2); user-select: none;
+    transition: border-color .14s, color .14s, background-color .14s; }
+  .nw-pill:hover { border-color: var(--indigo); color: var(--text); }
+  .nw-pill.on { color: var(--text); border-color: var(--indigo);
+    background: var(--indigo-soft); }
+  .nw-pill .nw-tick { width: 13px; height: 13px; margin: 0; flex: none;
+    cursor: pointer; accent-color: var(--indigo); }
+  .row.nw-off { opacity: 0.55; }
+  .row.nw-off .amount { text-decoration: line-through; }
+  .asset-card.nw-off .conn-total { text-decoration: line-through; opacity: 0.6; }
   .pos { color: var(--green); }
   .empty { color: var(--muted); font-size: 13px; padding: 14px 2px;
     text-align: center; }
@@ -463,7 +477,7 @@
     white-space: nowrap; }
   .md-cat-track { height: 6px; border-radius: 4px; background: var(--card-hi); }
   .md-cat-fill { height: 100%; border-radius: 4px; transform-origin: left;
-    animation: bar-grow .55s ease both; }
+    background: var(--indigo); animation: bar-grow .55s ease both; }
   .md-cat-pct { width: 30px; flex: 0 0 auto; text-align: right;
     font-size: 11px; font-weight: 700; color: var(--faint); }
   .md-cat-d { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 5px; }
@@ -471,6 +485,36 @@
   .md-d.good { color: var(--green); }
   .md-d.bad { color: var(--red); }
   .md-d.flat { color: var(--faint); }
+  /* Brokerage: holdings on account cards + the Insights brokerage view. */
+  .holds-toggle { margin-top: 4px; padding: 0; border: 0; background: none;
+    color: var(--indigo); font-size: 11.5px; font-weight: 700; cursor: pointer; }
+  .holds-list { margin: 2px 0 10px; padding: 8px 10px; background: var(--card-hi);
+    border-radius: 10px; display: flex; flex-direction: column; gap: 7px; }
+  .hold-row { display: flex; justify-content: space-between; gap: 10px;
+    align-items: flex-start; }
+  .hold-sym { min-width: 0; }
+  .hold-tk { font-size: 12.5px; font-weight: 700; }
+  .hold-desc { font-size: 10.5px; color: var(--faint); margin-left: 5px; }
+  .hold-end { text-align: right; white-space: nowrap; flex: 0 0 auto;
+    display: flex; flex-direction: column; gap: 1px; }
+  .hold-val { font: 700 12.5px/1 ui-rounded, "SF Pro Rounded", system-ui; }
+  .hold-units { font-size: 10.5px; color: var(--faint); }
+  .hold-gain { font-size: 10.5px; font-weight: 700; }
+  .hold-gain.good { color: var(--green); }
+  .hold-gain.bad { color: var(--red); }
+  .hold-gain.flat { color: var(--faint); }
+  .ins-toggle { margin-left: auto; display: flex; gap: 4px; padding: 3px;
+    background: var(--card-hi); border-radius: 999px; }
+  .ins-pill { border: 0; background: none; color: var(--muted); cursor: pointer;
+    font-size: 12px; font-weight: 700; padding: 5px 12px; border-radius: 999px; }
+  .ins-pill.on { background: var(--card); color: var(--text); }
+  .vc-chart { display: flex; align-items: flex-end; gap: 3px; height: 120px;
+    margin-top: 4px; }
+  .vc-bar { flex: 1; display: flex; align-items: flex-end; min-width: 3px; }
+  .vc-fill { width: 100%; border-radius: 3px 3px 0 0; background: var(--indigo);
+    animation: bar-grow .55s ease both; }
+  .vc-axis { display: flex; justify-content: space-between; margin-top: 6px;
+    font-size: 10.5px; color: var(--faint); }
   .md-big { display: flex; align-items: center; gap: 11px; margin-top: 16px;
     padding: 11px 12px; background: var(--card-hi); border-radius: 12px; }
   .md-big-ico { width: 34px; height: 34px; border-radius: 10px; flex: 0 0 auto;
@@ -640,6 +684,10 @@
   .pick-row:hover { background: var(--card-hi); }
   .pick-row .pr-sub { color: var(--muted); font-size: 11px; font-weight: 500;
     display: block; margin-top: 2px; }
+  .pick-row .pr-tag { margin-left: auto; flex: none; font-size: 10px;
+    font-weight: 700; padding: 3px 8px; border-radius: 999px; white-space: nowrap; }
+  .pick-row .pr-tag.auto { color: var(--green); background: rgba(61,220,132,0.15); }
+  .pick-row .pr-tag.manual { color: var(--amber); background: rgba(245,181,74,0.15); }
   .back-btn { background: none; border: none; color: var(--muted); cursor: pointer;
     font-size: 13px; padding: 4px 0; margin-bottom: 6px; }
   .back-btn:hover { color: var(--text); }
@@ -891,7 +939,7 @@ const SYMBOLS = { ILS: "₪", NIS: "₪", USD: "$", EUR: "€", GBP: "£" };
 const CATEGORIES = ["Groceries","Dining","Transport","Fuel","Shopping","Utilities",
   "Housing","Insurance","Health","Entertainment","Subscriptions","Travel","Education",
   "Income","Transfers","Fees","Other"];
-// [emoji, accent colour] per category — mirrors the macOS app's CategoryStyle.
+// [emoji, accent colour] per category.
 const CATEGORY_STYLE = {
   Groceries: ["🛒", "#5CC773"], Dining: ["🍽️", "#F59942"],
   Transport: ["🚌", "#5C9EF5"], Fuel: ["⛽", "#EB736B"],
@@ -971,6 +1019,9 @@ const state = {
   batchOpen: false,      // batch-bar category dropdown open?
   collapsed: {},         // { category: true } collapsed Activity groups
   insightsMonth: null,   // "YYYY-MM" drilled into on the Insights tab
+  insightsTab: "spending", // "spending" | "brokerage" sub-view of Insights
+  brokerage: { holdings: [], snapshots: [] }, // positions + value history
+  expandedHoldings: {},  // { accountId: true } account cards showing holdings
   subAliases: {},        // { lapsedName: activeName } — AI-detected renames
   subAliasSig: null,     // signature of the name set subAliases was built for
   subAliasBusy: false,   // an alias lookup is in flight
@@ -1193,7 +1244,7 @@ function txnRefundAmount(t) {
 async function loadAll() {
   try {
     const [companies, connections, accounts, transactions, assets, summary,
-           insights, llm, merchantFreq] =
+           insights, llm, merchantFreq, brokerage] =
       await Promise.all([
         api("/companies").then((r) => r.companies),
         api("/connections").then((r) => r.connections),
@@ -1204,10 +1255,11 @@ async function loadAll() {
         api("/insights"),
         api("/llm"),
         api("/merchant-frequencies").then((r) => r.frequencies),
+        api("/brokerage"),
       ]);
     Object.assign(state, {
       companies, connections, accounts, transactions, assets, summary,
-      insights, llm, merchantFreq,
+      insights, llm, merchantFreq, brokerage,
     });
     // The budget is fetched once transactions are in state — its URL carries
     // the recurring projection, which is derived from those transactions.
@@ -1451,6 +1503,29 @@ function llmCatalogHtml(llm) {
     + '<div class="list" style="margin-top:8px">' + options + "</div>";
 }
 
+// The OpenAI-compatible API form — the `api` panel. Works with Groq's free
+// tier, OpenRouter, Google Gemini's OpenAI endpoint, a local LM Studio, etc.
+function apiPanelHtml(llm) {
+  const a = llm.api || {};
+  return '<div class="field"><label>API base URL</label>'
+    + '<input id="set-api-url" type="text" autocomplete="off" '
+    + 'placeholder="https://api.groq.com/openai/v1" value="' + esc(a.baseUrl || "") + '"></div>'
+    + '<div class="field"><label>Model</label>'
+    + '<input id="set-api-model" type="text" autocomplete="off" '
+    + 'placeholder="llama-3.3-70b-versatile" value="' + esc(a.model || "") + '"></div>'
+    + '<div class="field"><label>API key</label>'
+    + '<input id="set-api-key" type="password" autocomplete="off" placeholder="'
+    + (a.hasKey ? "saved — leave blank to keep it" : "your service's API key")
+    + '"></div>'
+    + '<div class="actions"><button class="mini" data-api-test>Test connection</button></div>'
+    + '<div class="meta" id="set-api-status" style="margin-top:8px"></div>'
+    + '<p class="sub-hint" style="margin-top:9px">Any OpenAI-compatible chat API works. '
+    + 'A free option that needs no credit card: '
+    + '<a href="https://console.groq.com" target="_blank" rel="noopener">Groq</a> — '
+    + 'sign up, copy a key, and use the URL/model above as-is. Transaction '
+    + 'descriptions are sent to whichever service you pick.</p>';
+}
+
 // The Ollama server form — the `ollama` panel.
 function ollamaPanelHtml(llm) {
   const o = llm.ollama || {};
@@ -1480,13 +1555,20 @@ function modelSectionHtml() {
     + '<button type="button" data-llm-mode="local"'
     + (llmPanelMode === "local" ? ' class="on"' : "") + ">On-device model</button>"
     + '<button type="button" data-llm-mode="ollama"'
-    + (llmPanelMode === "ollama" ? ' class="on"' : "") + ">Ollama server</button></div>";
-  const panel = llmPanelMode === "ollama" ? ollamaPanelHtml(llm) : llmCatalogHtml(llm);
+    + (llmPanelMode === "ollama" ? ' class="on"' : "") + ">Ollama server</button>"
+    + '<button type="button" data-llm-mode="api"'
+    + (llmPanelMode === "api" ? ' class="on"' : "") + ">API service</button></div>";
+  const panel = llmPanelMode === "ollama" ? ollamaPanelHtml(llm)
+    : llmPanelMode === "api" ? apiPanelHtml(llm)
+    : llmCatalogHtml(llm);
   const active = llm.mode === "ollama"
     ? "Active: Ollama" + (llm.ollama && llm.ollama.model ? " · " + esc(llm.ollama.model) : "")
+    : llm.mode === "api"
+    ? "Active: API" + (llm.api && llm.api.model ? " · " + esc(llm.api.model) : "")
     : "Active: on-device model";
-  const applyLabel = llmPanelMode === "ollama"
-    ? "Use this Ollama server" : "Use the on-device model";
+  const applyLabel = llmPanelMode === "ollama" ? "Use this Ollama server"
+    : llmPanelMode === "api" ? "Use this API service"
+    : "Use the on-device model";
   return seg + panel
     + '<div class="actions" style="margin-top:12px;justify-content:space-between;'
     + 'align-items:center"><span class="meta">' + active + "</span>"
@@ -1505,6 +1587,8 @@ function fillModelSection() {
     b.addEventListener("click", () => { llmPanelMode = b.dataset.llmMode; fillModelSection(); }));
   const test = el.querySelector("[data-ollama-test]");
   if (test) test.addEventListener("click", testOllamaConnection);
+  const apiTest = el.querySelector("[data-api-test]");
+  if (apiTest) apiTest.addEventListener("click", testApiConnection);
   const apply = el.querySelector("[data-llm-apply]");
   if (apply) apply.addEventListener("click", applyLlmProvider);
 }
@@ -1519,6 +1603,16 @@ function ollamaFieldValues() {
   };
 }
 
+// Reads the API-service form inputs currently on screen.
+function apiFieldValues() {
+  const get = (id) => { const e = document.getElementById(id); return e ? e.value : ""; };
+  return {
+    url: get("set-api-url").trim(),
+    model: get("set-api-model").trim(),
+    key: get("set-api-key"),
+  };
+}
+
 // Probes the Ollama server with the values typed in, without saving them.
 async function testOllamaConnection() {
   const f = ollamaFieldValues();
@@ -1528,6 +1622,24 @@ async function testOllamaConnection() {
     const body = { ollamaUrl: f.url };
     if (f.key) body.ollamaKey = f.key;
     const r = await api("/llm/ollama/test", "POST", body);
+    const list = r.models && r.models.length
+      ? " — " + r.models.slice(0, 6).join(", ")
+        + (r.models.length > 6 ? "…" : "") : "";
+    if (statusEl) statusEl.textContent = r.message + list;
+  } catch (e) {
+    if (statusEl) statusEl.textContent = e.message;
+  }
+}
+
+// Same as testOllamaConnection, but for the OpenAI-compatible API service.
+async function testApiConnection() {
+  const f = apiFieldValues();
+  const statusEl = document.getElementById("set-api-status");
+  if (statusEl) statusEl.textContent = "Testing the connection…";
+  try {
+    const body = { apiUrl: f.url };
+    if (f.key) body.apiKey = f.key;
+    const r = await api("/llm/api/test", "POST", body);
     const list = r.models && r.models.length
       ? " — " + r.models.slice(0, 6).join(", ")
         + (r.models.length > 6 ? "…" : "") : "";
@@ -1551,14 +1663,27 @@ async function applyLlmProvider() {
     body.ollamaUrl = f.url;
     body.ollamaModel = f.model;
     if (f.key) body.ollamaKey = f.key; // blank keeps the saved key
+  } else if (mode === "api") {
+    const f = apiFieldValues();
+    if (!f.url || !f.model) {
+      toast("Enter the API base URL and model name first.", true);
+      return;
+    }
+    if (!f.key && !(state.llm && state.llm.api && state.llm.api.hasKey)) {
+      toast("Enter the API key first.", true);
+      return;
+    }
+    body.apiUrl = f.url;
+    body.apiModel = f.model;
+    if (f.key) body.apiKey = f.key; // blank keeps the saved key
   }
   try {
     state.llm = await api("/llm/provider", "POST", body);
     llmPanelMode = state.llm.mode;
     fillModelSection();
     render();
-    toast(mode === "ollama"
-      ? "Now using your Ollama server for AI."
+    toast(mode === "ollama" ? "Now using your Ollama server for AI."
+      : mode === "api" ? "Now using your API service for AI."
       : "Now using the on-device model for AI.");
   } catch (e) {
     if (e instanceof VaultLocked) return showGate();
@@ -1635,6 +1760,63 @@ function brokerageLogo(b) {
   return '<span class="logo">📈' + img + "</span>";
 }
 
+// A pill-shaped toggle that includes/excludes one account or manual asset
+// from the net-worth total. The "In net worth" label stays visible on every
+// row so it's obvious what the box does; the title attribute adds the longer
+// explanation on hover. `kind` is "account" or "asset".
+function nwTick(kind, id, excluded) {
+  return '<label class="nw-pill' + (excluded ? "" : " on") + '" title="'
+    + (excluded
+        ? "Excluded from net worth. Tick to count this balance in the total."
+        : "Counted in net worth. Untick to leave this balance out of the total.")
+    + '"><input type="checkbox" class="nw-tick" data-toggle-nw="' + esc(kind)
+    + '" data-id="' + esc(id) + '"' + (excluded ? "" : " checked")
+    + "><span>In net worth</span></label>";
+}
+
+// --- Brokerage helpers -----------------------------------------------------
+
+function holdingsFor(accountId) {
+  return (state.brokerage.holdings || []).filter((h) => h.accountId === accountId);
+}
+
+// Market value, cost and unrealized gain for one position. `openPnl` is used
+// when the brokerage reports it; otherwise gain is derived from cost basis.
+function holdingStats(h) {
+  const value = h.price != null ? h.units * h.price : null;
+  const cost = h.costBasis != null ? h.units * h.costBasis : null;
+  let gain = h.openPnl != null ? h.openPnl
+    : (value != null && cost != null ? value - cost : null);
+  const gainPct = gain != null && cost ? (gain / Math.abs(cost)) * 100 : null;
+  return { value: value, cost: cost, gain: gain, gainPct: gainPct };
+}
+
+// The expanded per-account positions list shown under a brokerage account.
+function holdingsList(holds) {
+  const rows = holds.map((h) => {
+    const s = holdingStats(h);
+    const gainCls = s.gain == null ? "flat" : s.gain >= 0 ? "good" : "bad";
+    const gainTxt = s.gainPct == null ? ""
+      : '<span class="hold-gain ' + gainCls + '">'
+        + (s.gain >= 0 ? "↑" : "↓") + " " + Math.abs(s.gainPct).toFixed(1) + "%</span>";
+    return '<div class="hold-row"><div class="hold-sym"><span class="hold-tk">'
+      + esc(h.symbol) + "</span>"
+      + (h.description ? '<span class="hold-desc">' + esc(h.description) + "</span>" : "")
+      + '</div><div class="hold-end">'
+      + '<span class="hold-val">' + (s.value != null ? money(s.value, h.currency) : "—")
+      + "</span>"
+      + '<span class="hold-units">' + fmtUnits(h.units) + " @ "
+      + (h.price != null ? money(h.price, h.currency) : "—") + "</span>"
+      + gainTxt + "</div></div>";
+  }).join("");
+  return '<div class="holds-list">' + rows + "</div>";
+}
+
+function fmtUnits(n) {
+  const r = Math.round(n * 1e6) / 1e6;
+  return Number.isInteger(r) ? String(r) : r.toFixed(4).replace(/0+$/, "");
+}
+
 function connectionCard(conn) {
   const accounts = state.accounts.filter((a) => a.connectionId === conn.id);
   const isSnap = conn.companyId === SNAPTRADE_ID;
@@ -1670,13 +1852,28 @@ function connectionCard(conn) {
   let rows, total = null, totalCur = "ILS";
   if (accounts.length) {
     accounts.forEach((a) => {
-      if (a.balance != null) { total = (total || 0) + a.balance; totalCur = a.currency; }
+      // An account the user excluded does not count toward the connection's
+      // total — keeping it in step with the net-worth figure.
+      if (a.balance != null && !a.excluded) {
+        total = (total || 0) + a.balance; totalCur = a.currency;
+      }
     });
-    rows = '<div class="list conn-accounts">' + accounts.map((a) =>
-      '<div class="row"><div><div class="name">'
-      + esc(a.label || "Account " + a.accountNumber) + "</div>"
-      + (a.label ? '<div class="secondary">' + esc(a.accountNumber) + "</div>" : "")
-      + "</div>" + amt(a) + "</div>").join("") + "</div>";
+    rows = '<div class="list conn-accounts">' + accounts.map((a) => {
+      const holds = isSnap ? holdingsFor(a.id) : [];
+      const open = !!state.expandedHoldings[a.id];
+      const toggle = holds.length
+        ? '<button class="holds-toggle" data-action="toggle-holdings" data-id="'
+          + esc(a.id) + '">' + (open ? "▾ " : "▸ ") + holds.length + " holding"
+          + (holds.length === 1 ? "" : "s") + "</button>"
+        : "";
+      return '<div class="row' + (a.excluded ? " nw-off" : "") + '"><div><div class="name">'
+        + esc(a.label || "Account " + a.accountNumber) + "</div>"
+        + (a.label ? '<div class="secondary">' + esc(a.accountNumber) + "</div>" : "")
+        + toggle
+        + '</div><div class="row-end">' + amt(a)
+        + nwTick("account", a.id, a.excluded) + "</div></div>"
+        + (open ? holdingsList(holds) : "");
+    }).join("") + "</div>";
   } else if (isSnap && !conn.lastScrapeAt) {
     rows = '<div class="empty">No brokerage linked yet — use “Link brokerage”.</div>';
   } else {
@@ -1751,6 +1948,21 @@ function connectionSpend(conn) {
   return total;
 }
 
+// This billing cycle's net spending on a single account (negative). The
+// per-account counterpart of connectionSpend — used to give each card a
+// figure, since card scrapers report no balance.
+function accountCycleSpend(accountId) {
+  const key = currentCycleKey();
+  let total = 0;
+  state.transactions.forEach((t) => {
+    if (t.accountId !== accountId || isCardTotal(t) || t.refundForId) return;
+    if (cycleKey(t.date) !== key) return;
+    const a = t.amount + txnRefundAmount(t);
+    if (a < 0) total += a;
+  });
+  return total;
+}
+
 /* --- Assets -------------------------------------------------------------- */
 
 const ASSET_META = {
@@ -1769,12 +1981,14 @@ function assetCard(a) {
     if (d.km) bits.push(Number(d.km).toLocaleString() + " km");
     if (bits.length) sub = bits.join(" · ");
   }
-  return '<div class="card asset-card"><div class="card-head">'
+  return '<div class="card asset-card' + (a.excluded ? " nw-off" : "")
+    + '"><div class="card-head">'
     + '<span class="logo">' + meta[0] + "</span>"
     + '<div style="min-width:0"><h3>' + esc(a.name) + "</h3>"
     + '<div class="meta">' + esc(sub) + "</div></div>"
     + '<span class="conn-total">' + money(a.value, a.currency) + "</span></div>"
     + '<div class="conn-foot actions">'
+    + nwTick("asset", a.id, a.excluded)
     + '<button class="mini" data-action="edit-asset" data-id="' + esc(a.id)
     + '">Edit</button>'
     + '<button class="mini danger" data-action="remove-asset" data-id="' + esc(a.id)
@@ -2690,7 +2904,25 @@ function deltaChip(current, baseline, label) {
 }
 
 function insightsView() {
-  const head = '<div class="sec-head"><div class="label">Insights</div></div>';
+  const hasBrokerage = (state.brokerage.holdings || []).length > 0
+    || (state.brokerage.snapshots || []).length > 0;
+  const tab = state.insightsTab === "brokerage" ? "brokerage" : "spending";
+
+  let toggle = "";
+  if (hasBrokerage) {
+    const pill = (key, label) => '<button class="ins-pill'
+      + (tab === key ? " on" : "") + '" data-action="insights-tab" data-arg="'
+      + key + '">' + label + "</button>";
+    toggle = '<div class="ins-toggle">' + pill("spending", "Spending")
+      + pill("brokerage", "Brokerage") + "</div>";
+  }
+  const head = '<div class="sec-head"><div class="label">Insights</div>'
+    + toggle + "</div>";
+
+  if (tab === "brokerage" && hasBrokerage) {
+    return head + '<div class="ins-stack">' + brokerageView() + "</div>";
+  }
+
   const months = cycleAnalytics();
   if (!months.some((m) => m.spending || m.income)) {
     return head + '<div class="card empty">No analytics yet — sync an account '
@@ -2706,6 +2938,133 @@ function insightsView() {
 
   return head + '<div class="ins-stack">' + chart
     + monthDetailCard(months, sel) + aiInsightsCard(state.insights) + "</div>";
+}
+
+// The brokerage stats view: portfolio value with its trend, total unrealized
+// gain, a value-over-time chart, and the consolidated holdings allocation.
+function brokerageView() {
+  const holdings = state.brokerage.holdings || [];
+  const snaps = state.brokerage.snapshots || [];
+  const brkAccts = state.accounts.filter((a) => a.companyId === SNAPTRADE_ID);
+
+  // Headline currency — the one most brokerage accounts report in.
+  const curCount = {};
+  brkAccts.forEach((a) => { curCount[a.currency] = (curCount[a.currency] || 0) + 1; });
+  const cur = Object.keys(curCount).sort((x, y) => curCount[y] - curCount[x])[0] || "USD";
+
+  // Total value: brokerage account balances (includes cash). Gain and cost
+  // come from the priced positions only.
+  let totalValue = 0, haveValue = false;
+  brkAccts.forEach((a) => {
+    if (a.balance != null) { totalValue += a.balance; haveValue = true; }
+  });
+  let totalCost = 0, totalGain = 0, haveGain = false;
+  holdings.forEach((h) => {
+    const s = holdingStats(h);
+    if (s.cost != null) totalCost += s.cost;
+    if (s.gain != null) { totalGain += s.gain; haveGain = true; }
+  });
+  const gainPct = haveGain && totalCost ? (totalGain / Math.abs(totalCost)) * 100 : null;
+
+  // Value-over-time: snapshots summed across all brokerage accounts per day.
+  const byDate = {};
+  snaps.forEach((s) => { byDate[s.date] = (byDate[s.date] || 0) + s.value; });
+  const series = Object.keys(byDate).sort().map((d) => ({ date: d, value: byDate[d] }));
+  const first = series.length ? series[0].value : null;
+  const last = series.length ? series[series.length - 1].value : null;
+  const periodPct = first ? ((last - first) / Math.abs(first)) * 100 : null;
+
+  const tiles = '<div class="md-tiles">'
+    + statTile(haveValue ? money(totalValue, cur) : "—", "Portfolio value", "")
+    + statTile(haveGain ? money(totalGain, cur, true) : "—", "Unrealized gain",
+        haveGain ? (totalGain >= 0 ? "good" : "bad") : "")
+    + statTile(gainPct == null ? "—"
+        : (gainPct >= 0 ? "+" : "") + gainPct.toFixed(1) + "%",
+        "Return on cost", gainPct == null ? "" : gainPct >= 0 ? "good" : "bad")
+    + statTile(String(holdings.length),
+        holdings.length === 1 ? "Holding" : "Holdings", "")
+    + "</div>";
+
+  let trendCard;
+  if (series.length >= 2) {
+    const down = periodPct != null && periodPct < 0;
+    const pill = periodPct == null ? ""
+      : '<span class="md-trend ' + (down ? "bad" : "good") + '">'
+        + (down ? "↓ " : "↑ ") + Math.abs(periodPct).toFixed(1) + "% since "
+        + fmtDate(series[0].date) + "</span>";
+    trendCard = '<div class="card"><div class="md-head">'
+      + '<span class="md-month">Value over time</span>' + pill + "</div>"
+      + valueChart(series, cur) + "</div>";
+  } else {
+    trendCard = '<div class="card"><div class="label">Value over time</div>'
+      + '<div class="ins-sub">The trend graph builds up as you sync — '
+      + "one point is recorded per sync.</div></div>";
+  }
+
+  // Holdings allocation, consolidated by symbol across accounts.
+  const bySym = {};
+  holdings.forEach((h) => {
+    const s = holdingStats(h);
+    const e = bySym[h.symbol] || (bySym[h.symbol] = {
+      symbol: h.symbol, description: h.description, units: 0,
+      value: 0, cost: 0, gain: 0, currency: h.currency, haveGain: false,
+    });
+    e.units += h.units;
+    if (s.value != null) e.value += s.value;
+    if (s.cost != null) e.cost += s.cost;
+    if (s.gain != null) { e.gain += s.gain; e.haveGain = true; }
+  });
+  const rows = Object.keys(bySym).map((k) => bySym[k])
+    .sort((a, b) => b.value - a.value);
+  const allocTotal = rows.reduce((sum, r) => sum + r.value, 0) || 1;
+
+  let alloc = '<div class="card"><div class="label">Holdings</div>';
+  if (rows.length) {
+    alloc += '<div class="ins-sub">' + rows.length + " position"
+      + (rows.length === 1 ? "" : "s") + " across " + brkAccts.length
+      + " account" + (brkAccts.length === 1 ? "" : "s") + "</div>";
+    alloc += rows.map((r) => {
+      const pct = Math.round((r.value / allocTotal) * 100);
+      const gPct = r.haveGain && r.cost ? (r.gain / Math.abs(r.cost)) * 100 : null;
+      const gCls = gPct == null ? "flat" : gPct >= 0 ? "good" : "bad";
+      return '<div class="md-cat"><div class="md-cat-main">'
+        + '<div class="md-cat-top"><span class="md-cat-name">' + esc(r.symbol)
+        + (r.description ? ' <span class="hold-desc">' + esc(r.description)
+          + "</span>" : "")
+        + '</span><span class="md-cat-amt">' + money(r.value, r.currency)
+        + "</span></div>"
+        + '<div class="md-cat-track"><div class="md-cat-fill" style="width:'
+        + Math.max(4, pct) + '%"></div></div>'
+        + '<div class="md-cat-d"><span class="hold-units">' + fmtUnits(r.units)
+        + " units</span>"
+        + (gPct == null ? "" : '<span class="hold-gain ' + gCls + '">'
+          + (gPct >= 0 ? "↑" : "↓") + " " + Math.abs(gPct).toFixed(1) + "%</span>")
+        + "</div></div>"
+        + '<span class="md-cat-pct">' + pct + "%</span></div>";
+    }).join("");
+  } else {
+    alloc += '<div class="empty" style="padding:6px 0">No positions found — '
+      + "sync your brokerage to pull holdings.</div>";
+  }
+  alloc += "</div>";
+
+  return tiles + trendCard + alloc;
+}
+
+// A bar chart of brokerage value over time, one bar per recorded snapshot.
+function valueChart(series, cur) {
+  const max = series.reduce((m, p) => Math.max(m, p.value), 0) || 1;
+  const min = series.reduce((m, p) => Math.min(m, p.value), max);
+  const span = max - min || max || 1;
+  const bars = series.map((p) => {
+    const h = 12 + Math.round(((p.value - min) / span) * 88);
+    return '<div class="vc-bar" title="' + esc(fmtDate(p.date)) + " · "
+      + esc(money(p.value, cur)) + '"><div class="vc-fill" style="height:'
+      + h + '%"></div></div>';
+  }).join("");
+  return '<div class="vc-chart">' + bars + "</div>"
+    + '<div class="vc-axis"><span>' + fmtDate(series[0].date) + "</span><span>"
+    + fmtDate(series[series.length - 1].date) + "</span></div>";
 }
 
 // One billing cycle's spend breakdown — category split, transaction count and
@@ -3058,7 +3417,7 @@ function addConnectionModal() {
       + '<div class="pick-card" data-cat="car"><span class="pc-emoji">🚗</span>Car'
       + '<span class="pc-count">looked up by plate</span></div>'
       + '<div class="pick-card" data-cat="pension"><span class="pc-emoji">🪺</span>'
-      + 'Pension<span class="pc-count">retirement savings</span></div>'
+      + 'Pension &amp; savings<span class="pc-count">pension, gemel &amp; study fund</span></div>'
       + '<div class="pick-card" data-cat="asset"><span class="pc-emoji">💎</span>'
       + 'Other asset<span class="pc-count">cash, property…</span></div>'
       + '<div class="pick-card" data-cat="splitwise"><span class="pc-emoji">🤝</span>'
@@ -3098,13 +3457,30 @@ function addConnectionModal() {
     // back to entering a pension by hand for providers Hon cannot scrape.
     const renderPensionStep = () => {
       const funds = state.companies.filter((c) => (c.type || "bank") === "pension");
-      const list = funds.map((c) =>
-        '<div class="pick-row" data-id="' + esc(c.id) + '">'
-        + companyLogo(c) + "<div>" + esc(c.name) + "</div></div>").join("");
-      modal.innerHTML = "<h2>Pension funds</h2>"
+      // Each provider connection covers every retirement product the member
+      // holds there. The tag tells automated providers apart from the ones
+      // that need a browser window to clear a security check on each sync.
+      const list = funds.map((c) => {
+        const auto = !c.interactive;
+        const tag = auto
+          ? '<span class="pr-tag auto">Automatic</span>'
+          : '<span class="pr-tag manual">Browser window</span>';
+        const sub = auto
+          ? "Synced automatically in the background"
+          : "A browser window opens on each sync to clear a security check";
+        return '<div class="pick-row" data-id="' + esc(c.id) + '">'
+          + companyLogo(c)
+          + "<div>" + esc(c.name)
+          + '<span class="pr-sub">' + sub + "</span></div>"
+          + tag + "</div>";
+      }).join("");
+      modal.innerHTML = "<h2>Pension &amp; savings</h2>"
         + '<button class="back-btn" data-x="back">‹ All categories</button>'
-        + '<p class="hint">Connect a fund to pull its balance automatically — or '
-        + "add a custom account and enter the balance yourself.</p>"
+        + '<p class="hint">Connect a provider once — Hon pulls every retirement '
+        + "product you hold there together: pension (<bdi>פנסיה</bdi>), gemel / "
+        + "provident fund (<bdi>קופת גמל</bdi>) and study fund / keren hishtalmut "
+        + "(<bdi>קרן השתלמות</bdi>). Or add a custom account and enter the "
+        + "balance yourself.</p>"
         + '<div class="pick-list">' + list
         + '<div class="pick-row" data-manual="1"><span class="logo">✍️</span>'
         + "<div>Custom pension account"
@@ -4540,6 +4916,15 @@ function handleAction(action, btn) {
     }
     case "edit-budgets": budgetModal(); break;
     case "generate-insights": generateInsights(); break;
+    case "toggle-holdings":
+      if (id) {
+        state.expandedHoldings[id] = !state.expandedHoldings[id];
+        render();
+      }
+      break;
+    case "insights-tab":
+      if (btn && btn.dataset.arg) { state.insightsTab = btn.dataset.arg; render(); }
+      break;
     case "view-month-activity":
       if (btn && btn.dataset.arg) {
         state.tab = "activity";
@@ -4550,11 +4935,35 @@ function handleAction(action, btn) {
   }
 }
 
+// Includes/excludes one account or manual asset from the net-worth total,
+// then reloads so the headline figure and the breakdown reflect the change.
+async function toggleNetWorth(kind, id, counted) {
+  const excluded = !counted;
+  try {
+    if (kind === "asset") {
+      await api("/assets/" + id, "PUT", { excluded: excluded });
+    } else {
+      await api("/accounts/" + id + "/excluded", "PATCH", { excluded: excluded });
+    }
+    await loadAll();
+    render();
+  } catch (err) {
+    toast("Couldn't update the net-worth setting.");
+    render(); // re-render to restore the checkbox to the stored state
+  }
+}
+
 document.getElementById("content").addEventListener("click", (e) => {
   const balEl = e.target.closest("[data-edit-balance]");
   if (balEl) {
     const acct = state.accounts.find((a) => a.id === balEl.dataset.editBalance);
     if (acct) balanceModal(acct);
+    return;
+  }
+  const nwEl = e.target.closest("[data-toggle-nw]");
+  if (nwEl) {
+    // The checkbox has already flipped: checked = counted in net worth.
+    toggleNetWorth(nwEl.dataset.toggleNw, nwEl.dataset.id, nwEl.checked);
     return;
   }
   const bcatOpt = e.target.closest("[data-batch-cat]");
@@ -4700,12 +5109,6 @@ function showGate(creating) {
       try {
         await api("/vault/unlock", "POST", { passphrase });
         sessionStorage.setItem("honVaultPass", passphrase);
-        // Inside the Mac app, hand the passphrase to the native shell so it
-        // can store it in the Keychain and unlock silently next launch.
-        if (window.webkit && window.webkit.messageHandlers
-            && window.webkit.messageHandlers.honVault) {
-          window.webkit.messageHandlers.honVault.postMessage(passphrase);
-        }
         closeOverlay();
         document.getElementById("app").hidden = false;
         await loadAll();

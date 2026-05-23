@@ -27,7 +27,7 @@ export interface RunStatus {
 }
 
 /**
- * Runs scrapes in the background and tracks their live status. The Hon app
+ * Runs scrapes in the background and tracks their live status. The web app
  * starts a scrape, then polls getStatus() until it is done.
  */
 export class ScrapeRunner {

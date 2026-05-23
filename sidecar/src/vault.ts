@@ -11,11 +11,10 @@ import type { Repo } from './repo.js';
 const VERIFIER_PLAINTEXT = 'hon-vault-ok';
 
 /**
- * Password-protected credential store. The web app has no macOS Keychain, so
- * connection credentials are encrypted (AES-256-GCM, key derived from the
- * user's passphrase via scrypt) and kept in the local SQLite database. The
- * passphrase is never stored — the derived key lives in memory only, for as
- * long as the engine process runs.
+ * Password-protected credential store. Connection credentials are encrypted
+ * (AES-256-GCM, key derived from the user's passphrase via scrypt) and kept in
+ * the local SQLite database. The passphrase is never stored — the derived key
+ * lives in memory only, for as long as the engine process runs.
  */
 export class Vault {
   private key: Buffer | null = null;

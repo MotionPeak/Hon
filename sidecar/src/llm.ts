@@ -48,8 +48,11 @@ export type LlmState =
   | 'ready'
   | 'error';
 
-/** Where inference runs: a downloaded on-device model, or a remote Ollama server. */
-export type LlmMode = 'local' | 'ollama';
+/**
+ * Where inference runs: a downloaded on-device model, a remote Ollama server,
+ * or an OpenAI-compatible API service (Groq's free tier, OpenRouter, etc.).
+ */
+export type LlmMode = 'local' | 'ollama' | 'api';
 
 export interface LlmStatus {
   state: LlmState;
@@ -73,9 +76,20 @@ export interface OllamaConfig {
   model: string; // e.g. qwen2.5:3b
 }
 
+/**
+ * Connection details for an OpenAI-compatible chat API. Works with Groq's free
+ * tier, OpenRouter, Google's Gemini OpenAI endpoint, a local LM Studio, etc.
+ */
+export interface ApiConfig {
+  baseUrl: string; // e.g. https://api.groq.com/openai/v1
+  apiKey: string; // the service's API key
+  model: string; // e.g. llama-3.3-70b-versatile
+}
+
 interface PersistedProvider {
   mode: LlmMode;
   ollama: OllamaConfig;
+  api: ApiConfig;
 }
 
 /**
@@ -179,6 +193,56 @@ class OllamaSession implements LlmSession {
   }
 }
 
+/** An inference handle that calls an OpenAI-compatible chat API over HTTP. */
+class OpenAiSession implements LlmSession {
+  constructor(
+    private readonly cfg: ApiConfig,
+    private readonly system: string,
+  ) {}
+
+  async prompt(text: string, opts?: PromptOptions): Promise<string> {
+    // JSON-schema support varies across providers, so rather than the strict
+    // `json_schema` response format Hon asks for plain JSON object mode (which
+    // every OpenAI-compatible service supports) and states the shape in the
+    // prompt. Callers validate the parsed result regardless.
+    let userText = text;
+    const body: Record<string, unknown> = { model: this.cfg.model, stream: false };
+    if (opts?.jsonSchema) {
+      body.response_format = { type: 'json_object' };
+      userText += `\n\nReply with a JSON object matching this schema: ${JSON.stringify(opts.jsonSchema)}`;
+    }
+    body.messages = [
+      { role: 'system', content: this.system },
+      { role: 'user', content: userText },
+    ];
+    if (opts?.maxTokens) body.max_tokens = opts.maxTokens;
+
+    const res = await fetch(`${this.cfg.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${this.cfg.apiKey}`,
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(120_000),
+    });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      throw new Error(
+        `API replied HTTP ${res.status}${detail ? `: ${detail.slice(0, 200)}` : ''}`,
+      );
+    }
+    const data = (await res.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+    };
+    return (data.choices?.[0]?.message?.content ?? '').trim();
+  }
+
+  dispose(): void {
+    // Stateless HTTP — nothing to release.
+  }
+}
+
 /**
  * Manages how Hon runs AI: either an on-device GGUF model (downloaded with
  * progress, never leaving the machine) or a remote Ollama server — a local
@@ -201,6 +265,7 @@ export class LlmManager {
 
   private mode: LlmMode = 'local';
   private ollama: OllamaConfig = { baseUrl: '', apiKey: '', model: '' };
+  private api: ApiConfig = { baseUrl: '', apiKey: '', model: '' };
 
   private abortController: AbortController | null = null;
   private llama: Llama | null = null;
@@ -226,6 +291,7 @@ export class LlmManager {
     mode: LlmMode;
     ready: boolean;
     ollama: { baseUrl: string; model: string; hasKey: boolean };
+    api: { baseUrl: string; model: string; hasKey: boolean };
   } {
     return {
       ...this.status,
@@ -233,11 +299,16 @@ export class LlmManager {
       modelsDir: this.modelsDir,
       mode: this.mode,
       ready: this.isReady(),
-      // The API key is never echoed back — only whether one is stored.
+      // API keys are never echoed back — only whether one is stored.
       ollama: {
         baseUrl: this.ollama.baseUrl,
         model: this.ollama.model,
         hasKey: !!this.ollama.apiKey,
+      },
+      api: {
+        baseUrl: this.api.baseUrl,
+        model: this.api.model,
+        hasKey: !!this.api.apiKey,
       },
     };
   }
@@ -246,6 +317,9 @@ export class LlmManager {
   isReady(): boolean {
     if (this.mode === 'ollama') {
       return !!(this.ollama.baseUrl && this.ollama.model);
+    }
+    if (this.mode === 'api') {
+      return !!(this.api.baseUrl && this.api.model && this.api.apiKey);
     }
     return this.status.state === 'ready' && !!this.model;
   }
@@ -261,6 +335,12 @@ export class LlmManager {
       }
       return new OllamaSession(this.ollama, opts.system);
     }
+    if (this.mode === 'api') {
+      if (!this.api.baseUrl || !this.api.model || !this.api.apiKey) {
+        throw new Error('The API service is not configured.');
+      }
+      return new OpenAiSession(this.api, opts.system);
+    }
     if (!this.llama || !this.model) {
       throw new Error('No on-device AI model is loaded.');
     }
@@ -273,8 +353,13 @@ export class LlmManager {
   }
 
   /** Switches the active provider and persists the choice. */
-  setProvider(next: { mode: LlmMode; ollama?: Partial<OllamaConfig> }): void {
-    this.mode = next.mode === 'ollama' ? 'ollama' : 'local';
+  setProvider(next: {
+    mode: LlmMode;
+    ollama?: Partial<OllamaConfig>;
+    api?: Partial<ApiConfig>;
+  }): void {
+    this.mode =
+      next.mode === 'ollama' ? 'ollama' : next.mode === 'api' ? 'api' : 'local';
     if (next.ollama) {
       this.ollama = {
         baseUrl: normalizeUrl(next.ollama.baseUrl ?? this.ollama.baseUrl),
@@ -282,6 +367,13 @@ export class LlmManager {
         // round-tripping the secret through the browser.
         apiKey: next.ollama.apiKey ?? this.ollama.apiKey,
         model: (next.ollama.model ?? this.ollama.model).trim(),
+      };
+    }
+    if (next.api) {
+      this.api = {
+        baseUrl: normalizeUrl(next.api.baseUrl ?? this.api.baseUrl),
+        apiKey: next.api.apiKey ?? this.api.apiKey,
+        model: (next.api.model ?? this.api.model).trim(),
       };
     }
     this.persistProvider();
@@ -321,6 +413,38 @@ export class LlmManager {
       };
     } catch {
       return { ok: false, models: [], message: 'Could not reach the server — check the URL and key.' };
+    }
+  }
+
+  /** Checks an OpenAI-compatible API is reachable and lists its models. */
+  async testApi(opts: { baseUrl: string; apiKey?: string }): Promise<{
+    ok: boolean;
+    models: string[];
+    message: string;
+  }> {
+    const baseUrl = normalizeUrl(opts.baseUrl);
+    if (!baseUrl) return { ok: false, models: [], message: 'Enter the API base URL first.' };
+    const apiKey = opts.apiKey ?? this.api.apiKey;
+    if (!apiKey) return { ok: false, models: [], message: 'Enter the API key first.' };
+    try {
+      const res = await fetch(`${baseUrl}/models`, {
+        headers: { Authorization: `Bearer ${apiKey}` },
+        signal: AbortSignal.timeout(8_000),
+      });
+      if (!res.ok) {
+        return { ok: false, models: [], message: `Server replied HTTP ${res.status}.` };
+      }
+      const data = (await res.json()) as { data?: Array<{ id?: string }> };
+      const models = (data.data ?? []).map((m) => m.id ?? '').filter(Boolean);
+      return {
+        ok: true,
+        models,
+        message: models.length
+          ? `Connected — ${models.length} model${models.length === 1 ? '' : 's'} available.`
+          : 'Connected to the server.',
+      };
+    } catch {
+      return { ok: false, models: [], message: 'Could not reach the API — check the URL and key.' };
     }
   }
 
@@ -445,7 +569,11 @@ export class LlmManager {
 
   private persistProvider(): void {
     try {
-      const data: PersistedProvider = { mode: this.mode, ollama: this.ollama };
+      const data: PersistedProvider = {
+        mode: this.mode,
+        ollama: this.ollama,
+        api: this.api,
+      };
       writeFileSync(this.providerFile, JSON.stringify(data, null, 2), 'utf8');
     } catch {
       // non-fatal: the choice still holds for this session
@@ -455,12 +583,18 @@ export class LlmManager {
   private restoreProvider(): void {
     if (!existsSync(this.providerFile)) return;
     try {
-      const saved = JSON.parse(readFileSync(this.providerFile, 'utf8')) as PersistedProvider;
-      this.mode = saved.mode === 'ollama' ? 'ollama' : 'local';
+      const saved = JSON.parse(readFileSync(this.providerFile, 'utf8')) as Partial<PersistedProvider>;
+      this.mode =
+        saved.mode === 'ollama' ? 'ollama' : saved.mode === 'api' ? 'api' : 'local';
       this.ollama = {
         baseUrl: normalizeUrl(saved.ollama?.baseUrl ?? ''),
         apiKey: saved.ollama?.apiKey ?? '',
         model: (saved.ollama?.model ?? '').trim(),
+      };
+      this.api = {
+        baseUrl: normalizeUrl(saved.api?.baseUrl ?? ''),
+        apiKey: saved.api?.apiKey ?? '',
+        model: (saved.api?.model ?? '').trim(),
       };
     } catch {
       // ignore a corrupt provider file — defaults to the local model

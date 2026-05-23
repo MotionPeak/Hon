@@ -145,7 +145,7 @@ async function driveOtpPage(page: Page, getCode: OtpCallback): Promise<void> {
     throw new Error('Could not find the "send code" button on the OTP page');
   }
 
-  // 3. Ask the Hon app (which asks the user) for the code while the SMS arrives.
+  // 3. Ask the web app (which asks the user) for the code while the SMS arrives.
   const code = await getCode();
 
   // Give the post-send page (with the code field) a moment to render.
