@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-export const SCHEMA_VERSION = 15;
+export const SCHEMA_VERSION = 17;
 
 export interface DbHandle {
   db: Database.Database;
@@ -276,6 +276,32 @@ const MIGRATIONS: { version: number; sql: string }[] = [
         value      REAL NOT NULL,
         currency   TEXT NOT NULL,
         PRIMARY KEY (account_id, date)
+      );
+    `,
+  },
+  {
+    // Cached SnapTrade performance report per brokerage connection — the full
+    // historical equity timeline, rate of return, dividends and contributions.
+    // Pulled once per sync; the UI slices it for 1M / 3M / YTD / 1Y / ALL.
+    version: 16,
+    sql: `
+      CREATE TABLE brokerage_performance (
+        connection_id TEXT PRIMARY KEY REFERENCES connections(id) ON DELETE CASCADE,
+        data_json     TEXT NOT NULL,
+        fetched_at    TEXT NOT NULL
+      );
+    `,
+  },
+  {
+    // Subscriptions the user has explicitly marked cancelled. The Subscriptions
+    // tab hides them from "active" and surfaces them in a Cancelled section; a
+    // later charge for the same merchant is flagged so the user can confirm
+    // whether the cancellation actually took.
+    version: 17,
+    sql: `
+      CREATE TABLE cancelled_subscriptions (
+        merchant_key TEXT PRIMARY KEY,
+        cancelled_at TEXT NOT NULL
       );
     `,
   },

@@ -25,7 +25,7 @@ import { buildBudgetReport } from './budget.js';
 import { persistPiggyMonth } from './piggy.js';
 import { InsightsGenerator } from './insights.js';
 import { SubscriptionMatcher } from './subscriptions.js';
-import { totalInILS } from './fx.js';
+import { totalInILS, getIlsRates } from './fx.js';
 import { lookupVehicle } from './vehicle.js';
 
 const START = Date.now();
@@ -398,7 +398,16 @@ app.get('/accounts', async (_req, reply) => {
 // computes spending analytics client-side.
 app.get('/brokerage', async (_req, reply) => {
   if (!repo) return reply.code(503).send({ error: 'database unavailable' });
-  return { holdings: repo.listHoldings(), snapshots: repo.listValueSnapshots() };
+  // FX rates (ILS per unit of X) ride along so the web app can show ILS
+  // equivalents for USD/EUR holdings without hard-coding rates; null when
+  // the Frankfurter fetch fails — the UI falls back to native amounts.
+  const ilsRates = await getIlsRates();
+  return {
+    holdings: repo.listHoldings(),
+    snapshots: repo.listValueSnapshots(),
+    performance: repo.listBrokeragePerformance(),
+    ilsRates,
+  };
 });
 
 // Sets an account balance by hand. Credit-card scrapers do not report a
@@ -1039,6 +1048,37 @@ app.post('/insights', async (_req, reply) => {
 app.get('/insights', async (_req, reply) => {
   if (!insights) return reply.code(503).send({ error: 'database unavailable' });
   return insights.getStatus();
+});
+
+// User-cancelled subscriptions. The Subscriptions tab hides these from
+// "active" and surfaces them in a Cancelled section; a charge dated after the
+// cancellation is flagged in the UI so the user can check the cancellation
+// actually took.
+app.get('/subscriptions/cancelled', async (_req, reply) => {
+  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+  const cancelled: Record<string, string> = {};
+  for (const row of repo.listCancelledSubs()) {
+    cancelled[row.merchantKey] = row.cancelledAt;
+  }
+  return { cancelled };
+});
+
+app.put('/subscriptions/cancelled', async (req, reply) => {
+  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+  const body = (req.body ?? {}) as { merchantKey?: string };
+  const key = (body.merchantKey ?? '').trim();
+  if (!key) return reply.code(400).send({ error: 'a merchant key is required' });
+  repo.markSubCancelled(key);
+  return { ok: true };
+});
+
+app.delete('/subscriptions/cancelled', async (req, reply) => {
+  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+  const body = (req.body ?? {}) as { merchantKey?: string };
+  const key = (body.merchantKey ?? '').trim();
+  if (!key) return reply.code(400).send({ error: 'a merchant key is required' });
+  repo.unmarkSubCancelled(key);
+  return { ok: true };
 });
 
 // Given the user's active and lapsed subscription names, returns which lapsed

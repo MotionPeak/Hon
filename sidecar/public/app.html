@@ -9,9 +9,9 @@
     --bg: #131120; --bg-elev: #1b1930; --card: #211f33; --card-hi: #2b2842;
     --hairline: rgba(255,255,255,0.075); --hairline-2: rgba(255,255,255,0.15);
     --text: #f1eff8; --muted: rgba(255,255,255,0.60); --faint: rgba(255,255,255,0.40);
-    --brand: #ecb949; --indigo: #7d72ff; --indigo-soft: rgba(125,114,255,0.16);
+    --brand: #ecb949; --accent: #2dd4bf; --accent-soft: rgba(45,212,191,0.16);
     --green: #3ddc84; --amber: #f5b54a; --red: #f4685a;
-    --grad-1: #7d72ff; --grad-2: #4a3fb0;
+    --grad-1: #2dd4bf; --grad-2: #0f766e;
     --shadow: 0 10px 30px rgba(0,0,0,0.42); --shadow-sm: 0 2px 10px rgba(0,0,0,0.32);
     --scrim: rgba(9,8,16,0.80);
   }
@@ -19,9 +19,9 @@
     --bg: #f1f1f7; --bg-elev: #ffffff; --card: #ffffff; --card-hi: #f3f3f9;
     --hairline: rgba(24,22,48,0.09); --hairline-2: rgba(24,22,48,0.17);
     --text: #1d1b2e; --muted: rgba(29,27,46,0.62); --faint: rgba(29,27,46,0.44);
-    --brand: #c79220; --indigo: #5f54e3; --indigo-soft: rgba(95,84,227,0.11);
+    --brand: #c79220; --accent: #0d9488; --accent-soft: rgba(13,148,136,0.12);
     --green: #16a85c; --amber: #cf8c1c; --red: #d8473a;
-    --grad-1: #6f64f0; --grad-2: #9182f6;
+    --grad-1: #14b8a6; --grad-2: #5eead4;
     --shadow: 0 12px 32px rgba(45,42,80,0.13); --shadow-sm: 0 2px 12px rgba(45,42,80,0.08);
     --scrim: rgba(28,26,52,0.55);
   }
@@ -33,7 +33,7 @@
     -webkit-font-smoothing: antialiased;
     transition: background-color .3s ease, color .3s ease;
   }
-  a { color: var(--indigo); }
+  a { color: var(--accent); }
 
   /* --- Shell ------------------------------------------------------------- */
   #app { display: flex; flex-direction: column; min-height: 100vh;
@@ -78,11 +78,11 @@
     cursor: pointer; white-space: nowrap;
     transition: transform .12s ease, border-color .15s, background .15s, opacity .15s;
   }
-  button:hover { border-color: var(--indigo); }
+  button:hover { border-color: var(--accent); }
   button:active { transform: scale(.97); }
   button:disabled { opacity: .42; cursor: default; transform: none; }
-  button.primary { background: var(--indigo); border-color: transparent;
-    color: #fff; box-shadow: 0 4px 14px var(--indigo-soft); }
+  button.primary { background: var(--accent); border-color: transparent;
+    color: #fff; box-shadow: 0 4px 14px var(--accent-soft); }
   button.primary:hover { filter: brightness(1.08); }
   button.danger { color: var(--red); }
   button.danger:hover { border-color: var(--red); }
@@ -109,7 +109,7 @@
   #nav button::before {
     content: ""; position: absolute; left: 0; top: 50%;
     width: 3px; height: 0; border-radius: 0 3px 3px 0;
-    background: var(--indigo); transform: translateY(-50%);
+    background: var(--accent); transform: translateY(-50%);
     transition: height .24s ease;
   }
   #nav button:hover {
@@ -120,8 +120,8 @@
   #nav button:hover::before { height: 54%; }
   #nav button.active {
     color: #fff; transform: none; border-color: transparent;
-    background: linear-gradient(135deg, var(--indigo), #5c51c4);
-    box-shadow: 0 8px 20px var(--indigo-soft);
+    background: linear-gradient(135deg, var(--accent), #0f766e);
+    box-shadow: 0 8px 20px var(--accent-soft);
   }
   #nav button.active::before { height: 0; }
   #nav button.active .rn-ico { transform: scale(1.08); }
@@ -184,17 +184,18 @@
   .bal-edit { cursor: pointer; border-radius: 6px; padding: 3px 6px;
     margin: -3px -6px; transition: background-color .14s; }
   .bal-edit:hover { background: var(--card-hi); }
-  .row-end { display: flex; align-items: center; gap: 10px; }
-  .nw-pill { display: inline-flex; align-items: center; gap: 6px;
-    font-size: 11px; font-weight: 600; color: var(--muted);
-    padding: 4px 9px 4px 7px; border-radius: 999px; cursor: pointer;
+  .row-end { display: flex; align-items: center; gap: 10px; flex: none; }
+  .nw-pill { display: inline-flex; align-items: center; gap: 5px;
+    font-size: 10.5px; font-weight: 600; color: var(--muted);
+    padding: 3px 8px 3px 6px; border-radius: 999px; cursor: pointer;
     border: 1px solid var(--hairline-2); user-select: none;
+    white-space: nowrap; flex: none;
     transition: border-color .14s, color .14s, background-color .14s; }
-  .nw-pill:hover { border-color: var(--indigo); color: var(--text); }
-  .nw-pill.on { color: var(--text); border-color: var(--indigo);
-    background: var(--indigo-soft); }
-  .nw-pill .nw-tick { width: 13px; height: 13px; margin: 0; flex: none;
-    cursor: pointer; accent-color: var(--indigo); }
+  .nw-pill:hover { border-color: var(--accent); color: var(--text); }
+  .nw-pill.on { color: var(--text); border-color: var(--accent);
+    background: var(--accent-soft); }
+  .nw-pill .nw-tick { width: 12px; height: 12px; margin: 0; flex: none;
+    cursor: pointer; accent-color: var(--accent); }
   .row.nw-off { opacity: 0.55; }
   .row.nw-off .amount { text-decoration: line-through; }
   .asset-card.nw-off .conn-total { text-decoration: line-through; opacity: 0.6; }
@@ -202,7 +203,7 @@
   .empty { color: var(--muted); font-size: 13px; padding: 14px 2px;
     text-align: center; }
   .pill { display: inline-block; font-size: 11px; padding: 2px 8px;
-    border-radius: 999px; background: var(--indigo-soft); color: var(--indigo);
+    border-radius: 999px; background: var(--accent-soft); color: var(--accent);
     font-weight: 600; }
 
   .logo { position: relative; flex: 0 0 36px; width: 36px; height: 36px;
@@ -280,7 +281,7 @@
   .cat-count { font-size: 11px; font-weight: 700; color: var(--faint);
     background: var(--card-hi); padding: 2px 8px; border-radius: 999px; }
   .cat-head:hover .cat-count { background: var(--bg-elev); }
-  .cat-count.has { background: var(--indigo-soft); color: var(--indigo); }
+  .cat-count.has { background: var(--accent-soft); color: var(--accent); }
   .cat-total { margin-left: auto; font: 800 14.5px/1 ui-rounded,
     "SF Pro Rounded", system-ui; }
   .cat-list { margin-top: 5px; }
@@ -290,8 +291,8 @@
   .txn + .txn { border-top: 1px solid var(--hairline); }
   .txn:hover { background: var(--card-hi); }
   .txn:hover + .txn { border-top-color: transparent; }
-  .txn.sel { background: var(--indigo-soft);
-    box-shadow: inset 0 0 0 1.5px var(--indigo); }
+  .txn.sel { background: var(--accent-soft);
+    box-shadow: inset 0 0 0 1.5px var(--accent); }
   .txn-icon { flex: 0 0 38px; width: 38px; height: 38px; border-radius: 11px;
     display: flex; align-items: center; justify-content: center; font-size: 18px; }
   .txn-main { flex: 1; min-width: 0; }
@@ -305,9 +306,9 @@
     border: 1.6px solid var(--hairline-2); display: flex; align-items: center;
     justify-content: center; font-size: 12px; font-weight: 800; color: #fff;
     transition: background-color .14s, border-color .14s, transform .12s; }
-  .txn-check.on { background: var(--indigo); border-color: var(--indigo);
+  .txn-check.on { background: var(--accent); border-color: var(--accent);
     transform: scale(1.06); }
-  .txn.picked { background: var(--indigo-soft); }
+  .txn.picked { background: var(--accent-soft); }
 
   /* --- Batch action bar -------------------------------------------------- */
   .batch-bar { position: fixed; bottom: 24px; left: 50%;
@@ -325,7 +326,7 @@
     background: var(--card-hi); border: 1.5px solid var(--hairline-2);
     border-radius: 11px; font-size: 13px; font-weight: 700; min-width: 168px;
     transition: border-color .14s; }
-  .bcat-btn:hover, .bcat-btn.open { border-color: var(--indigo); }
+  .bcat-btn:hover, .bcat-btn.open { border-color: var(--accent); }
   .bcat-em { width: 24px; height: 24px; flex: none; border-radius: 7px;
     display: flex; align-items: center; justify-content: center; font-size: 14px; }
   .bcat-chev { margin-left: auto; font-size: 10px; color: var(--faint);
@@ -340,7 +341,7 @@
     border-radius: 9px; cursor: pointer; font-size: 13px; font-weight: 600;
     transition: background-color .12s; }
   .bcat-opt:hover { background: var(--card-hi); }
-  .bcat-opt.on { background: var(--indigo-soft); color: var(--indigo); }
+  .bcat-opt.on { background: var(--accent-soft); color: var(--accent); }
   .bcat-opt .bcat-check { margin-left: auto; font-weight: 800; }
 
   /* --- Sidebar ----------------------------------------------------------- */
@@ -361,13 +362,13 @@
   .always { display: flex; align-items: flex-start; gap: 9px; margin: 4px 0 13px;
     font-size: 12.5px; color: var(--muted); cursor: pointer; }
   .always input { width: auto; margin-top: 1px; flex: 0 0 auto;
-    accent-color: var(--indigo); }
+    accent-color: var(--accent); }
   .freq-pick { display: flex; gap: 8px; margin: 4px 0 13px; }
   .freq-opt { flex: 1; padding: 8px 6px; font-size: 12.5px; font-weight: 600;
     background: var(--card-hi); border: 1.5px solid transparent;
     border-radius: 9px; color: var(--muted); }
   .freq-opt:hover { border-color: var(--hairline-2); }
-  .freq-opt.active { background: var(--indigo); border-color: transparent;
+  .freq-opt.active { background: var(--accent); border-color: transparent;
     color: #fff; }
   /* Reimbursement / refund linking */
   .sb-label { margin: 13px 0 7px; }
@@ -375,13 +376,13 @@
     margin: 2px 0 9px; }
   .rf-add { background: var(--card-hi); border: 1.5px dashed var(--hairline-2);
     color: var(--muted); font-weight: 600; }
-  .rf-add:hover { border-color: var(--indigo); color: var(--indigo); }
+  .rf-add:hover { border-color: var(--accent); color: var(--accent); }
   .rf-list { display: flex; flex-direction: column; gap: 3px;
     max-height: 340px; overflow-y: auto; margin-bottom: 6px; }
   .rf-opt { display: flex; align-items: center; gap: 10px; width: 100%;
     text-align: left; padding: 8px 9px; border-radius: 10px;
     border: 1.5px solid transparent; background: var(--card-hi); }
-  .rf-opt:hover { border-color: var(--indigo); }
+  .rf-opt:hover { border-color: var(--accent); }
   .txn-icon.sm { flex: 0 0 30px; width: 30px; height: 30px; font-size: 14px;
     border-radius: 9px; }
   .rf-linked { background: var(--card-hi); border-radius: 12px;
@@ -433,9 +434,9 @@
   .mb-col { flex: 1; display: flex; flex-direction: column; align-items: center;
     justify-content: flex-end; height: 100%; }
   .mb-fill { width: 100%; max-width: 20px; min-height: 3px;
-    border-radius: 4px 4px 2px 2px; background: var(--indigo-soft);
+    border-radius: 4px 4px 2px 2px; background: var(--accent-soft);
     transform-origin: bottom; animation: bar-rise .5s ease both; }
-  .mb-fill.cur { background: var(--indigo); }
+  .mb-fill.cur { background: var(--accent); }
   .mb-x { font-size: 9px; color: var(--faint); margin-top: 4px; }
   .ins-llm { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--hairline); }
 
@@ -444,9 +445,9 @@
   .ins-sub { font-size: 11.5px; color: var(--faint); margin-top: 3px; }
   .mb-col { cursor: pointer; }
   .mb-col .mb-fill { transition: background-color .15s ease, opacity .15s ease; }
-  .mb-col:not(.sel):hover .mb-fill { background: var(--indigo); opacity: .55; }
-  .mb-col.sel .mb-fill { background: var(--indigo); }
-  .mb-col.sel .mb-x { color: var(--indigo); font-weight: 800; }
+  .mb-col:not(.sel):hover .mb-fill { background: var(--accent); opacity: .55; }
+  .mb-col.sel .mb-fill { background: var(--accent); }
+  .mb-col.sel .mb-x { color: var(--accent); font-weight: 800; }
   .md-head { display: flex; align-items: baseline; flex-wrap: wrap;
     gap: 8px 10px; margin-bottom: 14px; }
   .md-month { font: 800 19px/1 ui-rounded, "SF Pro Rounded", system-ui; }
@@ -455,8 +456,8 @@
   .md-trend.good { color: var(--green); background: rgba(61,220,132,0.15); }
   .md-trend.bad { color: var(--red); background: rgba(244,104,90,0.15); }
   .md-trend.flat { color: var(--faint); background: var(--card-hi); }
-  .md-tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
-    margin-bottom: 18px; }
+  .md-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+    gap: 8px; margin-bottom: 18px; }
   .md-tile { background: var(--card-hi); border-radius: 12px; padding: 11px 6px;
     text-align: center; }
   .md-tile-val { font: 800 15px/1.15 ui-rounded, "SF Pro Rounded", system-ui; }
@@ -477,7 +478,7 @@
     white-space: nowrap; }
   .md-cat-track { height: 6px; border-radius: 4px; background: var(--card-hi); }
   .md-cat-fill { height: 100%; border-radius: 4px; transform-origin: left;
-    background: var(--indigo); animation: bar-grow .55s ease both; }
+    background: var(--accent); animation: bar-grow .55s ease both; }
   .md-cat-pct { width: 30px; flex: 0 0 auto; text-align: right;
     font-size: 11px; font-weight: 700; color: var(--faint); }
   .md-cat-d { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 5px; }
@@ -487,7 +488,7 @@
   .md-d.flat { color: var(--faint); }
   /* Brokerage: holdings on account cards + the Insights brokerage view. */
   .holds-toggle { margin-top: 4px; padding: 0; border: 0; background: none;
-    color: var(--indigo); font-size: 11.5px; font-weight: 700; cursor: pointer; }
+    color: var(--accent); font-size: 11.5px; font-weight: 700; cursor: pointer; }
   .holds-list { margin: 2px 0 10px; padding: 8px 10px; background: var(--card-hi);
     border-radius: 10px; display: flex; flex-direction: column; gap: 7px; }
   .hold-row { display: flex; justify-content: space-between; gap: 10px;
@@ -508,13 +509,15 @@
   .ins-pill { border: 0; background: none; color: var(--muted); cursor: pointer;
     font-size: 12px; font-weight: 700; padding: 5px 12px; border-radius: 999px; }
   .ins-pill.on { background: var(--card); color: var(--text); }
-  .vc-chart { display: flex; align-items: flex-end; gap: 3px; height: 120px;
+  .vc-chart { display: flex; align-items: flex-end; gap: 1px; height: 140px;
     margin-top: 4px; }
-  .vc-bar { flex: 1; display: flex; align-items: flex-end; min-width: 3px; }
-  .vc-fill { width: 100%; border-radius: 3px 3px 0 0; background: var(--indigo);
+  .vc-bar { flex: 1; display: flex; align-items: flex-end; min-width: 1px; }
+  .vc-fill { width: 100%; border-radius: 2px 2px 0 0; background: var(--accent);
     animation: bar-grow .55s ease both; }
   .vc-axis { display: flex; justify-content: space-between; margin-top: 6px;
     font-size: 10.5px; color: var(--faint); }
+  .brk-ctrl { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 12px;
+    justify-content: space-between; align-items: center; }
   .md-big { display: flex; align-items: center; gap: 11px; margin-top: 16px;
     padding: 11px 12px; background: var(--card-hi); border-radius: 12px; }
   .md-big-ico { width: 34px; height: 34px; border-radius: 10px; flex: 0 0 auto;
@@ -535,13 +538,13 @@
     animation: ai-in .45s ease both; }
   .ai-card.win { border-left-color: var(--green); }
   .ai-card.watch { border-left-color: var(--red); }
-  .ai-card.trend { border-left-color: var(--indigo); }
+  .ai-card.trend { border-left-color: var(--accent); }
   .ai-card.tip { border-left-color: var(--amber); }
   .ai-ico { width: 27px; height: 27px; border-radius: 8px; flex: 0 0 auto;
     display: flex; align-items: center; justify-content: center; font-size: 14px; }
   .ai-card.win .ai-ico { background: rgba(61,220,132,0.16); }
   .ai-card.watch .ai-ico { background: rgba(244,104,90,0.16); }
-  .ai-card.trend .ai-ico { background: var(--indigo-soft); }
+  .ai-card.trend .ai-ico { background: var(--accent-soft); }
   .ai-card.tip .ai-ico { background: rgba(245,181,74,0.18); }
   .ai-card.info .ai-ico { background: var(--card-hi); }
   .ai-text { font-size: 12.8px; line-height: 1.5; align-self: center; }
@@ -593,7 +596,7 @@
   .bgt-nolimit { font-size: 11px; color: var(--faint); font-weight: 600;
     padding: 3px 8px; border-radius: 999px; background: var(--card-hi);
     margin-left: auto; }
-  .bgt-line:hover .bgt-nolimit { color: var(--indigo); }
+  .bgt-line:hover .bgt-nolimit { color: var(--accent); }
   .bgt-tot { display: flex; justify-content: space-between; align-items: baseline;
     font-size: 13px; font-weight: 700; padding: 13px 11px 3px;
     margin-top: 7px; border-top: 1px solid var(--hairline-2); }
@@ -673,7 +676,7 @@
   .pick-card { flex: 1; border: 1px solid var(--hairline-2); border-radius: 13px;
     padding: 20px 8px; text-align: center; cursor: pointer; background: var(--card-hi);
     font-size: 13px; font-weight: 700; transition: border-color .15s, transform .12s; }
-  .pick-card:hover { border-color: var(--indigo); transform: translateY(-2px); }
+  .pick-card:hover { border-color: var(--accent); transform: translateY(-2px); }
   .pick-card .pc-emoji { font-size: 28px; display: block; margin-bottom: 7px; }
   .pick-card .pc-count { color: var(--muted); font-size: 11px; font-weight: 500;
     display: block; margin-top: 3px; }
@@ -721,14 +724,14 @@
     font: inherit; font-size: 14px;
   }
   input:focus, select:focus, textarea:focus {
-    outline: 2px solid var(--indigo); outline-offset: -1px; }
+    outline: 2px solid var(--accent); outline-offset: -1px; }
   .modal textarea { width: 100%; min-height: 92px; resize: vertical;
     background: var(--bg-elev); color: var(--text);
     border: 1px solid var(--hairline-2); border-radius: 9px; padding: 9px 11px;
     font: inherit; font-size: 13px; line-height: 1.5; }
   .set-toggle { display: flex; align-items: center; gap: 9px; cursor: pointer;
     font-size: 13.5px; font-weight: 600; margin-bottom: 0; }
-  .set-toggle input { width: auto; accent-color: var(--indigo); }
+  .set-toggle input { width: auto; accent-color: var(--accent); }
   .field .sub-hint { color: var(--muted); font-size: 12px; margin: 6px 0 0;
     line-height: 1.45; }
   .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; }
@@ -756,20 +759,20 @@
   .switch-track::after { content: ""; position: absolute; top: 2px; left: 2px;
     width: 20px; height: 20px; border-radius: 50%; background: #fff;
     box-shadow: 0 1px 3px rgba(0,0,0,.32); transition: transform .2s ease; }
-  .switch input:checked + .switch-track { background: var(--indigo); }
+  .switch input:checked + .switch-track { background: var(--accent); }
   .switch input:checked + .switch-track::after { transform: translateX(16px); }
   .seg { display: inline-flex; gap: 2px; background: var(--card-hi);
     border-radius: 9px; padding: 2px; flex: 0 0 auto; }
   .seg button { padding: 5px 12px; font-size: 12.5px; font-weight: 600;
     border-radius: 7px; background: transparent; border: 0; color: var(--muted);
     transition: background .15s ease, color .15s ease; }
-  .seg button.on { background: var(--indigo); color: #fff; }
+  .seg button.on { background: var(--accent); color: #fff; }
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .plate-row { display: flex; gap: 8px; }
   .plate-row input { flex: 1; min-width: 0; }
   .plate-row button { flex: none; }
   .est-note { font-size: 12px; line-height: 1.5; padding: 9px 12px;
-    border-radius: 10px; background: var(--indigo-soft); color: var(--muted);
+    border-radius: 10px; background: var(--accent-soft); color: var(--muted);
     margin-bottom: 13px; }
   .est-note strong { color: var(--text); font-weight: 700; }
 
@@ -801,7 +804,7 @@
   .sw-member { display: flex; align-items: center; gap: 10px; padding: 9px;
     border-radius: 10px; cursor: pointer; font-size: 13.5px; }
   .sw-member:hover { background: var(--card-hi); }
-  .sw-member input { width: auto; flex: 0 0 auto; accent-color: var(--indigo); }
+  .sw-member input { width: auto; flex: 0 0 auto; accent-color: var(--accent); }
 
   /* --- Piggy banks ------------------------------------------------------- */
   .pgy-head { display: flex; align-items: flex-start; gap: 12px;
@@ -828,7 +831,7 @@
   .pgy-card-top { display: flex; align-items: center; gap: 11px; }
   .pgy-emoji { width: 44px; height: 44px; flex: none; border-radius: 13px;
     display: flex; align-items: center; justify-content: center; font-size: 23px;
-    background: var(--indigo-soft); }
+    background: var(--accent-soft); }
   .pgy-card.done .pgy-emoji { background: rgba(61,220,132,0.16); }
   .pgy-name { font-size: 14.5px; font-weight: 700; white-space: nowrap;
     overflow: hidden; text-overflow: ellipsis; }
@@ -870,7 +873,7 @@
     transition: transform .12s ease, border-color .12s ease,
       background-color .12s ease; }
   .pgy-em:hover { transform: translateY(-2px); }
-  .pgy-em.on { border-color: var(--indigo); background: var(--indigo-soft);
+  .pgy-em.on { border-color: var(--accent); background: var(--accent-soft);
     transform: translateY(-2px); }
   .fld-lbl { display: block; font-size: 13px; font-weight: 600;
     margin-bottom: 6px; }
@@ -888,8 +891,8 @@
     border: 1px solid var(--hairline-2);
     transition: border-color .12s ease, transform .12s ease,
       background-color .12s ease; }
-  .pgy-plan:hover { transform: translateY(-2px); border-color: var(--indigo); }
-  .pgy-plan.on { border-color: var(--indigo); background: var(--indigo-soft); }
+  .pgy-plan:hover { transform: translateY(-2px); border-color: var(--accent); }
+  .pgy-plan.on { border-color: var(--accent); background: var(--accent-soft); }
   .pgy-plan-amt { font: 800 15px/1 ui-rounded, "SF Pro Rounded", system-ui;
     font-variant-numeric: tabular-nums; }
   .pgy-plan-sub { font-size: 10.5px; color: var(--muted); font-weight: 600; }
@@ -897,7 +900,7 @@
     grid-column: 1 / -1; }
   .pgy-modal-eta { font-size: 12px; color: var(--muted); line-height: 1.5;
     margin-top: 11px; padding: 9px 12px; border-radius: 10px;
-    background: var(--indigo-soft); }
+    background: var(--accent-soft); }
   .tab-enter .pgy-card { animation: fade-up .42s cubic-bezier(.2,.8,.2,1) both; }
   .tab-enter .pgy-card:nth-child(2) { animation-delay: .05s; }
   .tab-enter .pgy-card:nth-child(3) { animation-delay: .1s; }
@@ -1010,6 +1013,7 @@ const state = {
   companies: [], connections: [], accounts: [], transactions: [], assets: [],
   summary: null, budget: null, insights: null, llm: null,
   merchantFreq: {},      // { merchantKey: "monthly"|"bimonthly"|"yearly" }
+  cancelledSubs: {},     // { merchantKey: cancelledAtIso } — user-marked cancellations
   scrapes: {}, categorize: null, tab: "overview",
   move: null,            // { txnId, picked, always } while moving a transaction
   activityMonth: null,   // "YYYY-MM" currently shown in the Activity tab
@@ -1020,7 +1024,9 @@ const state = {
   collapsed: {},         // { category: true } collapsed Activity groups
   insightsMonth: null,   // "YYYY-MM" drilled into on the Insights tab
   insightsTab: "spending", // "spending" | "brokerage" sub-view of Insights
-  brokerage: { holdings: [], snapshots: [] }, // positions + value history
+  brokerage: { holdings: [], snapshots: [], performance: [], ilsRates: null },
+  brkRange: "1Y",        // "1M" | "3M" | "YTD" | "1Y" | "ALL" chart window
+  brkBase: "native",     // "native" | "ILS" — currency the headlines render in
   expandedHoldings: {},  // { accountId: true } account cards showing holdings
   subAliases: {},        // { lapsedName: activeName } — AI-detected renames
   subAliasSig: null,     // signature of the name set subAliases was built for
@@ -1244,7 +1250,7 @@ function txnRefundAmount(t) {
 async function loadAll() {
   try {
     const [companies, connections, accounts, transactions, assets, summary,
-           insights, llm, merchantFreq, brokerage] =
+           insights, llm, merchantFreq, brokerage, cancelledSubs] =
       await Promise.all([
         api("/companies").then((r) => r.companies),
         api("/connections").then((r) => r.connections),
@@ -1256,10 +1262,11 @@ async function loadAll() {
         api("/llm"),
         api("/merchant-frequencies").then((r) => r.frequencies),
         api("/brokerage"),
+        api("/subscriptions/cancelled").then((r) => r.cancelled),
       ]);
     Object.assign(state, {
       companies, connections, accounts, transactions, assets, summary,
-      insights, llm, merchantFreq, brokerage,
+      insights, llm, merchantFreq, brokerage, cancelledSubs,
     });
     // The budget is fetched once transactions are in state — its URL carries
     // the recurring projection, which is derived from those transactions.
@@ -1487,7 +1494,7 @@ function llmCatalogHtml(llm) {
   if (llm.state === "downloading" || llm.state === "loading" || llm.state === "downloaded") {
     const pct = llm.totalBytes ? Math.round(100 * llm.downloadedBytes / llm.totalBytes) : 0;
     return '<div class="meta">' + esc(llm.message || llm.state) + "</div>"
-      + '<div class="bar"><div style="width:' + pct + '%;background:var(--indigo)"></div></div>'
+      + '<div class="bar"><div style="width:' + pct + '%;background:var(--accent)"></div></div>'
       + '<div class="actions" style="margin-top:10px">'
       + '<button class="mini" data-model-cancel>Cancel</button></div>';
   }
@@ -1771,7 +1778,7 @@ function nwTick(kind, id, excluded) {
         : "Counted in net worth. Untick to leave this balance out of the total.")
     + '"><input type="checkbox" class="nw-tick" data-toggle-nw="' + esc(kind)
     + '" data-id="' + esc(id) + '"' + (excluded ? "" : " checked")
-    + "><span>In net worth</span></label>";
+    + "><span>Net worth</span></label>";
 }
 
 // --- Brokerage helpers -----------------------------------------------------
@@ -2458,7 +2465,7 @@ function piggyCard(b) {
   const deg = Math.max(0, Math.min(360, (b.progress || 0) * 360));
   const ringColor = b.complete ? "var(--green)"
     : b.onHold ? "var(--hairline-2)"
-    : b.thisMonth.status === "skipped" ? "var(--amber)" : "var(--indigo)";
+    : b.thisMonth.status === "skipped" ? "var(--amber)" : "var(--accent)";
   const ring = '<div class="pgy-ring" style="background:conic-gradient('
     + ringColor + " " + deg.toFixed(1) + "deg, var(--card-hi) 0)\">"
     + '<div class="pgy-hole"><div class="pgy-pct">' + pct + "%</div>"
@@ -2945,60 +2952,135 @@ function insightsView() {
 function brokerageView() {
   const holdings = state.brokerage.holdings || [];
   const snaps = state.brokerage.snapshots || [];
+  const performance = state.brokerage.performance || [];
+  const ilsRates = state.brokerage.ilsRates || null;
   const brkAccts = state.accounts.filter((a) => a.companyId === SNAPTRADE_ID);
 
-  // Headline currency — the one most brokerage accounts report in.
+  // Headline currency — the one most brokerage accounts report in. SnapTrade
+  // performance reports their currency too; prefer that when available.
   const curCount = {};
   brkAccts.forEach((a) => { curCount[a.currency] = (curCount[a.currency] || 0) + 1; });
-  const cur = Object.keys(curCount).sort((x, y) => curCount[y] - curCount[x])[0] || "USD";
+  performance.forEach((p) => {
+    const c = p.data && p.data.currency;
+    if (c) curCount[c] = (curCount[c] || 0) + 5; // weight performance heavier
+  });
+  const nativeCur = Object.keys(curCount).sort((x, y) => curCount[y] - curCount[x])[0]
+    || "USD";
+
+  // Toggle ILS conversion when rates are available and the user picked ILS.
+  const useIls = state.brkBase === "ILS" && ilsRates;
+  const displayCur = useIls ? "ILS" : nativeCur;
+  const toIls = (v, c) => {
+    if (v == null || !ilsRates) return null;
+    const r = ilsRates[(c || nativeCur).toUpperCase()];
+    return r == null ? null : v * r;
+  };
+  const conv = (v, c) => {
+    if (v == null) return null;
+    if (!useIls) return v;
+    const out = toIls(v, c || nativeCur);
+    return out == null ? v : out;
+  };
 
   // Total value: brokerage account balances (includes cash). Gain and cost
   // come from the priced positions only.
   let totalValue = 0, haveValue = false;
   brkAccts.forEach((a) => {
-    if (a.balance != null) { totalValue += a.balance; haveValue = true; }
+    if (a.balance == null) return;
+    const v = conv(a.balance, a.currency);
+    if (v == null) return;
+    totalValue += v; haveValue = true;
   });
   let totalCost = 0, totalGain = 0, haveGain = false;
   holdings.forEach((h) => {
     const s = holdingStats(h);
-    if (s.cost != null) totalCost += s.cost;
-    if (s.gain != null) { totalGain += s.gain; haveGain = true; }
+    if (s.cost != null) { const c = conv(s.cost, h.currency); if (c != null) totalCost += c; }
+    if (s.gain != null) {
+      const g = conv(s.gain, h.currency);
+      if (g != null) { totalGain += g; haveGain = true; }
+    }
   });
   const gainPct = haveGain && totalCost ? (totalGain / Math.abs(totalCost)) * 100 : null;
 
-  // Value-over-time: snapshots summed across all brokerage accounts per day.
-  const byDate = {};
-  snaps.forEach((s) => { byDate[s.date] = (byDate[s.date] || 0) + s.value; });
-  const series = Object.keys(byDate).sort().map((d) => ({ date: d, value: byDate[d] }));
+  // Build the equity series — prefer SnapTrade's full historical timeline
+  // (rich, daily, goes back years). Fall back to Hon's local snapshots,
+  // which only accumulate one point per sync.
+  const fullSeries = buildEquitySeries(performance, snaps, conv);
+  const range = state.brkRange || "1Y";
+  const series = sliceRange(fullSeries, range);
   const first = series.length ? series[0].value : null;
   const last = series.length ? series[series.length - 1].value : null;
   const periodPct = first ? ((last - first) / Math.abs(first)) * 100 : null;
+  const periodAbs = first != null && last != null ? last - first : null;
+
+  // Aggregated SnapTrade reporting stats (returns + dividends).
+  let dividend = 0, haveDividend = false;
+  let rateSum = 0, rateCount = 0;
+  performance.forEach((p) => {
+    const d = p.data || {};
+    if (typeof d.dividendIncome === "number") {
+      const v = conv(d.dividendIncome, d.currency);
+      if (v != null) { dividend += v; haveDividend = true; }
+    }
+    if (typeof d.rateOfReturn === "number") { rateSum += d.rateOfReturn; rateCount += 1; }
+  });
+  const rateOfReturn = rateCount ? (rateSum / rateCount) * 100 : null;
 
   const tiles = '<div class="md-tiles">'
-    + statTile(haveValue ? money(totalValue, cur) : "—", "Portfolio value", "")
-    + statTile(haveGain ? money(totalGain, cur, true) : "—", "Unrealized gain",
+    + statTile(haveValue ? money(totalValue, displayCur) : "—", "Portfolio value", "")
+    + statTile(haveGain ? money(totalGain, displayCur, true) : "—", "Unrealized gain",
         haveGain ? (totalGain >= 0 ? "good" : "bad") : "")
     + statTile(gainPct == null ? "—"
         : (gainPct >= 0 ? "+" : "") + gainPct.toFixed(1) + "%",
         "Return on cost", gainPct == null ? "" : gainPct >= 0 ? "good" : "bad")
+    + statTile(rateOfReturn == null ? "—"
+        : (rateOfReturn >= 0 ? "+" : "") + rateOfReturn.toFixed(1) + "%",
+        "Rate of return", rateOfReturn == null ? "" : rateOfReturn >= 0 ? "good" : "bad")
+    + (haveDividend
+        ? statTile(money(dividend, displayCur), "Dividends", "good")
+        : "")
     + statTile(String(holdings.length),
         holdings.length === 1 ? "Holding" : "Holdings", "")
     + "</div>";
+
+  // Currency toggle, only meaningful when rates loaded and native ≠ ILS.
+  let baseToggle = "";
+  if (ilsRates && nativeCur !== "ILS") {
+    const pill = (key, label) => '<button class="ins-pill'
+      + ((state.brkBase === key || (key === "native" && state.brkBase !== "ILS")) ? " on" : "")
+      + '" data-action="brk-base" data-arg="' + key + '">' + label + "</button>";
+    baseToggle = '<div class="ins-toggle">' + pill("native", nativeCur)
+      + pill("ILS", "ILS") + "</div>";
+  }
+
+  // Time-range pills for the equity chart.
+  const ranges = ["1M", "3M", "YTD", "1Y", "ALL"];
+  const rangePills = '<div class="ins-toggle">' + ranges.map((r) =>
+    '<button class="ins-pill' + (range === r ? " on" : "")
+    + '" data-action="brk-range" data-arg="' + r + '">' + r + "</button>").join("") + "</div>";
 
   let trendCard;
   if (series.length >= 2) {
     const down = periodPct != null && periodPct < 0;
     const pill = periodPct == null ? ""
       : '<span class="md-trend ' + (down ? "bad" : "good") + '">'
-        + (down ? "↓ " : "↑ ") + Math.abs(periodPct).toFixed(1) + "% since "
-        + fmtDate(series[0].date) + "</span>";
+        + (down ? "↓ " : "↑ ") + Math.abs(periodPct).toFixed(2) + "% · "
+        + money(Math.abs(periodAbs), displayCur) + "</span>";
     trendCard = '<div class="card"><div class="md-head">'
       + '<span class="md-month">Value over time</span>' + pill + "</div>"
-      + valueChart(series, cur) + "</div>";
+      + '<div class="brk-ctrl">' + rangePills + baseToggle + "</div>"
+      + valueChart(series, displayCur) + "</div>";
+  } else if (fullSeries.length >= 2) {
+    // Series exists but the chosen window is empty.
+    trendCard = '<div class="card"><div class="md-head">'
+      + '<span class="md-month">Value over time</span></div>'
+      + '<div class="brk-ctrl">' + rangePills + baseToggle + "</div>"
+      + '<div class="ins-sub">No data in this window — try a wider range.</div></div>';
   } else {
     trendCard = '<div class="card"><div class="label">Value over time</div>'
-      + '<div class="ins-sub">The trend graph builds up as you sync — '
-      + "one point is recorded per sync.</div></div>";
+      + '<div class="ins-sub">SnapTrade returned no historical equity data. '
+      + "It is built up locally on every sync — hit <b>↻ Sync</b> a few times "
+      + "over the coming days to populate the graph.</div></div>";
   }
 
   // Holdings allocation, consolidated by symbol across accounts.
@@ -3024,14 +3106,20 @@ function brokerageView() {
       + (rows.length === 1 ? "" : "s") + " across " + brkAccts.length
       + " account" + (brkAccts.length === 1 ? "" : "s") + "</div>";
     alloc += rows.map((r) => {
+      // Allocation share is always native-vs-native — converting both sides
+      // to ILS would cancel out anyway. The displayed amount honors the
+      // currency toggle.
       const pct = Math.round((r.value / allocTotal) * 100);
       const gPct = r.haveGain && r.cost ? (r.gain / Math.abs(r.cost)) * 100 : null;
       const gCls = gPct == null ? "flat" : gPct >= 0 ? "good" : "bad";
+      const shownVal = conv(r.value, r.currency);
+      const shownCur = useIls && shownVal != null && shownVal !== r.value
+        ? "ILS" : r.currency;
       return '<div class="md-cat"><div class="md-cat-main">'
         + '<div class="md-cat-top"><span class="md-cat-name">' + esc(r.symbol)
         + (r.description ? ' <span class="hold-desc">' + esc(r.description)
           + "</span>" : "")
-        + '</span><span class="md-cat-amt">' + money(r.value, r.currency)
+        + '</span><span class="md-cat-amt">' + money(shownVal, shownCur)
         + "</span></div>"
         + '<div class="md-cat-track"><div class="md-cat-fill" style="width:'
         + Math.max(4, pct) + '%"></div></div>'
@@ -3056,6 +3144,50 @@ function brokerageView() {
   alloc += "</div>";
 
   return tiles + trendCard + alloc;
+}
+
+// Picks the equity series the chart should draw. SnapTrade's reporting API
+// is the source of truth when available — it returns daily values going back
+// years on the very first sync. Hon's own snapshots (one per sync) are the
+// fallback when SnapTrade returned no history (e.g. brokerage still syncing).
+function buildEquitySeries(performance, snaps, conv) {
+  const byDate = {};
+  let havePerformance = false;
+  performance.forEach((p) => {
+    const pts = (p.data && p.data.totalEquity) || [];
+    if (pts.length) havePerformance = true;
+    const pcur = (p.data && p.data.currency) || "USD";
+    pts.forEach((pt) => {
+      const v = conv(pt.value, pt.currency || pcur);
+      if (v == null) return;
+      byDate[pt.date] = (byDate[pt.date] || 0) + v;
+    });
+  });
+  if (!havePerformance) {
+    snaps.forEach((s) => {
+      const v = conv(s.value, s.currency);
+      if (v == null) return;
+      byDate[s.date] = (byDate[s.date] || 0) + v;
+    });
+  }
+  return Object.keys(byDate).sort()
+    .map((d) => ({ date: d, value: byDate[d] }));
+}
+
+// Filters an equity series down to a preset window: 1M / 3M / YTD / 1Y / ALL.
+function sliceRange(series, range) {
+  if (!series.length || range === "ALL") return series;
+  const now = new Date();
+  let cutoff;
+  if (range === "YTD") {
+    cutoff = new Date(now.getFullYear(), 0, 1);
+  } else {
+    const months = range === "1M" ? 1 : range === "3M" ? 3 : 12;
+    cutoff = new Date(now);
+    cutoff.setMonth(cutoff.getMonth() - months);
+  }
+  const iso = cutoff.toISOString().slice(0, 10);
+  return series.filter((p) => p.date >= iso);
 }
 
 // A bar chart of brokerage value over time, one bar per recorded snapshot.
@@ -3308,19 +3440,50 @@ function subscriptionsView() {
       amount: monthlyEquivalent(charge, freq), cur: last.currency,
       active: days <= (RECURRENCE_ACTIVE_DAYS[freq] || SUB_ACTIVE_DAYS) };
   });
-  const active = rows.filter((r) => r.active).sort((a, b) => b.amount - a.amount);
-  const deadAll = rows.filter((r) => !r.active).sort((a, b) => a.days - b.days);
+  // Partition by user mark + activity. Sections, in order:
+  //   • Flagged   — user marked cancelled, but a charge arrived AFTER that.
+  //   • Active    — recent charge AND not user-cancelled.
+  //   • Cancelled — user-marked, no charges since the mark.
+  //   • Probably cancelled — auto-lapsed (no charge in over a month).
+  const cancelledMap = state.cancelledSubs || {};
+  const flagged = [];
+  const userCancelled = [];
+  const stillActive = [];
+  const autoLapsedAll = [];
+  rows.forEach((r) => {
+    const cancelledAt = cancelledMap[r.key];
+    if (cancelledAt) {
+      const lastTs = new Date(r.last.date).getTime();
+      const cancelledTs = new Date(cancelledAt).getTime();
+      if (lastTs > cancelledTs) flagged.push(r);
+      else userCancelled.push(r);
+      return;
+    }
+    if (r.active) stillActive.push(r);
+    else autoLapsedAll.push(r);
+  });
+  stillActive.sort((a, b) => b.amount - a.amount);
+  userCancelled.sort((a, b) => a.days - b.days);
+  autoLapsedAll.sort((a, b) => a.days - b.days);
+  flagged.sort((a, b) => new Date(b.last.date) - new Date(a.last.date));
   // A lapsed subscription the AI matched to an active one is just the same
   // service under a renamed descriptor — keep it out of "probably cancelled".
-  ensureSubAliases(active.map((r) => r.desc), deadAll.map((r) => r.desc));
-  const dead = deadAll.filter((r) => !state.subAliases[r.desc]);
-  const monthly = active.reduce((s, r) => s + r.amount, 0);
+  ensureSubAliases(stillActive.map((r) => r.desc), autoLapsedAll.map((r) => r.desc));
+  const autoLapsed = autoLapsedAll.filter((r) => !state.subAliases[r.desc]);
+  const monthly = stillActive.reduce((s, r) => s + r.amount, 0);
   const cur = (rows[0] && rows[0].cur) || "ILS";
 
-  const subRow = (r, faded) => {
+  const subRow = (r, opts) => {
+    const faded = opts && opts.faded;
+    const cancelled = opts && opts.cancelled;
     const note = r.freq !== "monthly"
       ? " · billed " + r.freq + " · " + money(r.charge, r.cur)
       : "";
+    const action = cancelled
+      ? '<button class="mini" data-action="restore-sub" data-key="'
+        + esc(r.key) + '">Restore</button>'
+      : '<button class="mini" data-action="cancel-sub" data-key="'
+        + esc(r.key) + '">Mark cancelled</button>';
     return '<div class="sub-row' + (faded ? " faded" : "") + '">'
       + '<span class="txn-icon" style="background:#7D8CED26;color:#7D8CED">🔁</span>'
       + '<div class="txn-main"><div class="txn-name">' + esc(r.desc) + "</div>"
@@ -3330,25 +3493,46 @@ function subscriptionsView() {
       + esc(note)
       + "</div></div>"
       + '<div class="sub-amt">' + money(r.amount, r.cur)
-      + '<span class="sub-per">/mo</span></div></div>';
+      + '<span class="sub-per">/mo</span>'
+      + '<div style="margin-top:6px">' + action + "</div>"
+      + "</div></div>";
   };
 
   let out = '<div class="sec-head"><div class="label">Subscriptions</div></div>'
     + '<div class="card sub-summary"><div class="sub-big">' + money(monthly, cur)
     + '<span class="sub-per"> / month</span></div>'
-    + '<div class="meta">' + active.length + " active subscription"
-    + (active.length === 1 ? "" : "s")
-    + (dead.length ? " · " + dead.length + " likely cancelled" : "")
-    + "</div></div>"
-    + '<div class="card sub-list"><div class="label">Active</div>'
-    + (active.length ? active.map((r) => subRow(r, false)).join("")
+    + '<div class="meta">' + stillActive.length + " active subscription"
+    + (stillActive.length === 1 ? "" : "s")
+    + (userCancelled.length ? " · " + userCancelled.length + " cancelled" : "")
+    + (autoLapsed.length ? " · " + autoLapsed.length + " likely cancelled" : "")
+    + "</div></div>";
+  if (flagged.length) {
+    out += '<div class="card sub-list" style="border:1px solid #E0883F66">'
+      + '<div class="label">⚠ Charged after you marked them cancelled</div>'
+      + '<div class="meta">A new charge arrived after you marked these cancelled — '
+      + "the cancellation may not have gone through. Restore to count them again, "
+      + "or mark cancelled again once you have re-confirmed it with the merchant.</div>"
+      + '<div style="margin-top:8px">'
+      + flagged.map((r) => subRow(r, { cancelled: true })).join("")
+      + "</div></div>";
+  }
+  out += '<div class="card sub-list"><div class="label">Active</div>'
+    + (stillActive.length ? stillActive.map((r) => subRow(r, {})).join("")
         : '<div class="empty">No active subscriptions in the last month.</div>')
     + "</div>";
-  if (dead.length) {
+  if (userCancelled.length) {
+    out += '<div class="card sub-list"><div class="label">Cancelled</div>'
+      + '<div class="meta">You marked these cancelled — Hon will flag any new '
+      + "charge for them.</div>"
+      + '<div style="margin-top:8px">'
+      + userCancelled.map((r) => subRow(r, { faded: true, cancelled: true })).join("")
+      + "</div></div>";
+  }
+  if (autoLapsed.length) {
     out += '<div class="card sub-list"><div class="label">Probably cancelled</div>'
       + '<div class="meta">No charge in over a month — likely cancelled.</div>'
       + '<div style="margin-top:8px">'
-      + dead.map((r) => subRow(r, true)).join("") + "</div></div>";
+      + autoLapsed.map((r) => subRow(r, { faded: true })).join("") + "</div></div>";
   }
   return out;
 }
@@ -4387,6 +4571,27 @@ async function removeAsset(id) {
   } catch (e) { toast(e.message, true); }
 }
 
+// Marks a subscription cancelled — it moves out of Active into Cancelled, and
+// any later charge for the same merchant will be flagged on the next render.
+async function markSubCancelled(key) {
+  try {
+    await api("/subscriptions/cancelled", "PUT", { merchantKey: key });
+    state.cancelledSubs = Object.assign({}, state.cancelledSubs,
+      { [key]: new Date().toISOString() });
+    render();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function unmarkSubCancelled(key) {
+  try {
+    await api("/subscriptions/cancelled", "DELETE", { merchantKey: key });
+    const next = Object.assign({}, state.cancelledSubs);
+    delete next[key];
+    state.cancelledSubs = next;
+    render();
+  } catch (e) { toast(e.message, true); }
+}
+
 async function linkBrokerage(id) {
   try {
     const { portal } = await api("/snaptrade/portal", "POST", {
@@ -4932,12 +5137,24 @@ function handleAction(action, btn) {
     case "insights-tab":
       if (btn && btn.dataset.arg) { state.insightsTab = btn.dataset.arg; render(); }
       break;
+    case "brk-range":
+      if (btn && btn.dataset.arg) { state.brkRange = btn.dataset.arg; render(); }
+      break;
+    case "brk-base":
+      if (btn && btn.dataset.arg) { state.brkBase = btn.dataset.arg; render(); }
+      break;
     case "view-month-activity":
       if (btn && btn.dataset.arg) {
         state.tab = "activity";
         state.activityMonth = btn.dataset.arg;
         render();
       }
+      break;
+    case "cancel-sub":
+      if (btn && btn.dataset.key) markSubCancelled(btn.dataset.key);
+      break;
+    case "restore-sub":
+      if (btn && btn.dataset.key) unmarkSubCancelled(btn.dataset.key);
       break;
   }
 }

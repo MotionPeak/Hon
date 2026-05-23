@@ -1,6 +1,10 @@
 import type Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
-import type { NormalizedAccount, NormalizedHolding } from './scrapers.js';
+import type {
+  BrokeragePerformanceData,
+  NormalizedAccount,
+  NormalizedHolding,
+} from './scrapers.js';
 
 export interface Connection {
   id: string;
@@ -282,6 +286,41 @@ export class Repo {
          ORDER BY symbol`,
       )
       .all() as HoldingRow[];
+  }
+
+  /** Cached SnapTrade performance reports, keyed by connection id. */
+  listBrokeragePerformance(): { connectionId: string; data: BrokeragePerformanceData; fetchedAt: string }[] {
+    const rows = this.db
+      .prepare(
+        `SELECT connection_id AS connectionId, data_json AS dataJson,
+                fetched_at AS fetchedAt
+         FROM brokerage_performance`,
+      )
+      .all() as { connectionId: string; dataJson: string; fetchedAt: string }[];
+    return rows
+      .map((r) => {
+        try {
+          return {
+            connectionId: r.connectionId,
+            data: JSON.parse(r.dataJson) as BrokeragePerformanceData,
+            fetchedAt: r.fetchedAt,
+          };
+        } catch {
+          return null;
+        }
+      })
+      .filter((r): r is { connectionId: string; data: BrokeragePerformanceData; fetchedAt: string } => r !== null);
+  }
+
+  saveBrokeragePerformance(connectionId: string, data: BrokeragePerformanceData): void {
+    this.db
+      .prepare(
+        `INSERT INTO brokerage_performance (connection_id, data_json, fetched_at)
+         VALUES (?, ?, ?)
+         ON CONFLICT (connection_id) DO UPDATE SET
+           data_json = excluded.data_json, fetched_at = excluded.fetched_at`,
+      )
+      .run(connectionId, JSON.stringify(data), new Date().toISOString());
   }
 
   /** Every recorded brokerage value snapshot, oldest first. */
@@ -891,6 +930,35 @@ export class Repo {
   clearMerchantFrequency(merchantKey: string): void {
     this.db
       .prepare('DELETE FROM merchant_recurrence WHERE merchant_key = ?')
+      .run(merchantKey);
+  }
+
+  // --- Cancelled subscriptions ----------------------------------------------
+  // Subscriptions the user has explicitly marked cancelled. `cancelled_at` is
+  // the moment the mark was set — the UI flags any charge after that as a
+  // possible "the cancellation didn't take" recurrence.
+
+  listCancelledSubs(): { merchantKey: string; cancelledAt: string }[] {
+    return this.db
+      .prepare(
+        'SELECT merchant_key AS merchantKey, cancelled_at AS cancelledAt FROM cancelled_subscriptions',
+      )
+      .all() as { merchantKey: string; cancelledAt: string }[];
+  }
+
+  markSubCancelled(merchantKey: string): void {
+    this.db
+      .prepare(
+        `INSERT INTO cancelled_subscriptions (merchant_key, cancelled_at)
+         VALUES (?, ?)
+         ON CONFLICT (merchant_key) DO UPDATE SET cancelled_at = excluded.cancelled_at`,
+      )
+      .run(merchantKey, new Date().toISOString());
+  }
+
+  unmarkSubCancelled(merchantKey: string): void {
+    this.db
+      .prepare('DELETE FROM cancelled_subscriptions WHERE merchant_key = ?')
       .run(merchantKey);
   }
 
