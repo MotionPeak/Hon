@@ -31,10 +31,25 @@ import { lookupVehicle } from './vehicle.js';
 const START = Date.now();
 const VERSION = '0.2.0';
 
-// --- Configuration (passed in by the Hon app, with dev-friendly fallbacks) ---
+// --- Configuration (from the environment, with dev-friendly fallbacks) ---
 const token = process.env.HON_TOKEN ?? '';
-const dataDir =
-  process.env.HON_DATA_DIR ?? join(homedir(), 'Library', 'Application Support', 'Hon');
+// Default data directory per OS convention:
+//   • macOS   — ~/Library/Application Support/Hon
+//   • Windows — %APPDATA%\Hon  (typically C:\Users\<name>\AppData\Roaming\Hon)
+//   • Linux   — $XDG_DATA_HOME/Hon, falling back to ~/.local/share/Hon
+// The Hon macOS app always passes HON_DATA_DIR; this default is for the dev
+// launcher (web.sh) and Linux/Windows deployments.
+function defaultDataDir(): string {
+  const home = homedir();
+  if (process.platform === 'darwin') {
+    return join(home, 'Library', 'Application Support', 'Hon');
+  }
+  if (process.platform === 'win32') {
+    return join(process.env.APPDATA ?? join(home, 'AppData', 'Roaming'), 'Hon');
+  }
+  return join(process.env.XDG_DATA_HOME ?? join(home, '.local', 'share'), 'Hon');
+}
+const dataDir = process.env.HON_DATA_DIR ?? defaultDataDir();
 const port = Number(process.env.HON_PORT ?? 0); // 0 => OS picks a free port
 // The interface to bind. Loopback by default — nothing leaves the machine.
 // A NAS/server deployment sets HON_HOST=0.0.0.0 so the LAN (or a VPN such as
@@ -55,11 +70,13 @@ let dbHandle: DbHandle | null = null;
 let dbStatus = 'unopened';
 let repo: Repo | null = null;
 let runner: ScrapeRunner | null = null;
-// Password-protected credential store for the web app (no macOS Keychain).
+// Password-protected credential store for connection credentials.
 let vault: Vault | null = null;
 try {
   dbHandle = openDatabase(dataDir);
   repo = new Repo(dbHandle.db);
+  const interrupted = repo.reconcileInterruptedRuns();
+  if (interrupted > 0) log(`reconciled ${interrupted} interrupted run(s) from a previous session`);
   vault = new Vault(repo);
   runner = new ScrapeRunner(repo, dataDir, vault);
   dbStatus = `ok (schema v${dbHandle.schemaVersion})`;
@@ -188,8 +205,8 @@ app.post('/connections', async (req, reply) => {
   const displayName = (body.displayName ?? '').trim() || body.companyId;
   const connection = repo.createConnection(body.companyId, displayName);
 
-  // The web app supplies credentials here so they can be stored in the vault;
-  // the Swift app omits them (it keeps them in the macOS Keychain instead).
+  // Credentials, when supplied, are stored in the vault. A connection may also
+  // be created without them and have them added later.
   if (body.credentials && typeof body.credentials === 'object') {
     if (!vault?.unlocked) {
       repo.deleteConnection(connection.id);
@@ -210,8 +227,7 @@ app.delete('/connections/:id', async (req, reply) => {
   return { ok: true };
 });
 
-// Stores (or replaces) the vault credentials for an existing connection — the
-// web app uses this for connections that were first created by the Swift app.
+// Stores (or replaces) the vault credentials for an existing connection.
 app.put('/connections/:id/credentials', async (req, reply) => {
   if (!repo) return reply.code(503).send({ error: 'database unavailable' });
   const { id } = req.params as { id: string };
@@ -234,21 +250,16 @@ app.post('/connections/:id/scrape', async (req, reply) => {
   if (!connection) return reply.code(404).send({ error: 'connection not found' });
 
   const body = (req.body ?? {}) as {
-    credentials?: Record<string, string>;
     monthsBack?: number;
     interactive?: boolean;
   };
-  // The Swift app sends credentials in the request (from the Keychain); the
-  // web app omits them, so they are loaded from the vault instead.
-  let credentials = body.credentials;
-  if (!credentials || typeof credentials !== 'object') {
-    if (!vault?.unlocked) {
-      return reply.code(409).send({ error: 'the credential vault is locked' });
-    }
-    credentials = vault.loadCredentials(id);
-    if (!credentials) {
-      return reply.code(400).send({ error: 'no stored credentials for this connection' });
-    }
+  // Credentials are always loaded from the vault.
+  if (!vault?.unlocked) {
+    return reply.code(409).send({ error: 'the credential vault is locked' });
+  }
+  const credentials = vault.loadCredentials(id);
+  if (!credentials) {
+    return reply.code(400).send({ error: 'no stored credentials for this connection' });
   }
   // Each scraper returns whatever history it actually holds, so asking for a
   // long window simply means "as far back as the institution allows".
@@ -305,29 +316,24 @@ app.post('/scrape/:runId/otp', async (req, reply) => {
 });
 
 // Registers the SnapTrade user (first time) and returns a Connection Portal
-// URL the app opens so the user can link a brokerage. The Swift app passes
-// credentials directly; the web app passes a connectionId (vault-backed).
+// URL the web app opens so the user can link a brokerage. The developer
+// credentials are loaded from the vault for the given connection.
 app.post('/snaptrade/portal', async (req, reply) => {
   const body = (req.body ?? {}) as {
-    credentials?: Record<string, string>;
     connectionId?: string;
     broker?: string;
     customRedirect?: string;
   };
 
-  let credentials = body.credentials;
-  if ((!credentials || typeof credentials !== 'object') && body.connectionId) {
-    if (!vault?.unlocked) {
-      return reply.code(409).send({ error: 'the credential vault is locked' });
-    }
-    credentials = vault.loadCredentials(body.connectionId);
+  if (!body.connectionId) {
+    return reply.code(400).send({ error: 'connectionId is required' });
   }
-  if (!credentials || typeof credentials !== 'object') {
-    return reply.code(400).send({ error: 'credentials are required' });
-  }
-  // The SnapTrade user this registers is persisted encrypted in the vault.
   if (!vault?.unlocked) {
     return reply.code(409).send({ error: 'the credential vault is locked' });
+  }
+  const credentials = vault.loadCredentials(body.connectionId);
+  if (!credentials || typeof credentials !== 'object') {
+    return reply.code(400).send({ error: 'credentials are required' });
   }
 
   try {
@@ -343,17 +349,16 @@ app.post('/snaptrade/portal', async (req, reply) => {
 // them with logos. Needs only the developer credentials (no SnapTrade user).
 app.post('/snaptrade/brokerages', async (req, reply) => {
   const body = (req.body ?? {}) as {
-    credentials?: Record<string, string>;
     connectionId?: string;
   };
 
-  let credentials = body.credentials;
-  if ((!credentials || typeof credentials !== 'object') && body.connectionId) {
-    if (!vault?.unlocked) {
-      return reply.code(409).send({ error: 'the credential vault is locked' });
-    }
-    credentials = vault.loadCredentials(body.connectionId);
+  if (!body.connectionId) {
+    return reply.code(400).send({ error: 'connectionId is required' });
   }
+  if (!vault?.unlocked) {
+    return reply.code(409).send({ error: 'the credential vault is locked' });
+  }
+  const credentials = vault.loadCredentials(body.connectionId);
   if (!credentials || typeof credentials !== 'object') {
     return reply.code(400).send({ error: 'credentials are required' });
   }
@@ -365,8 +370,7 @@ app.post('/snaptrade/brokerages', async (req, reply) => {
   }
 });
 
-// Landing page SnapTrade's portal redirects to once a brokerage is connected
-// (used by the web app; the macOS app uses a hon:// deep link instead).
+// Landing page SnapTrade's portal redirects to once a brokerage is connected.
 app.get('/snaptrade/done', async (_req, reply) =>
   reply.type('text/html; charset=utf-8').send(`<!doctype html>
 <html><head><meta charset="utf-8"><title>Hon — Connected</title>
@@ -389,6 +393,14 @@ app.get('/accounts', async (_req, reply) => {
   return { accounts: repo.listAccounts() };
 });
 
+// Brokerage positions and the recorded value history. The web app computes
+// the brokerage stats (totals, gain, trends) from these, the same way it
+// computes spending analytics client-side.
+app.get('/brokerage', async (_req, reply) => {
+  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+  return { holdings: repo.listHoldings(), snapshots: repo.listValueSnapshots() };
+});
+
 // Sets an account balance by hand. Credit-card scrapers do not report a
 // balance, and a manual figure also lets the user correct a stale one.
 app.patch('/accounts/:id/balance', async (req, reply) => {
@@ -403,6 +415,22 @@ app.patch('/accounts/:id/balance', async (req, reply) => {
     return reply.code(404).send({ error: 'account not found' });
   }
   repo.setAccountBalance(id, balance);
+  return { ok: true };
+});
+
+// Includes or excludes one account from the net-worth total. The account stays
+// visible on its connection card either way — only the totals change.
+app.patch('/accounts/:id/excluded', async (req, reply) => {
+  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+  const { id } = req.params as { id: string };
+  const body = (req.body ?? {}) as { excluded?: boolean };
+  if (typeof body.excluded !== 'boolean') {
+    return reply.code(400).send({ error: 'excluded must be a boolean' });
+  }
+  if (!repo.listAccounts().some((a) => a.id === id)) {
+    return reply.code(404).send({ error: 'account not found' });
+  }
+  repo.setAccountExcluded(id, body.excluded);
   return { ok: true };
 });
 
@@ -430,9 +458,11 @@ app.get('/summary', async (_req, reply) => {
     buckets.set(key, byCur);
   };
   for (const acct of repo.listAccounts()) {
+    if (acct.excluded) continue;
     addToBucket(typeOf.get(acct.companyId) ?? 'bank', acct.currency, acct.balance ?? 0);
   }
   for (const asset of repo.listManualAssets()) {
+    if (asset.excluded) continue;
     addToBucket(`asset:${asset.kind}`, asset.currency, asset.value);
   }
   const sources: { key: string; amount: number }[] = [];
@@ -741,8 +771,14 @@ app.put('/assets/:id', async (req, reply) => {
     name?: string;
     value?: number;
     details?: Record<string, unknown> | null;
+    excluded?: boolean;
   };
-  const fields: { name?: string; value?: number; details?: Record<string, unknown> | null } = {};
+  const fields: {
+    name?: string;
+    value?: number;
+    details?: Record<string, unknown> | null;
+    excluded?: boolean;
+  } = {};
   if (body.name !== undefined) {
     const name = body.name.trim();
     if (!name) return reply.code(400).send({ error: 'a name is required' });
@@ -757,6 +793,9 @@ app.put('/assets/:id', async (req, reply) => {
   }
   if (body.details !== undefined) {
     fields.details = body.details && typeof body.details === 'object' ? body.details : null;
+  }
+  if (body.excluded !== undefined) {
+    fields.excluded = body.excluded === true;
   }
   repo.updateManualAsset(id, fields);
   return { asset: repo.getManualAsset(id) };
@@ -811,18 +850,23 @@ app.post('/llm/provider', async (req) => {
     ollamaUrl?: string;
     ollamaKey?: string;
     ollamaModel?: string;
+    apiUrl?: string;
+    apiKey?: string;
+    apiModel?: string;
   };
   // Only forward fields the request actually carried — an omitted field keeps
-  // its stored value, so switching to the local model never wipes the Ollama
-  // details (and vice versa).
+  // its stored value, so switching providers never wipes the others' details.
   const ollama: Record<string, string> = {};
   if (body.ollamaUrl !== undefined) ollama.baseUrl = body.ollamaUrl;
   if (body.ollamaKey !== undefined) ollama.apiKey = body.ollamaKey;
   if (body.ollamaModel !== undefined) ollama.model = body.ollamaModel;
-  llm.setProvider({
-    mode: body.mode === 'ollama' ? 'ollama' : 'local',
-    ollama,
-  });
+  const api: Record<string, string> = {};
+  if (body.apiUrl !== undefined) api.baseUrl = body.apiUrl;
+  if (body.apiKey !== undefined) api.apiKey = body.apiKey;
+  if (body.apiModel !== undefined) api.model = body.apiModel;
+  const mode =
+    body.mode === 'ollama' ? 'ollama' : body.mode === 'api' ? 'api' : 'local';
+  llm.setProvider({ mode, ollama, api });
   return llm.getStatus();
 });
 
@@ -833,6 +877,15 @@ app.post('/llm/ollama/test', async (req) => {
   return llm.testOllama({
     baseUrl: body.ollamaUrl ?? '',
     ...(body.ollamaKey !== undefined ? { apiKey: body.ollamaKey } : {}),
+  });
+});
+
+// Same as the Ollama test, but for an OpenAI-compatible API service.
+app.post('/llm/api/test', async (req) => {
+  const body = (req.body ?? {}) as { apiUrl?: string; apiKey?: string };
+  return llm.testApi({
+    baseUrl: body.apiUrl ?? '',
+    ...(body.apiKey !== undefined ? { apiKey: body.apiKey } : {}),
   });
 });
 
@@ -1031,19 +1084,20 @@ function shutdown(reason: string): void {
   if (shuttingDown) return;
   shuttingDown = true;
   log(`shutting down (${reason})`);
+  // Failsafe: a lingering keep-alive socket can make app.close() hang forever.
+  // Never let that keep this ~2 GB process alive after the app is gone.
+  const hardExit = setTimeout(() => {
+    log('shutdown timed out — forcing exit');
+    process.exit(0);
+  }, 3000);
+  hardExit.unref();
   app.close().finally(() => {
+    clearTimeout(hardExit);
     dbHandle?.db.close();
     process.exit(0);
   });
 }
 
-// When launched by the Hon app, exit as soon as the app does: the app holds
-// our stdin pipe open, so EOF on stdin means the parent is gone.
-if (process.env.HON_PARENT_PIPE === '1') {
-  process.stdin.on('end', () => shutdown('parent-exited'));
-  process.stdin.on('close', () => shutdown('parent-exited'));
-  process.stdin.resume();
-}
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
 
