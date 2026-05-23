@@ -3043,8 +3043,15 @@ function brokerageView() {
         + '<span class="md-cat-pct">' + pct + "%</span></div>";
     }).join("");
   } else {
-    alloc += '<div class="empty" style="padding:6px 0">No positions found — '
-      + "sync your brokerage to pull holdings.</div>";
+    // The brokerage tab is showing, so a snapshot exists — but no positions
+    // came back. Usually SnapTrade is still doing its initial holdings sync
+    // (it can take a few minutes after linking), or the sync ran on an older
+    // build before holdings were wired up.
+    alloc += '<div class="empty" style="padding:6px 0">No positions yet — '
+      + "SnapTrade may still be syncing holdings (give it a few minutes after "
+      + "linking), or your last sync ran before the holdings update. Hit "
+      + "<b>↻ Sync</b> on the SnapTrade card and try again. Server logs "
+      + "(<code>web.sh</code> output) show the exact reason if the fetch failed.</div>";
   }
   alloc += "</div>";
 
