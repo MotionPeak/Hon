@@ -3,32 +3,46 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Hon</title>
+<title>Hon · הוֹן</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='b' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%23fcb932'/%3E%3Cstop offset='100%25' stop-color='%23d4831a'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='url(%23b)'/%3E%3Cg fill='none' stroke='%231a1612' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8.5 12.4 L24 8.8'/%3E%3Cpath d='M8.5 12.4 L8.5 24'/%3E%3Cpath d='M24 14.6 L24 24'/%3E%3C/g%3E%3Ccircle cx='24' cy='8.8' r='1.8' fill='%231a1612'/%3E%3C/svg%3E" />
 <style>
   :root {
-    --bg: #131120; --bg-elev: #1b1930; --card: #211f33; --card-hi: #2b2842;
-    --hairline: rgba(255,255,255,0.075); --hairline-2: rgba(255,255,255,0.15);
-    --text: #f1eff8; --muted: rgba(255,255,255,0.60); --faint: rgba(255,255,255,0.40);
-    --brand: #ecb949; --accent: #2dd4bf; --accent-soft: rgba(45,212,191,0.16);
-    --green: #3ddc84; --amber: #f5b54a; --red: #f4685a;
-    --grad-1: #2dd4bf; --grad-2: #0f766e;
-    --shadow: 0 10px 30px rgba(0,0,0,0.42); --shadow-sm: 0 2px 10px rgba(0,0,0,0.32);
-    --scrim: rgba(9,8,16,0.80);
+    --bg: #1a1612; --bg-elev: #221c16; --card: #2a231b; --card-hi: #352b21;
+    --hairline: rgba(252,233,194,0.08); --hairline-2: rgba(252,233,194,0.17);
+    --text: #faf3e5; --muted: rgba(250,243,229,0.62); --faint: rgba(250,243,229,0.42);
+    --brand: #fcb932; --accent: #fcb932; --accent-soft: rgba(252,185,50,0.16);
+    --green: #4fcf8a; --amber: #f59842; --red: #f4685a;
+    --indigo: #8b8dff; --indigo-soft: rgba(139,141,255,0.16);
+    --grad-1: #fcb932; --grad-2: #d4831a;
+    /* Chart palette — bright enough to pop on the dark card background. */
+    --chart-up: #4fe39a; --chart-up-glow: rgba(79,227,154,0.45);
+    --chart-down: #ff7a6a; --chart-down-glow: rgba(255,122,106,0.42);
+    --chart-grid: rgba(250,243,229,0.06);
+    --shadow: 0 10px 30px rgba(0,0,0,0.48); --shadow-sm: 0 2px 10px rgba(0,0,0,0.34);
+    --scrim: rgba(14,11,7,0.82);
   }
   [data-theme="light"] {
-    --bg: #f1f1f7; --bg-elev: #ffffff; --card: #ffffff; --card-hi: #f3f3f9;
-    --hairline: rgba(24,22,48,0.09); --hairline-2: rgba(24,22,48,0.17);
-    --text: #1d1b2e; --muted: rgba(29,27,46,0.62); --faint: rgba(29,27,46,0.44);
-    --brand: #c79220; --accent: #0d9488; --accent-soft: rgba(13,148,136,0.12);
-    --green: #16a85c; --amber: #cf8c1c; --red: #d8473a;
-    --grad-1: #14b8a6; --grad-2: #5eead4;
-    --shadow: 0 12px 32px rgba(45,42,80,0.13); --shadow-sm: 0 2px 12px rgba(45,42,80,0.08);
-    --scrim: rgba(28,26,52,0.55);
+    --bg: #faf6ee; --bg-elev: #ffffff; --card: #ffffff; --card-hi: #f4ecda;
+    --hairline: rgba(60,40,20,0.10); --hairline-2: rgba(60,40,20,0.18);
+    --text: #2a1f14; --muted: rgba(42,31,20,0.62); --faint: rgba(42,31,20,0.44);
+    --brand: #c98a16; --accent: #c98a16; --accent-soft: rgba(201,138,22,0.12);
+    --green: #16a85c; --amber: #cf6f1c; --red: #d8473a;
+    --indigo: #5b5dd8; --indigo-soft: rgba(91,93,216,0.12);
+    --grad-1: #f0a020; --grad-2: #fcc04a;
+    --chart-up: #16a85c; --chart-up-glow: rgba(22,168,92,0.34);
+    --chart-down: #d8473a; --chart-down-glow: rgba(216,71,58,0.34);
+    --chart-grid: rgba(42,31,20,0.07);
+    --shadow: 0 12px 32px rgba(70,50,20,0.14); --shadow-sm: 0 2px 12px rgba(70,50,20,0.09);
+    --scrim: rgba(50,35,15,0.55);
   }
   * { box-sizing: border-box; margin: 0; }
   html, body { height: 100%; }
   body {
-    background: var(--bg); color: var(--text);
+    background:
+      radial-gradient(1100px 600px at 12% -10%, rgba(252,185,50,0.10), transparent 60%),
+      radial-gradient(900px 500px at 105% 115%, rgba(212,131,26,0.08), transparent 60%),
+      var(--bg);
+    color: var(--text); min-height: 100vh;
     font: 15px/1.5 -apple-system, "SF Pro Text", system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
     transition: background-color .3s ease, color .3s ease;
@@ -45,12 +59,36 @@
     padding: 16px 0 14px; margin-bottom: 8px;
     background: var(--bg); border-bottom: 1px solid var(--hairline);
   }
-  .brand { display: flex; align-items: center; gap: 9px; }
-  .brand-mark { width: 22px; height: 22px; border-radius: 7px;
-    background: linear-gradient(135deg, var(--brand), #d98f2e);
-    box-shadow: 0 2px 8px rgba(236,185,73,0.4); }
-  h1 { font: 800 23px/1 ui-rounded, "SF Pro Rounded", system-ui;
-    color: var(--brand); letter-spacing: .3px; }
+  .brand { display: flex; align-items: center; gap: 11px; }
+  /* Logo badge — amber rounded square with a stylized Hebrew ה (heh, the
+     first letter of הון / "wealth") whose top bar tilts upward as a subtle
+     growth motif. A small dot at the upper-right tip reads as both the
+     letter's natural geresh and a milestone marker on the trend line. */
+  .brand-mark { width: 38px; height: 38px; border-radius: 11px;
+    background:
+      radial-gradient(120% 100% at 0% 0%, rgba(255,255,255,0.30), transparent 60%),
+      linear-gradient(135deg, var(--grad-1), var(--grad-2));
+    box-shadow: 0 4px 14px rgba(252,185,50,0.42),
+                0 0 0 2px rgba(252,185,50,0.10),
+                inset 0 1px 0 rgba(255,255,255,0.30);
+    display: inline-flex; align-items: center; justify-content: center;
+    padding: 5px; flex: 0 0 auto;
+    transition: transform .25s cubic-bezier(.2,.8,.2,1); }
+  .brand-mark svg { display: block; width: 100%; height: 100%; }
+  .brand:hover .brand-mark { transform: rotate(-4deg) scale(1.05); }
+  /* Wordmark — English "Hon" stacked over the Hebrew "הוֹן" so the bilingual
+     signature reads as a unit and the Hebrew sits at the same x-height as
+     the engine version label sitting to its right. */
+  .brand-words { display: flex; flex-direction: column; gap: 1px;
+    line-height: 1; }
+  h1 { font: 800 22px/1 ui-rounded, "SF Pro Rounded", system-ui;
+    color: var(--brand); letter-spacing: .3px; margin: 0; }
+  /* Native macOS / iOS Hebrew via SF Hebrew (delivered through -apple-system
+     and system-ui), falling back to Heebo / Arial Hebrew. SF Hebrew is a
+     modern humanist sans-serif tuned to pair with SF Pro Latin. */
+  .brand-he { font: 600 12.5px/1 -apple-system, "SF Hebrew", "Heebo",
+    "Assistant", "Arial Hebrew", system-ui, sans-serif;
+    color: var(--muted); letter-spacing: .2px; direction: rtl; }
   #engine { color: var(--faint); font-size: 12px; }
   .spacer { margin-left: auto; }
 
@@ -120,7 +158,7 @@
   #nav button:hover::before { height: 54%; }
   #nav button.active {
     color: #fff; transform: none; border-color: transparent;
-    background: linear-gradient(135deg, var(--accent), #0f766e);
+    background: linear-gradient(135deg, var(--accent), #d4831a);
     box-shadow: 0 8px 20px var(--accent-soft);
   }
   #nav button.active::before { height: 0; }
@@ -131,7 +169,7 @@
     color: var(--faint); text-transform: uppercase; }
   section { margin-bottom: 18px; }
   .card { background: var(--card); border: 1px solid var(--hairline);
-    border-radius: 16px; padding: 17px 18px; box-shadow: var(--shadow-sm);
+    border-radius: 18px; padding: 18px 20px; box-shadow: var(--shadow-sm);
     transition: transform .16s ease, box-shadow .16s ease, background-color .3s; }
   .card h3 { font-size: 15px; font-weight: 700; }
   .card .meta { color: var(--muted); font-size: 12px; margin-top: 2px; }
@@ -146,32 +184,48 @@
   .sec-head .spacer { margin-left: auto; }
 
   /* --- Net worth banner -------------------------------------------------- */
-  .networth { position: relative; overflow: hidden;
-    background: linear-gradient(135deg, var(--grad-1), var(--grad-2));
-    border-radius: 20px; padding: 26px 26px 24px; color: #fff;
+  .networth { position: relative; overflow: hidden; isolation: isolate;
+    background: linear-gradient(140deg, var(--grad-1) 0%, var(--grad-2) 100%);
+    border-radius: 22px; padding: 24px 26px 22px; color: #fff;
     box-shadow: var(--shadow); margin-bottom: 18px; }
-  .networth::after { content: ""; position: absolute; top: -60px; right: -40px;
-    width: 220px; height: 220px; border-radius: 50%;
-    background: rgba(255,255,255,0.10); }
-  .networth .label { color: rgba(255,255,255,0.75); }
-  .nw-total { font: 800 46px/1.05 ui-rounded, "SF Pro Rounded", system-ui;
-    margin-top: 10px; letter-spacing: -.5px; }
+  /* Single soft top-right highlight instead of the dueling radials that
+     left a diagonal band cutting the gradient in two. */
+  .networth::before { content: ""; position: absolute; inset: 0;
+    background: radial-gradient(80% 60% at 95% -20%,
+      rgba(255,255,255,0.22), transparent 60%);
+    pointer-events: none; z-index: 0; }
+  .networth > * { position: relative; z-index: 1; }
+  .networth .label { color: rgba(255,255,255,0.72); font-weight: 700;
+    letter-spacing: 1.4px; text-transform: uppercase; font-size: 11px; }
+  .nw-total { font: 800 48px/1.05 ui-rounded, "SF Pro Rounded", system-ui;
+    margin-top: 8px; letter-spacing: -.5px; font-variant-numeric: tabular-nums; }
   .nw-total.neg { color: #ffd7d1; }
+  /* Stacked allocation bar — one coloured segment per positive source.
+     A single glance reveals how the net worth is composed. */
+  .nw-alloc { position: relative; display: flex; height: 9px; margin-top: 18px;
+    border-radius: 999px; overflow: hidden; background: rgba(0,0,0,0.18); }
+  .nw-alloc-seg { height: 100%; transition: width .35s ease; }
   .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
   .chip { background: rgba(255,255,255,0.16); border-radius: 999px;
-    padding: 5px 12px; font-size: 13px; font-weight: 600; }
-  .nw-sub { color: rgba(255,255,255,0.78); font-size: 12.5px; margin-top: 14px;
+    padding: 5px 12px; font-size: 13px; font-weight: 600;
+    backdrop-filter: blur(8px); }
+  .nw-sub { color: rgba(255,255,255,0.78); font-size: 12.5px; margin-top: 16px;
     position: relative; }
-  .nw-breakdown { position: relative; margin-top: 16px; padding-top: 4px;
-    border-top: 1px solid rgba(255,255,255,0.22); }
-  .nw-bd-row { display: flex; align-items: center; gap: 9px; padding: 7px 0;
-    font-size: 13px; border-top: 1px solid rgba(255,255,255,0.14); }
+  .nw-breakdown { position: relative; margin-top: 14px; }
+  .nw-bd-row { display: flex; align-items: center; gap: 10px; padding: 8px 0;
+    font-size: 13px; border-top: 1px solid rgba(255,255,255,0.12); }
   .nw-bd-row:first-child { border-top: 0; }
-  .nw-bd-ico { font-size: 14px; width: 19px; flex: 0 0 auto; text-align: center; }
-  .nw-bd-name { flex: 1; min-width: 0; color: rgba(255,255,255,0.92); }
+  .nw-bd-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+  .nw-bd-ico { font-size: 14px; width: 19px; flex: 0 0 auto; text-align: center;
+    opacity: .9; }
+  .nw-bd-name { flex: 1; min-width: 0; color: rgba(255,255,255,0.94);
+    font-weight: 600; }
   .nw-bd-amt { font: 700 13.5px/1 ui-rounded, "SF Pro Rounded", system-ui;
     font-variant-numeric: tabular-nums; }
   .nw-bd-amt.neg { color: #ffd7d1; }
+  .nw-bd-pct { width: 38px; text-align: right; font-size: 11.5px;
+    font-weight: 700; color: rgba(255,255,255,0.65);
+    font-variant-numeric: tabular-nums; }
 
   /* --- Generic rows ------------------------------------------------------ */
   .row { display: flex; justify-content: space-between; align-items: center;
@@ -199,6 +253,45 @@
   .row.nw-off { opacity: 0.55; }
   .row.nw-off .amount { text-decoration: line-through; }
   .asset-card.nw-off .conn-total { text-decoration: line-through; opacity: 0.6; }
+  /* Loan card — debt visualised with a progress bar, monthly payment, and
+     a coloured pill for the rate track (fixed / prime / CPI-linked). */
+  @keyframes loan-card-in { from { opacity: 0; transform: translateY(8px); } }
+  @keyframes loan-bar-fill { from { width: 0; } }
+  .loan-card { animation: loan-card-in .35s ease-out; }
+  .loan-card .conn-total { color: var(--red); }
+  .loan-card.nw-off { opacity: 0.65; }
+  .loan-card.nw-off .conn-total { text-decoration: line-through; opacity: 0.6; }
+  .loan-bar { height: 8px; background: var(--card-hi); border-radius: 999px;
+    overflow: hidden; margin: 14px 0 12px; }
+  .loan-bar > span { display: block; height: 100%; border-radius: 999px;
+    background: linear-gradient(90deg, var(--indigo), #5c51c4);
+    animation: loan-bar-fill 1.1s cubic-bezier(.2,.7,.2,1); }
+  .loan-stats { display: grid; grid-template-columns: repeat(3, 1fr);
+    gap: 10px 14px; margin-top: 4px; }
+  .loan-stat label { display: block; font-size: 10px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+  .loan-stat b { display: block; font-size: 14px; font-weight: 700;
+    margin-top: 3px; }
+  .loan-stat .muted { color: var(--muted); font-weight: 500; font-size: 12px; }
+  .loan-pill { display: inline-block; font-size: 11px; font-weight: 700;
+    padding: 2px 9px; border-radius: 999px; vertical-align: middle; }
+  .loan-pill.fixed { color: var(--text); background: var(--card-hi); }
+  .loan-pill.prime { color: var(--amber); background: rgba(245,181,74,0.16); }
+  .loan-pill.cpi-fixed { color: var(--green); background: rgba(61,220,132,0.16); }
+  .loan-pill.cpi-prime { color: #b97aff; background: rgba(185,122,255,0.16); }
+  /* Loan form: side-by-side fields + a stack of selectable track cards. */
+  .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .loan-tracks { display: grid; gap: 8px; }
+  .loan-track { display: grid; grid-template-columns: 22px 1fr; align-items: start;
+    gap: 10px; padding: 12px 14px; border: 1px solid var(--hairline-2);
+    border-radius: 12px; cursor: pointer; transition: border-color .14s,
+    background-color .14s; }
+  .loan-track:hover { border-color: var(--indigo); }
+  .loan-track:has(input:checked) { border-color: var(--indigo);
+    background: var(--indigo-soft); }
+  .loan-track input { margin: 2px 0 0; accent-color: var(--indigo); }
+  .lt-title { display: block; font-weight: 700; font-size: 13px; }
+  .lt-sub { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; }
   .pos { color: var(--green); }
   .empty { color: var(--muted); font-size: 13px; padding: 14px 2px;
     text-align: center; }
@@ -242,6 +335,17 @@
   .act-hidden { color: var(--faint); font-size: 11px; font-weight: 600; }
   .act-cat { color: var(--amber); font-size: 11px; font-weight: 700; }
   .act-cat .spin { display: inline-block; animation: spin 1s linear infinite; }
+  /* Per-type section on the Assets page. Subtle subheader, slightly more
+     vertical breathing room between sections than between cards inside one. */
+  .assets-section + .assets-section { margin-top: 22px; }
+  .assets-sub-head { display: flex; align-items: center; gap: 8px;
+    margin: 0 2px 10px; color: var(--muted); font-size: 11px;
+    font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; }
+  .assets-sub-head .ash-emoji { font-size: 14px; line-height: 1; }
+  .assets-sub-head .ash-label { color: var(--text); }
+  .assets-sub-head .ash-count { margin-left: auto; opacity: 0.7;
+    font-size: 10px; padding: 2px 7px; border-radius: 999px;
+    background: var(--card-hi); letter-spacing: 0; }
   .act-cols { display: flex; align-items: flex-start; gap: 18px; }
   .act-col { flex: 1 1 0; min-width: 0; display: flex;
     flex-direction: column; gap: 18px; }
@@ -250,7 +354,9 @@
     margin: 0 2px 12px; }
   .umbrella-name { font-size: 12px; font-weight: 700; letter-spacing: .6px;
     text-transform: uppercase; color: var(--faint); }
-  .umbrella-line { flex: 1; height: 1px; background: var(--hairline); }
+  /* Spacer between the umbrella name and total — invisible; the wide
+     multi-column layout made an actual stroke read as a page divider. */
+  .umbrella-line { flex: 1; height: 0; }
   .umbrella-total { font: 800 13px/1 ui-rounded, "SF Pro Rounded", system-ui; }
 
   /* --- Subscriptions ----------------------------------------------------- */
@@ -460,9 +566,12 @@
     gap: 8px; margin-bottom: 18px; }
   .md-tile { background: var(--card-hi); border-radius: 12px; padding: 11px 6px;
     text-align: center; }
-  .md-tile-val { font: 800 15px/1.15 ui-rounded, "SF Pro Rounded", system-ui; }
+  .md-tile-val { font: 800 15px/1.15 ui-rounded, "SF Pro Rounded", system-ui;
+    font-variant-numeric: tabular-nums; }
   .md-tile-val.good { color: var(--green); }
   .md-tile-val.bad { color: var(--red); }
+  .md-tile-aux { font-size: 11px; font-weight: 700; opacity: .78;
+    margin-left: 3px; }
   .md-tile-cap { font-size: 10px; color: var(--faint); margin-top: 4px;
     letter-spacing: .3px; }
   .md-label { font: 700 11px/1 system-ui; letter-spacing: 1.4px;
@@ -509,15 +618,197 @@
   .ins-pill { border: 0; background: none; color: var(--muted); cursor: pointer;
     font-size: 12px; font-weight: 700; padding: 5px 12px; border-radius: 999px; }
   .ins-pill.on { background: var(--card); color: var(--text); }
-  .vc-chart { display: flex; align-items: flex-end; gap: 1px; height: 140px;
-    margin-top: 4px; }
-  .vc-bar { flex: 1; display: flex; align-items: flex-end; min-width: 1px; }
-  .vc-fill { width: 100%; border-radius: 2px 2px 0 0; background: var(--accent);
-    animation: bar-grow .55s ease both; }
-  .vc-axis { display: flex; justify-content: space-between; margin-top: 6px;
-    font-size: 10.5px; color: var(--faint); }
-  .brk-ctrl { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 12px;
+  .brk-ctrl { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 14px;
     justify-content: space-between; align-items: center; }
+
+  /* --- Line chart (SVG) -------------------------------------------------- */
+  .lc-wrap { position: relative; width: 100%; cursor: crosshair;
+    overflow: visible;
+    -webkit-mask-image: linear-gradient(to right, transparent, #000 4%, #000 96%, transparent);
+            mask-image: linear-gradient(to right, transparent, #000 4%, #000 96%, transparent); }
+  .lc-svg { display: block; width: 100%; height: 100%; overflow: visible; }
+  .lc-glow { opacity: 0; animation: lc-glow .35s .1s ease forwards; }
+  .lc-line { stroke-dasharray: 1000; stroke-dashoffset: 1000;
+    animation: lc-draw .55s cubic-bezier(.65,0,.25,1) .02s forwards; }
+  .lc-area { opacity: 0; transform: translateY(8%); transform-origin: bottom;
+    animation: lc-fade .4s cubic-bezier(.4,0,.2,1) .1s forwards; }
+  @keyframes lc-draw { to { stroke-dashoffset: 0; } }
+  @keyframes lc-fade { to { opacity: 1; transform: translateY(0); } }
+  @keyframes lc-glow { to { opacity: .9; } }
+
+  /* Crosshair — soft vertical line with a tiny halo so it reads on a busy
+     chart without being heavy-handed. */
+  .lc-cross { position: absolute; top: 0; bottom: 0; width: 1px;
+    background: linear-gradient(to bottom, transparent, var(--hairline-2) 12%,
+      var(--hairline-2) 88%, transparent);
+    opacity: 0; pointer-events: none; transform: translateX(-0.5px);
+    transition: opacity .15s ease, left .08s cubic-bezier(.2,.8,.2,1); }
+  .lc-cross.on { opacity: 1; }
+
+  /* The hovered-point dot — a colored core with a continuously breathing
+     halo that softens the click target without distracting from the line. */
+  .lc-dot { position: absolute; width: 14px; height: 14px; border-radius: 50%;
+    border: 2.5px solid var(--card); opacity: 0; pointer-events: none;
+    transform: translate(-50%, -50%);
+    transition: opacity .18s ease,
+                left .08s cubic-bezier(.2,.8,.2,1),
+                top .08s cubic-bezier(.2,.8,.2,1); }
+  .lc-dot.lc-good { background: var(--chart-up);
+    box-shadow: 0 0 0 4px var(--chart-up-glow); }
+  .lc-dot.lc-bad  { background: var(--chart-down);
+    box-shadow: 0 0 0 4px var(--chart-down-glow); }
+  .lc-dot.on { opacity: 1; }
+  .lc-dot.on .lc-dot-pulse { animation: lc-pulse 1.8s ease-out infinite; }
+  .lc-dot-pulse { position: absolute; inset: -4px; border-radius: 50%;
+    border: 2px solid currentColor; opacity: 0; pointer-events: none; }
+  .lc-dot.lc-good .lc-dot-pulse { color: var(--chart-up); }
+  .lc-dot.lc-bad  .lc-dot-pulse { color: var(--chart-down); }
+  @keyframes lc-pulse {
+    0% { transform: scale(0.7); opacity: 0.65; }
+    100% { transform: scale(2.6); opacity: 0; }
+  }
+
+  /* Tooltip — small, high-contrast, with a tonal accent stripe down the side.
+     Pops in with a quick scale + opacity, then follows the cursor along the
+     x-axis via the `left` transition. The transform-origin sits at the dot
+     so the pop-in feels anchored to the data point. */
+  .lc-tip { position: absolute; top: 0; padding: 8px 12px 9px;
+    background: var(--bg-elev); border: 1px solid var(--hairline-2);
+    border-radius: 10px;
+    transform: translate(-50%, -118%) scale(0.88);
+    transform-origin: 50% calc(100% + 18px);
+    box-shadow: 0 14px 28px rgba(0,0,0,0.38);
+    opacity: 0; pointer-events: none; white-space: nowrap;
+    transition: opacity .18s ease,
+                transform .22s cubic-bezier(.2,1.1,.25,1),
+                left .09s cubic-bezier(.2,.8,.2,1); }
+  .lc-tip::before { content: ""; position: absolute; left: 0; top: 7px;
+    bottom: 7px; width: 3px; border-radius: 0 3px 3px 0; }
+  .lc-tip.lc-good::before { background: var(--chart-up); }
+  .lc-tip.lc-bad::before { background: var(--chart-down); }
+  .lc-tip.on { opacity: 1; transform: translate(-50%, -118%) scale(1); }
+  .lc-tip.right { transform: translate(-100%, -118%) scale(0.88);
+    transform-origin: 100% calc(100% + 18px); }
+  .lc-tip.on.right { transform: translate(-100%, -118%) scale(1); }
+  .lc-tip.left { transform: translate(0, -118%) scale(0.88);
+    transform-origin: 0 calc(100% + 18px); }
+  .lc-tip.on.left { transform: translate(0, -118%) scale(1); }
+  .lc-tip-val { font: 800 14.5px/1 ui-rounded, "SF Pro Rounded", system-ui;
+    color: var(--text); font-variant-numeric: tabular-nums; padding-left: 8px; }
+  .lc-tip-date { font-size: 10.5px; color: var(--faint); margin-top: 4px;
+    padding-left: 8px; }
+  .lc-tip-extras { margin-top: 7px; padding: 6px 0 0 8px;
+    border-top: 1px solid var(--hairline); display: flex; flex-direction: column;
+    gap: 4px; min-width: 130px; }
+  .lc-tip-extras:empty { display: none; }
+  .lc-tip-row { display: flex; justify-content: space-between; gap: 16px;
+    font-size: 11px; }
+  .lc-tip-k { color: var(--faint); text-transform: uppercase; letter-spacing: .4px;
+    font-weight: 600; }
+  .lc-tip-v { color: var(--text); font-weight: 700;
+    font-variant-numeric: tabular-nums; }
+  .lc-tip-v.good { color: var(--chart-up); }
+  .lc-tip-v.bad { color: var(--chart-down); }
+  .lc-axis { display: flex; justify-content: space-between; margin-top: 10px;
+    font-size: 10.5px; color: var(--faint); text-transform: uppercase;
+    letter-spacing: .4px; }
+  .lc-empty { padding: 30px 4px; color: var(--muted); font-size: 13px;
+    text-align: center; }
+  @media (prefers-reduced-motion: reduce) {
+    .lc-line, .lc-area, .lc-glow { animation: none; opacity: 1;
+      stroke-dashoffset: 0; transform: none; }
+    .lc-dot.on .lc-dot-pulse { animation: none; }
+  }
+
+  /* --- Holdings panel ---------------------------------------------------- */
+  .brk-acct-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 4px; }
+  .brk-acct-pill { background: var(--bg-elev); border: 1px solid var(--hairline);
+    color: var(--muted); cursor: pointer; font-size: 12px; font-weight: 600;
+    padding: 6px 13px; border-radius: 999px;
+    transition: background .15s ease, color .15s ease, border-color .15s ease; }
+  .brk-acct-pill:hover { color: var(--text); }
+  .brk-acct-pill.on { background: var(--accent); color: #fff;
+    border-color: transparent; }
+  .hp-card { padding: 18px 18px 10px; }
+  .hp-head { display: flex; align-items: flex-start; gap: 12px;
+    margin-bottom: 14px; }
+  .hp-head .label { font: 700 13px/1 system-ui; letter-spacing: 1.4px;
+    text-transform: uppercase; color: var(--faint); }
+  .hp-sub { font-size: 11.5px; color: var(--faint); margin-top: 4px; }
+  .hp-totals { margin-left: auto; text-align: right; }
+  .hp-total-val { font: 800 22px/1 ui-rounded, "SF Pro Rounded", system-ui;
+    font-variant-numeric: tabular-nums; }
+  .hp-total-cap { font-size: 10.5px; color: var(--faint); margin-top: 4px;
+    text-transform: uppercase; letter-spacing: .8px; }
+  .hp-list { display: flex; flex-direction: column; gap: 2px;
+    margin: 0 -6px; }
+  .hp-item { border-radius: 12px;
+    animation: fade-up .35s ease both;
+    transition: background .18s ease; }
+  .hp-item.open { background: var(--card-hi); }
+  .hp-item:nth-child(2) { animation-delay: .03s; }
+  .hp-item:nth-child(3) { animation-delay: .06s; }
+  .hp-item:nth-child(4) { animation-delay: .09s; }
+  .hp-item:nth-child(5) { animation-delay: .12s; }
+  .hp-item:nth-child(n+6) { animation-delay: .15s; }
+  .hp-row { display: grid;
+    grid-template-columns: 12px 1.6fr 1.2fr auto auto 14px;
+    align-items: center; gap: 14px; padding: 12px 12px;
+    width: 100%; border: 0; background: transparent; color: var(--text);
+    cursor: pointer; text-align: left;
+    transition: background .15s ease; }
+  .hp-row:hover { background: var(--card-hi); border-radius: 12px; }
+  .hp-item.open .hp-row { border-radius: 12px 12px 0 0; }
+  .hp-dot { width: 10px; height: 10px; border-radius: 50%;
+    box-shadow: 0 0 0 3px rgba(255,255,255,0.04); }
+  .hp-id { min-width: 0; }
+  .hp-sym { font: 800 14px/1.1 ui-rounded, "SF Pro Rounded", system-ui;
+    letter-spacing: .2px; }
+  .hp-name { font-size: 11px; color: var(--faint); margin-top: 3px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hp-bar { position: relative; height: 6px; border-radius: 3px;
+    background: var(--card-hi); overflow: hidden; }
+  .hp-item:hover .hp-bar, .hp-item.open .hp-bar { background: rgba(0,0,0,0.18); }
+  .hp-bar-fill { position: absolute; left: 0; top: 0; bottom: 0;
+    border-radius: 3px; transform-origin: left;
+    animation: bar-grow .6s cubic-bezier(.2,.8,.2,1) both; }
+  .hp-figs { text-align: right; min-width: 0; }
+  .hp-val { font: 700 13.5px/1 ui-rounded, "SF Pro Rounded", system-ui;
+    font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .hp-pct { font-size: 11px; color: var(--faint); margin-top: 3px;
+    font-weight: 700; }
+  .hp-gain-wrap { min-width: 100px; text-align: right; }
+  .hp-gain { display: inline-flex; align-items: baseline; gap: 5px;
+    font-size: 11.5px; font-weight: 700; padding: 3px 8px; border-radius: 999px;
+    white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .hp-gain.good { color: var(--green); background: rgba(61,220,132,0.13); }
+  .hp-gain.bad { color: var(--red); background: rgba(244,104,90,0.14); }
+  .hp-gain.flat { color: var(--faint); background: var(--card-hi); }
+  .hp-gain-abs { font-weight: 600; opacity: .8; }
+  .hp-chev { color: var(--faint); font-size: 12px;
+    transition: transform .2s ease; }
+  .hp-item.open .hp-chev { transform: rotate(90deg); color: var(--text); }
+  /* Expanded holding detail. */
+  .hp-detail { padding: 6px 16px 18px; animation: fade-up .35s ease both; }
+  .hd-stats { display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 10px; margin-bottom: 14px; }
+  .hd-stat { background: var(--card); border-radius: 10px; padding: 10px 12px; }
+  .hd-stat-cap { font-size: 10px; color: var(--faint); text-transform: uppercase;
+    letter-spacing: .5px; }
+  .hd-stat-val { font: 700 14px/1.1 ui-rounded, "SF Pro Rounded", system-ui;
+    margin-top: 5px; font-variant-numeric: tabular-nums; }
+  .hd-stat-val.good { color: var(--green); }
+  .hd-stat-val.bad { color: var(--red); }
+  .hd-chart-wrap { background: var(--card); border-radius: 12px;
+    padding: 14px 14px 10px; }
+  .hd-empty { padding: 16px 4px; color: var(--faint); font-size: 12.5px;
+    text-align: center; }
+  @media (max-width: 720px) {
+    .hp-row { grid-template-columns: 10px 1.5fr 1fr auto 12px;
+      gap: 10px; padding: 11px 10px; }
+    .hp-gain-wrap { display: none; }
+  }
   .md-big { display: flex; align-items: center; gap: 11px; margin-top: 16px;
     padding: 11px 12px; background: var(--card-hi); border-radius: 12px; }
   .md-big-ico { width: 34px; height: 34px; border-radius: 10px; flex: 0 0 auto;
@@ -703,7 +994,100 @@
   .blank p { color: var(--muted); font-size: 14px; max-width: 340px; }
   .blank button { margin-top: 10px; }
 
-  /* --- Modals & gate ----------------------------------------------------- */
+  /* --- Welcome / vault unlock gate -------------------------------------- */
+  .gate { position: fixed; inset: 0; z-index: 60; padding: 24px;
+    display: flex; align-items: center; justify-content: center;
+    background:
+      radial-gradient(900px 600px at 18% 12%, rgba(252,185,50,0.18), transparent 62%),
+      radial-gradient(800px 520px at 84% 88%, rgba(212,131,26,0.13), transparent 62%),
+      var(--bg);
+    transition: opacity .35s ease; }
+  .gate.leaving { opacity: 0; pointer-events: none; }
+  .gate-content { max-width: 460px; width: 100%; text-align: center;
+    display: flex; flex-direction: column; align-items: center; gap: 18px; }
+  .gate-brand { width: 78px; height: 78px; border-radius: 22px;
+    background:
+      radial-gradient(120% 100% at 0% 0%, rgba(255,255,255,0.30), transparent 60%),
+      linear-gradient(135deg, var(--grad-1), var(--grad-2));
+    color: #1a1612;
+    display: flex; align-items: center; justify-content: center;
+    padding: 14px;
+    box-shadow: 0 12px 36px rgba(252,185,50,0.46),
+                0 0 0 4px rgba(252,185,50,0.10),
+                inset 0 1px 0 rgba(255,255,255,0.32);
+    animation: gate-brand-in .55s cubic-bezier(.2,.9,.3,1.3) both,
+               gate-brand-pulse 3.4s ease-in-out 1s infinite; }
+  .gate-brand svg { display: block; width: 100%; height: 100%; }
+  /* Two-line greeting: a small/muted lead-in ("Good evening,") sitting on top
+   * of a big gold name. Sized to fit a typical full name on one line; clamps
+   * down on narrower viewports and ellipses if the name is unusually long. */
+  .gate-greeting { width: 100%; margin-top: 4px; }
+  .gate-greet { display: block; font: 600 19px/1.25 system-ui;
+    color: var(--muted); letter-spacing: -.1px; margin-bottom: 6px;
+    opacity: 0; animation: gate-fade-up .55s ease .15s both; }
+  .gate-name { display: block; margin: 0; padding: 0 4px;
+    font: 800 clamp(34px, 5.4vw, 48px)/1.08 ui-rounded,
+          "SF Pro Rounded", system-ui;
+    letter-spacing: -.8px; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis;
+    background: linear-gradient(135deg, var(--grad-1), var(--grad-2));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    opacity: 0; animation: gate-fade-up .55s ease .22s both; }
+  .gate-sub { font-size: 15px; color: var(--muted); line-height: 1.55;
+    max-width: 380px; margin: -4px 0 6px;
+    opacity: 0; animation: gate-fade-up .55s ease .28s both; }
+  .gate-panel { background: var(--card); border: 1px solid var(--hairline-2);
+    border-radius: 18px; padding: 22px; width: 100%; box-shadow: var(--shadow);
+    opacity: 0; animation: gate-fade-up .55s ease .42s both; }
+  .gate-field { margin-bottom: 14px; text-align: left; }
+  .gate-field:last-of-type { margin-bottom: 0; }
+  .gate-field > label { display: block; font: 700 11px/1 system-ui;
+    letter-spacing: .55px; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 8px; }
+  .gate-input { width: 100%; background: var(--card-hi);
+    border: 1px solid var(--hairline-2); border-radius: 11px;
+    padding: 12px 14px; color: var(--text);
+    font: 500 15px/1.4 system-ui;
+    transition: border-color .14s, box-shadow .14s, background-color .14s; }
+  .gate-input:focus { outline: none; border-color: var(--accent);
+    box-shadow: 0 0 0 4px var(--accent-soft); background: var(--card); }
+  .gate-err { color: var(--red); font-size: 13px; font-weight: 500;
+    margin-top: 12px; min-height: 18px; opacity: 0;
+    transition: opacity .15s ease; }
+  .gate-err.on { opacity: 1; }
+  .gate-btn { width: 100%; margin-top: 18px; position: relative; overflow: hidden;
+    background: linear-gradient(135deg, var(--grad-1), var(--grad-2));
+    border: none; border-radius: 12px; padding: 13px 16px;
+    font: 700 15px/1 system-ui; color: #1a1612; cursor: pointer;
+    box-shadow: 0 6px 20px rgba(252,185,50,0.32);
+    transition: transform .12s ease, box-shadow .14s ease; }
+  .gate-btn:hover { transform: translateY(-1px);
+    box-shadow: 0 10px 28px rgba(252,185,50,0.42); }
+  .gate-btn:active { transform: translateY(0); }
+  .gate-btn:disabled { opacity: .65; cursor: progress; transform: none; }
+  .gate-btn::after { content: ""; position: absolute; inset: 0;
+    background: linear-gradient(115deg, transparent 30%, rgba(255,255,255,0.35) 50%, transparent 70%);
+    transform: translateX(-130%); transition: transform .7s ease; }
+  .gate-btn:hover::after { transform: translateX(130%); }
+  .gate-foot { color: var(--faint); font-size: 12px; line-height: 1.55;
+    max-width: 380px; margin-top: 4px;
+    opacity: 0; animation: gate-fade-up .55s ease .55s both; }
+  @keyframes gate-fade-up {
+    from { opacity: 0; transform: translateY(18px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes gate-brand-in {
+    from { opacity: 0; transform: scale(.6) translateY(-10px); }
+    to   { opacity: 1; transform: scale(1) translateY(0); }
+  }
+  @keyframes gate-brand-pulse {
+    0%, 100% { box-shadow: 0 8px 32px rgba(252,185,50,0.42),
+                            0 0 0 4px rgba(252,185,50,0.10); }
+    50%      { box-shadow: 0 10px 40px rgba(252,185,50,0.58),
+                            0 0 0 7px rgba(252,185,50,0.18); }
+  }
+
+  /* --- Modals ----------------------------------------------------------- */
   .overlay { position: fixed; inset: 0; background: var(--scrim); display: flex;
     align-items: center; justify-content: center; padding: 24px; z-index: 50;
     animation: fade .18s ease; }
@@ -751,6 +1135,34 @@
   .set-row-sub { font-size: 11.5px; color: var(--muted); margin-top: 3px;
     line-height: 1.45; }
   .set-row select { width: auto; flex: 0 0 auto; }
+  /* Full-page Settings tab — bigger type, roomier cards, 2-column grid. */
+  .settings-view { max-width: 1100px; margin: 0 auto; }
+  .settings-view .sec-head { align-items: baseline; }
+  .settings-view .sec-head .label { font: 800 22px/1 ui-rounded,
+    "SF Pro Rounded", system-ui; text-transform: none; letter-spacing: -.2px;
+    color: var(--text); }
+  .set-intro { color: var(--muted); font-size: 14px; margin: 6px 0 22px;
+    line-height: 1.5; }
+  .set-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+    gap: 20px; align-items: start; }
+  .set-grid .set-card { margin-bottom: 0; padding: 24px 26px; border-radius: 18px; }
+  /* The last card (Splitwise) spans the full grid width so it isn't left
+   * alone in a half-width slot at the bottom. */
+  .set-grid .set-card:last-child { grid-column: 1 / -1; }
+  .set-grid .set-card-head { font-size: 12.5px; gap: 10px; margin-bottom: 16px;
+    letter-spacing: .5px; text-transform: uppercase; color: var(--muted); }
+  .set-grid .set-ico { font-size: 18px; }
+  .set-grid .set-row { padding: 18px 0; gap: 16px; }
+  .set-grid .set-row.col { gap: 12px; }
+  .set-grid .set-row-name { font-size: 14.5px; }
+  .set-grid .set-row-sub { font-size: 12.5px; margin-top: 5px; }
+  /* Auto-save chip in the section header — pulses on each save. */
+  .set-saved { margin-left: auto; font-size: 11.5px; font-weight: 700;
+    letter-spacing: .4px; text-transform: uppercase; color: var(--green);
+    background: rgba(61,220,132,0.14); padding: 5px 11px; border-radius: 999px;
+    opacity: 0; transform: translateY(-2px);
+    transition: opacity .2s ease, transform .2s ease; }
+  .set-saved.on { opacity: 1; transform: translateY(0); }
   .switch { position: relative; flex: 0 0 auto; width: 40px; height: 24px; }
   .switch input { position: absolute; inset: 0; opacity: 0; margin: 0;
     width: 100%; height: 100%; cursor: pointer; }
@@ -761,6 +1173,86 @@
     box-shadow: 0 1px 3px rgba(0,0,0,.32); transition: transform .2s ease; }
   .switch input:checked + .switch-track { background: var(--accent); }
   .switch input:checked + .switch-track::after { transform: translateX(16px); }
+  /* Fully custom dropdown (button + popover) so the open list is also styled. */
+  .dd { position: relative; display: inline-block; min-width: 220px; flex: 0 0 auto; }
+  /* When open, lift the dd above sibling grid cards so the popover paints
+   * over them instead of being clipped behind the next row. */
+  .dd.open { z-index: 90; }
+  .dd-trigger { width: 100%; display: inline-flex; align-items: center;
+    justify-content: space-between; gap: 10px;
+    background: var(--card-hi); border: 1px solid var(--hairline-2);
+    border-radius: 10px; padding: 9px 12px;
+    font-size: 13px; font-weight: 600; color: var(--text); cursor: pointer;
+    transition: border-color .14s, background-color .14s; }
+  .dd-trigger:hover { border-color: var(--accent); }
+  .dd.open .dd-trigger { border-color: var(--accent); background: var(--card); }
+  .dd-chev { width: 11px; height: 8px; color: var(--accent); flex: none;
+    transition: transform .18s ease; }
+  .dd.open .dd-chev { transform: rotate(180deg); }
+  /* The menu sits 4px below (or above) the trigger with its own shadow — no
+   * extra glow on the trigger when open, so there's no "double-border" line
+   * between them. .dd.up flips the menu above when there's no room below. */
+  .dd-menu { position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+    background: var(--bg-elev); border: 1px solid var(--hairline-2);
+    border-radius: 12px; padding: 5px;
+    box-shadow: 0 14px 32px rgba(0,0,0,0.42), 0 4px 10px rgba(0,0,0,0.20);
+    display: none; z-index: 70; max-height: min(320px, 70vh); overflow-y: auto;
+    transform-origin: top center; }
+  .dd.up .dd-menu { top: auto; bottom: calc(100% + 4px); transform-origin: bottom center; }
+  .dd.open .dd-menu { display: block; animation: dd-pop .16s ease both; }
+  @keyframes dd-pop {
+    from { opacity: 0; transform: translateY(-4px) scale(.98); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .dd.up.open .dd-menu { animation: dd-pop-up .16s ease both; }
+  @keyframes dd-pop-up {
+    from { opacity: 0; transform: translateY(4px) scale(.98); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .dd-opt { display: flex; width: 100%; align-items: center; gap: 10px;
+    text-align: left; padding: 9px 12px; border-radius: 8px;
+    background: transparent; border: none; color: var(--text);
+    font-size: 13px; font-weight: 500; cursor: pointer;
+    transition: background-color .12s, color .12s; }
+  .dd-opt:hover { background: var(--card-hi); }
+  .dd-opt.on { background: var(--accent-soft); color: var(--accent);
+    font-weight: 700; }
+  .dd-opt-tick { width: 12px; height: 12px; opacity: 0; flex: none; }
+  .dd-opt.on .dd-opt-tick { opacity: 1; }
+  /* Chip picker — used for the card-provider list. */
+  .chip-row { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { display: inline-flex; align-items: center; gap: 8px;
+    padding: 7px 14px; border-radius: 999px; font-size: 13px; font-weight: 600;
+    background: var(--card-hi); border: 1px solid var(--hairline-2);
+    color: var(--muted); cursor: pointer; user-select: none;
+    transition: border-color .14s, color .14s, background-color .14s; }
+  .chip:hover { border-color: var(--accent); color: var(--text); }
+  .chip.on { background: var(--accent-soft); border-color: var(--accent);
+    color: var(--text); }
+  .chip-dot { width: 7px; height: 7px; border-radius: 50%;
+    background: var(--hairline-2); transition: background-color .14s; }
+  .chip.on .chip-dot { background: var(--accent); }
+  .custom-row { margin-top: 14px; }
+  .custom-row-label { display: block; color: var(--muted); font-size: 11px;
+    font-weight: 700; text-transform: uppercase; letter-spacing: .5px;
+    margin-bottom: 7px; }
+  .custom-row input { font-size: 13px; padding: 8px 12px; border-radius: 9px;
+    background: var(--card-hi); border: 1px solid var(--hairline-2);
+    color: var(--text); width: 100%; transition: border-color .14s; }
+  .custom-row input:focus { outline: none; border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft); }
+  .custom-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px;
+    min-height: 1px; }
+  .custom-chip { display: inline-flex; align-items: center; gap: 2px;
+    background: var(--card-hi); border: 1px solid var(--hairline-2);
+    border-radius: 999px; padding: 4px 4px 4px 11px;
+    font-size: 12px; color: var(--text); font-weight: 500; }
+  .custom-chip button { background: transparent; border: none;
+    color: var(--muted); width: 20px; height: 20px; border-radius: 50%;
+    padding: 0; font-size: 15px; line-height: 1; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
+    transition: background-color .14s, color .14s; }
+  .custom-chip button:hover { background: rgba(244,104,90,0.16); color: var(--red); }
   .seg { display: inline-flex; gap: 2px; background: var(--card-hi);
     border-radius: 9px; padding: 2px; flex: 0 0 auto; }
   .seg button { padding: 5px 12px; font-size: 12.5px; font-weight: 600;
@@ -913,17 +1405,9 @@
 <body>
 <main id="app" hidden>
   <header>
-    <div class="brand"><span class="brand-mark"></span><h1>Hon</h1></div>
+    <div class="brand"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="hm-g" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#1f1810"/><stop offset="100%" stop-color="#2d2010"/></linearGradient></defs><g fill="url(#hm-g)"><rect x="4" y="7" width="24" height="4.6" rx="2.3"/><rect x="4" y="7" width="4.6" height="21" rx="2.3"/><rect x="23.4" y="14" width="4.6" height="14" rx="2.3"/></g><path d="M5.5 7.8 L26.5 7.8" stroke="rgba(255,255,255,0.22)" stroke-width="0.9" stroke-linecap="round" fill="none"/></svg></span><div class="brand-words"><h1>Hon</h1><span class="brand-he" lang="he" dir="rtl">הוֹן</span></div></div>
     <span id="engine"></span>
     <span class="spacer"></span>
-    <button class="icon-btn" id="settings-btn" title="Settings" aria-label="Settings">
-      <svg viewBox="0 0 24 24" width="18" height="18" fill="none"
-        stroke="currentColor" stroke-width="2" stroke-linecap="round"
-        stroke-linejoin="round">
-        <circle cx="12" cy="12" r="3.2"></circle>
-        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-      </svg>
-    </button>
     <button class="icon-btn" id="theme-toggle" title="Light / dark">☀</button>
   </header>
   <div class="shell collapsed" id="shell">
@@ -1001,7 +1485,8 @@ const SECURE_FIELDS = new Set(["password", "consumerKey"]);
 const SNAPTRADE_ID = "snaptrade";
 const TABS = [["overview", "Overview", "📊"], ["assets", "Assets", "🏦"],
   ["activity", "Activity", "🧾"], ["subscriptions", "Subscriptions", "🔁"],
-  ["piggy", "Piggy banks", "🐷"], ["insights", "Insights", "💡"]];
+  ["piggy", "Piggy banks", "🐷"], ["insights", "Insights", "💡"],
+  ["settings", "Settings", "⚙️"]];
 
 // Icons offered when naming a piggy bank, and the preset "ready in N months"
 // plans the create form turns into a suggested monthly set-aside.
@@ -1011,6 +1496,7 @@ const PIGGY_PLANS = [3, 6, 12, 24];
 
 const state = {
   companies: [], connections: [], accounts: [], transactions: [], assets: [],
+  loans: [], rates: { prime: null, cpiNow: null },
   summary: null, budget: null, insights: null, llm: null,
   merchantFreq: {},      // { merchantKey: "monthly"|"bimonthly"|"yearly" }
   cancelledSubs: {},     // { merchantKey: cancelledAtIso } — user-marked cancellations
@@ -1024,9 +1510,12 @@ const state = {
   collapsed: {},         // { category: true } collapsed Activity groups
   insightsMonth: null,   // "YYYY-MM" drilled into on the Insights tab
   insightsTab: "spending", // "spending" | "brokerage" sub-view of Insights
-  brokerage: { holdings: [], snapshots: [], performance: [], ilsRates: null },
+  brokerage: { holdings: [], snapshots: [], holdingSnapshots: [], performance: [],
+    ilsRates: null },
   brkRange: "1Y",        // "1M" | "3M" | "YTD" | "1Y" | "ALL" chart window
   brkBase: "native",     // "native" | "ILS" — currency the headlines render in
+  brkAccount: "all",     // "all" | accountId — filter for chart + holdings
+  brkOpenHolding: null,  // symbol of the holding whose detail card is open
   expandedHoldings: {},  // { accountId: true } account cards showing holdings
   subAliases: {},        // { lapsedName: activeName } — AI-detected renames
   subAliasSig: null,     // signature of the name set subAliases was built for
@@ -1249,7 +1738,7 @@ function txnRefundAmount(t) {
 
 async function loadAll() {
   try {
-    const [companies, connections, accounts, transactions, assets, summary,
+    const [companies, connections, accounts, transactions, assets, loansResp, summary,
            insights, llm, merchantFreq, brokerage, cancelledSubs] =
       await Promise.all([
         api("/companies").then((r) => r.companies),
@@ -1257,6 +1746,7 @@ async function loadAll() {
         api("/accounts").then((r) => r.accounts),
         api("/transactions?limit=1000").then((r) => r.transactions),
         api("/assets").then((r) => r.assets),
+        api("/loans").catch(() => ({ loans: [], rates: { prime: null, cpiNow: null } })),
         api("/summary").then((r) => r.summary),
         api("/insights"),
         api("/llm"),
@@ -1265,8 +1755,9 @@ async function loadAll() {
         api("/subscriptions/cancelled").then((r) => r.cancelled),
       ]);
     Object.assign(state, {
-      companies, connections, accounts, transactions, assets, summary,
-      insights, llm, merchantFreq, brokerage, cancelledSubs,
+      companies, connections, accounts, transactions, assets,
+      loans: loansResp.loans || [], rates: loansResp.rates || { prime: null, cpiNow: null },
+      summary, insights, llm, merchantFreq, brokerage, cancelledSubs,
     });
     // The budget is fetched once transactions are in state — its URL carries
     // the recurring projection, which is derived from those transactions.
@@ -1311,6 +1802,9 @@ function render() {
     content.innerHTML = piggyView();
   } else if (state.tab === "insights") {
     content.innerHTML = insightsView();
+  } else if (state.tab === "settings") {
+    content.innerHTML = settingsView();
+    bindSettings(content);
   } else {
     content.innerHTML = overviewView();
   }
@@ -1420,32 +1914,65 @@ function netWorthSub(s) {
   return parts.join(" · ") || "Nothing added yet";
 }
 
-// Label + emoji for one net-worth source bucket from the /summary breakdown.
+// Label, emoji, and the colour the allocation bar uses for one net-worth
+// source bucket from the /summary breakdown.
 const SOURCE_LABEL = {
-  bank: ["🏦", "Bank accounts"],
-  card: ["💳", "Credit cards"],
-  brokerage: ["📈", "Investments"],
-  pension: ["🪺", "Pension funds"],
-  "asset:car": ["🚗", "Car"],
-  "asset:pension": ["🪺", "Pension"],
-  "asset:property": ["🏠", "Property"],
-  "asset:cash": ["💵", "Cash savings"],
-  "asset:crypto": ["🪙", "Crypto"],
-  "asset:other": ["💎", "Other assets"],
+  bank:             ["🏦", "Bank accounts",  "#3dcd84"],
+  card:             ["💳", "Credit cards",   "#f4685a"],
+  brokerage:        ["📈", "Investments",    "#7c83ff"],
+  pension:          ["🪺", "Pension funds",  "#ffd166"],
+  "asset:car":      ["🚗", "Car",            "#5fb0ff"],
+  "asset:pension":  ["🪺", "Pension",        "#ffd166"],
+  "asset:property": ["🏠", "Property",       "#f896c8"],
+  "asset:cash":     ["💵", "Cash savings",   "#74d0c2"],
+  "asset:crypto":   ["🪙", "Crypto",         "#ffb74d"],
+  "asset:other":    ["💎", "Other assets",   "#c2b3ff"],
+  loan:             ["📉", "Loans",          "#ff8aa1"],
 };
+const SOURCE_FALLBACK = ["•", null, "#ffffff"];
+
+// Stacked horizontal bar showing each positive source's share of the total —
+// the visual key for the breakdown rows below it. Negative sources (credit
+// card debt) are excluded; they read in the rows but would distort the bar.
+function netWorthAllocBar(sources) {
+  const positives = sources.filter((s) => s.amount > 0);
+  const total = positives.reduce((sum, s) => sum + s.amount, 0);
+  if (total <= 0) return "";
+  const segs = positives.map((src) => {
+    const meta = SOURCE_LABEL[src.key] || SOURCE_FALLBACK;
+    const pct = (src.amount / total) * 100;
+    return '<div class="nw-alloc-seg" style="width:' + pct + "%;background:"
+      + meta[2] + '" title="' + esc(meta[1] || src.key) + " · "
+      + esc(money(src.amount, "ILS")) + '"></div>';
+  }).join("");
+  return '<div class="nw-alloc">' + segs + "</div>";
+}
+
 // The "where it comes from" breakdown under the net-worth figure: one row per
-// source bucket, each already converted to ILS by the engine.
+// source bucket, each already converted to ILS by the engine. A coloured dot
+// keys each row to its segment in the allocation bar; positives show their
+// share, negatives (debt) are flagged with — to keep the percentages honest.
 function netWorthBreakdown(s) {
   const sources = s.sources || [];
   if (!sources.length) return "";
+  const positiveTotal = sources
+    .filter((src) => src.amount > 0)
+    .reduce((sum, src) => sum + src.amount, 0);
   const rows = sources.map((src) => {
-    const meta = SOURCE_LABEL[src.key] || ["•", src.key];
-    return '<div class="nw-bd-row"><span class="nw-bd-ico">' + meta[0]
-      + '</span><span class="nw-bd-name">' + esc(meta[1]) + "</span>"
+    const meta = SOURCE_LABEL[src.key] || SOURCE_FALLBACK;
+    const pct = src.amount > 0 && positiveTotal
+      ? Math.round((src.amount / positiveTotal) * 100) + "%"
+      : "—";
+    return '<div class="nw-bd-row">'
+      + '<span class="nw-bd-dot" style="background:' + meta[2] + '"></span>'
+      + '<span class="nw-bd-ico">' + meta[0] + "</span>"
+      + '<span class="nw-bd-name">' + esc(meta[1] || src.key) + "</span>"
       + '<span class="nw-bd-amt' + (src.amount < 0 ? " neg" : "") + '">'
-      + money(src.amount, "ILS") + "</span></div>";
+      + money(src.amount, "ILS") + "</span>"
+      + '<span class="nw-bd-pct">' + pct + "</span></div>";
   }).join("");
-  return '<div class="nw-breakdown">' + rows + "</div>";
+  return netWorthAllocBar(sources)
+    + '<div class="nw-breakdown">' + rows + "</div>";
 }
 
 function netWorthCard() {
@@ -1701,19 +2228,63 @@ async function applyLlmProvider() {
 /* --- Accounts ------------------------------------------------------------ */
 
 function accountsView() {
-  // Height-balanced columns so every column's first card lines up at the top.
-  const items = state.connections.map((conn) => {
-    const n = state.accounts.filter((a) => a.connectionId === conn.id).length;
-    return { html: connectionCard(conn), h: 176 + n * 46 };
-  }).concat((state.assets || []).map((a) => ({ html: assetCard(a), h: 156 })));
-
+  // Groups the assets page by kind so each section is easy to skim:
+  //   Banks → Credit cards → Investments → Pension → Other assets → Loans.
+  // Each section is its own height-balanced column grid; loans sit at the
+  // bottom because they're debt, not assets in the usual sense. Asset cards
+  // are dense but not transaction-heavy, so they pack two-up earlier than the
+  // Activity grid: a ~300px column comfortably holds an institution card.
   const contentEl = document.getElementById("content");
   const colW = (contentEl && contentEl.clientWidth) || 880;
-  const colCount = Math.max(1, Math.min(3, Math.floor(colW / 380)));
-  const cols = packColumns(items, (c) => c.h, colCount);
-  const grid = '<div class="act-cols">' + cols.map((col) =>
-    '<div class="act-col">' + col.map((c) => c.html).join("") + "</div>").join("")
-    + "</div>";
+  const colCount = Math.max(1, Math.min(3, Math.floor(colW / 300)));
+
+  const sectionsByKey = {
+    bank: [], card: [], brokerage: [], pension: [], asset: [], loan: [],
+  };
+  for (const conn of state.connections) {
+    const company = state.companies.find((c) => c.id === conn.companyId);
+    const kind = (company && company.type) || "bank";
+    const n = state.accounts.filter((a) => a.connectionId === conn.id).length;
+    (sectionsByKey[kind] || sectionsByKey.bank).push({
+      html: connectionCard(conn),
+      h: 176 + n * 46,
+      name: conn.displayName || "",
+    });
+  }
+  for (const a of (state.assets || [])) {
+    sectionsByKey.asset.push({ html: assetCard(a), h: 156, name: a.name || "" });
+  }
+  for (const l of (state.loans || [])) {
+    sectionsByKey.loan.push({ html: loanCard(l), h: 230, name: l.name || "" });
+  }
+
+  // Order, label, and small emoji for each section header. Keys that hold no
+  // items render nothing — empty sections never appear.
+  const sections = [
+    { key: "bank",      label: "Banks",         emoji: "🏦" },
+    { key: "card",      label: "Credit cards",  emoji: "💳" },
+    { key: "brokerage", label: "Investments",   emoji: "📈" },
+    { key: "pension",   label: "Pension & savings", emoji: "🪺" },
+    { key: "asset",     label: "Other assets",  emoji: "💎" },
+    { key: "loan",      label: "Loans",         emoji: "📉" },
+  ];
+
+  const grids = sections.map((sec) => {
+    const list = sectionsByKey[sec.key] || [];
+    if (!list.length) return "";
+    // Within a section, sort alphabetically so the layout is stable across
+    // re-renders even when packing distributes cards across columns.
+    list.sort((a, b) => a.name.localeCompare(b.name));
+    const cols = packColumns(list, (c) => c.h, colCount);
+    const grid = '<div class="act-cols">' + cols.map((col) =>
+      '<div class="act-col">' + col.map((c) => c.html).join("") + "</div>").join("")
+      + "</div>";
+    return '<div class="assets-section">'
+      + '<div class="assets-sub-head"><span class="ash-emoji">' + sec.emoji
+      + "</span><span class=\"ash-label\">" + esc(sec.label) + "</span>"
+      + '<span class="ash-count">' + list.length + "</span></div>"
+      + grid + "</div>";
+  }).join("");
 
   return '<div class="sec-head"><div class="label">Assets</div>'
     + '<span class="spacer"></span>'
@@ -1721,7 +2292,7 @@ function accountsView() {
     + (state.connections.length
         ? '<button class="mini primary" data-action="sync-all">↻ Sync all</button>'
         : "")
-    + "</div>" + grid;
+    + "</div>" + (grids || '<p class="hint">Nothing here yet — hit + Add asset.</p>');
 }
 
 // A category emoji with the institution's favicon layered on top; if the
@@ -1787,13 +2358,19 @@ function holdingsFor(accountId) {
   return (state.brokerage.holdings || []).filter((h) => h.accountId === accountId);
 }
 
-// Market value, cost and unrealized gain for one position. `openPnl` is used
-// when the brokerage reports it; otherwise gain is derived from cost basis.
+// Market value, cost and unrealized gain for one position. Gain is computed
+// from cost basis when both units and prices are known — that's the textbook
+// formula and matches every brokerage's UI. The brokerage's own `openPnl`
+// is only used as a fallback when we cannot compute, because SnapTrade hands
+// it through per-share for some brokerages (notably IBKR) and per-position
+// for others, with no flag — using it directly understated the figure by a
+// factor of `units`.
 function holdingStats(h) {
   const value = h.price != null ? h.units * h.price : null;
   const cost = h.costBasis != null ? h.units * h.costBasis : null;
-  let gain = h.openPnl != null ? h.openPnl
-    : (value != null && cost != null ? value - cost : null);
+  let gain = value != null && cost != null
+    ? value - cost
+    : (h.openPnl != null ? h.openPnl : null);
   const gainPct = gain != null && cost ? (gain / Math.abs(cost)) * 100 : null;
   return { value: value, cost: cost, gain: gain, gainPct: gainPct };
 }
@@ -1888,12 +2465,14 @@ function connectionCard(conn) {
       + "</div>";
   }
 
-  // This billing cycle's spending. Credit cards show it as their headline
-  // figure (their "balance"); banks show it as a secondary line.
+  // This billing cycle's spending. Every connection (banks and cards) shows
+  // it as a secondary line below the headline balance — the headline itself
+  // is always the actual sum of account balances, so it matches the rows.
   const cycleSpent = !isSnap && accounts.length ? connectionSpend(conn) : 0;
   let spendLine = "";
-  if (!isSnap && !isCard && accounts.length && cycleSpent < 0) {
-    spendLine = '<div class="conn-spend"><span>Spent this month</span>'
+  if (!isSnap && accounts.length && cycleSpent < 0) {
+    spendLine = '<div class="conn-spend"><span>'
+      + (isCard ? "Spent this cycle" : "Spent this month") + "</span>"
       + '<span class="conn-spend-amt">' + money(-cycleSpent, "ILS") + "</span></div>";
   }
 
@@ -1917,12 +2496,11 @@ function connectionCard(conn) {
     logo = companyLogo(company);
   }
 
-  // Credit cards headline the cycle's spend; others headline the balance.
+  // Headline is the sum of the connection's account balances — the same
+  // figure the user sees if they add up the rows below. Cycle spend rides
+  // along as a secondary line (handled above).
   let headAmt = "";
-  if (isCard && accounts.length) {
-    headAmt = '<span class="conn-total' + (cycleSpent < 0 ? " neg" : "") + '">'
-      + money(cycleSpent, "ILS", true) + "</span>";
-  } else if (total != null) {
+  if (total != null) {
     headAmt = '<span class="conn-total' + (total < 0 ? " neg" : "") + '">'
       + money(total, totalCur) + "</span>";
   } else if (!isSnap && accounts.length) {
@@ -2000,6 +2578,72 @@ function assetCard(a) {
     + '">Edit</button>'
     + '<button class="mini danger" data-action="remove-asset" data-id="' + esc(a.id)
     + '">Remove</button></div></div>';
+}
+
+// Hebrew + English labels for each loan track. The pill class matches a
+// distinct colour so the four tracks read at a glance.
+const LOAN_TRACK = {
+  "fixed":     { label: "Fixed",                cls: "fixed" },
+  "prime":     { label: "Prime + margin",       cls: "prime" },
+  "cpi-fixed": { label: "CPI-linked · Fixed",   cls: "cpi-fixed" },
+  "cpi-prime": { label: "CPI-linked · Prime",   cls: "cpi-prime" },
+};
+
+// A loan card with current outstanding, progress bar, monthly payment and
+// remaining term. The progress bar animates from 0 each render so the value
+// feels alive on screen.
+function loanCard(loan) {
+  const s = loan.state || {};
+  const track = LOAN_TRACK[loan.rateType] || LOAN_TRACK.fixed;
+  const pct = Math.max(0, Math.min(1, s.progress || 0)) * 100;
+  const yrs = Math.floor((s.monthsRemaining || 0) / 12);
+  const mos = Math.round((s.monthsRemaining || 0) - yrs * 12);
+  const remainText = yrs
+    ? yrs + " yr" + (yrs === 1 ? "" : "s") + (mos ? " " + mos + " mo" : "")
+    : (mos + " mo" + (mos === 1 ? "" : "s"));
+  const rateText = (s.annualRate != null ? s.annualRate.toFixed(2) : loan.rateValue.toFixed(2)) + "%";
+
+  // A loan scraped from a bank carries the bank's connectionId. Show the
+  // bank's logo and "Loan · {bank name}" as the headline, with the bank's
+  // own product name (e.g. "דיגיטל 108-416") on the sub-line — so loans
+  // from the same bank stay distinguishable. Hand-entered loans keep the
+  // 📉 icon and the user-typed name.
+  const conn = loan.connectionId
+    ? state.connections.find((c) => c.id === loan.connectionId)
+    : null;
+  const bank = conn ? state.companies.find((c) => c.id === conn.companyId) : null;
+  const headLogo = bank ? companyLogo(bank) : '<span class="logo">📉</span>';
+  const heading = bank ? "Loan · " + esc(bank.name) : esc(loan.name);
+  const productLine = bank
+    ? '<div class="secondary">' + esc(loan.name)
+        + (loan.externalId ? " · #" + esc(loan.externalId) : "") + "</div>"
+    : "";
+
+  return '<div class="card loan-card' + (loan.excluded ? " nw-off" : "") + '">'
+    + '<div class="card-head">' + headLogo
+    + '<div style="min-width:0"><h3>' + heading + "</h3>" + productLine
+    + '<div class="meta">' + remainText + " left · "
+    + '<span class="loan-pill ' + track.cls + '">' + esc(track.label) + "</span></div></div>"
+    + '<span class="conn-total">' + money(-(s.outstanding || 0), loan.currency) + "</span></div>"
+    + '<div class="loan-bar"><span style="width:' + pct.toFixed(1) + '%"></span></div>'
+    + '<div class="loan-stats">'
+    + '<div class="loan-stat"><label>Monthly</label><b>' + money(s.monthlyPayment || 0, loan.currency) + "</b></div>"
+    + '<div class="loan-stat"><label>Rate</label><b>' + esc(rateText) + "</b>"
+    + (loan.isPrime
+        ? '<span class="muted">' + esc((state.rates.prime ?? 0).toFixed(2)) + "% prime + " + esc(loan.rateValue.toFixed(2)) + "%</span>"
+        : (loan.isCpiLinked && s.cpiRatio && s.cpiRatio !== 1
+            ? '<span class="muted">×' + esc(s.cpiRatio.toFixed(4)) + " index</span>"
+            : ""))
+    + "</div>"
+    + '<div class="loan-stat"><label>Paid · ' + Math.round(pct) + '%</label>'
+    + '<b>' + money(s.totalPaid || 0, loan.currency) + "</b>"
+    + '<span class="muted">of ' + money(loan.principal * (s.cpiRatio || 1), loan.currency) + "</span></div>"
+    + "</div>"
+    + '<div class="conn-foot actions">'
+    + nwTick("loan", loan.id, loan.excluded)
+    + '<button class="mini" data-action="edit-loan" data-id="' + esc(loan.id) + '">Edit</button>'
+    + '<button class="mini danger" data-action="remove-loan" data-id="' + esc(loan.id) + '">Remove</button>'
+    + "</div></div>";
 }
 
 /* --- Activity ------------------------------------------------------------ */
@@ -2950,24 +3594,37 @@ function insightsView() {
 // The brokerage stats view: portfolio value with its trend, total unrealized
 // gain, a value-over-time chart, and the consolidated holdings allocation.
 function brokerageView() {
-  const holdings = state.brokerage.holdings || [];
+  const allHoldings = state.brokerage.holdings || [];
   const snaps = state.brokerage.snapshots || [];
+  const holdSnaps = state.brokerage.holdingSnapshots || [];
   const performance = state.brokerage.performance || [];
   const ilsRates = state.brokerage.ilsRates || null;
   const brkAccts = state.accounts.filter((a) => a.companyId === SNAPTRADE_ID);
 
-  // Headline currency — the one most brokerage accounts report in. SnapTrade
-  // performance reports their currency too; prefer that when available.
+  // Account filter (the user can narrow chart + holdings to one account).
+  const acctFilter = state.brkAccount && state.brkAccount !== "all"
+    && brkAccts.some((a) => a.id === state.brkAccount) ? state.brkAccount : "all";
+  const acctsInScope = acctFilter === "all"
+    ? brkAccts : brkAccts.filter((a) => a.id === acctFilter);
+  const holdings = acctFilter === "all"
+    ? allHoldings : allHoldings.filter((h) => h.accountId === acctFilter);
+  const snapsScoped = acctFilter === "all"
+    ? snaps : snaps.filter((s) => s.accountId === acctFilter);
+
+  // Headline currency: prefer SnapTrade's reported currency, then account
+  // currency. Heavy-weight performance so a USD report wins over an ILS cash
+  // sub-account.
   const curCount = {};
-  brkAccts.forEach((a) => { curCount[a.currency] = (curCount[a.currency] || 0) + 1; });
-  performance.forEach((p) => {
-    const c = p.data && p.data.currency;
-    if (c) curCount[c] = (curCount[c] || 0) + 5; // weight performance heavier
-  });
+  acctsInScope.forEach((a) => { curCount[a.currency] = (curCount[a.currency] || 0) + 1; });
+  if (acctFilter === "all") {
+    performance.forEach((p) => {
+      const c = p.data && p.data.currency;
+      if (c) curCount[c] = (curCount[c] || 0) + 5;
+    });
+  }
   const nativeCur = Object.keys(curCount).sort((x, y) => curCount[y] - curCount[x])[0]
     || "USD";
 
-  // Toggle ILS conversion when rates are available and the user picked ILS.
   const useIls = state.brkBase === "ILS" && ilsRates;
   const displayCur = useIls ? "ILS" : nativeCur;
   const toIls = (v, c) => {
@@ -2982,10 +3639,10 @@ function brokerageView() {
     return out == null ? v : out;
   };
 
-  // Total value: brokerage account balances (includes cash). Gain and cost
-  // come from the priced positions only.
+  // Total value uses account balances (includes cash); gain/cost come from
+  // priced positions only.
   let totalValue = 0, haveValue = false;
-  brkAccts.forEach((a) => {
+  acctsInScope.forEach((a) => {
     if (a.balance == null) return;
     const v = conv(a.balance, a.currency);
     if (v == null) return;
@@ -3002,10 +3659,17 @@ function brokerageView() {
   });
   const gainPct = haveGain && totalCost ? (totalGain / Math.abs(totalCost)) * 100 : null;
 
-  // Build the equity series — prefer SnapTrade's full historical timeline
-  // (rich, daily, goes back years). Fall back to Hon's local snapshots,
-  // which only accumulate one point per sync.
-  const fullSeries = buildEquitySeries(performance, snaps, conv);
+  // Equity series — SnapTrade's reporting timeline when an account isn't
+  // narrowed (the report is connection-wide); local snapshots when filtered
+  // to one account, or as the universal fallback.
+  // Per-holding snapshots scoped to the in-view accounts. Yahoo Finance
+  // backfills these on every brokerage sync, so the chart has multi-year
+  // history even when SnapTrade returns no performance report.
+  const holdSnapsScoped = acctFilter === "all"
+    ? holdSnaps : holdSnaps.filter((s) => s.accountId === acctFilter);
+  const fullSeries = acctFilter === "all"
+    ? buildEquitySeries(performance, snaps, holdSnaps, conv)
+    : buildEquitySeries([], snapsScoped, holdSnapsScoped, conv);
   const range = state.brkRange || "1Y";
   const series = sliceRange(fullSeries, range);
   const first = series.length ? series[0].value : null;
@@ -3013,37 +3677,70 @@ function brokerageView() {
   const periodPct = first ? ((last - first) / Math.abs(first)) * 100 : null;
   const periodAbs = first != null && last != null ? last - first : null;
 
-  // Aggregated SnapTrade reporting stats (returns + dividends).
+  // Reporting stats — picked from the timeframe the user selected at the top
+  // of the chart. SnapTrade caches every range on each sync (1M/3M/YTD/1Y/
+  // ALL) into `byRange`, so flipping a pill is instant. Falls back to the
+  // top-level fields when an older cache pre-dates the per-range fetch.
   let dividend = 0, haveDividend = false;
   let rateSum = 0, rateCount = 0;
-  performance.forEach((p) => {
-    const d = p.data || {};
-    if (typeof d.dividendIncome === "number") {
-      const v = conv(d.dividendIncome, d.currency);
-      if (v != null) { dividend += v; haveDividend = true; }
-    }
-    if (typeof d.rateOfReturn === "number") { rateSum += d.rateOfReturn; rateCount += 1; }
-  });
+  if (acctFilter === "all") {
+    performance.forEach((p) => {
+      const d = p.data || {};
+      const window = (d.byRange && d.byRange[range]) || {
+        rateOfReturn: d.rateOfReturn ?? null,
+        dividendIncome: d.dividendIncome ?? null,
+      };
+      if (typeof window.dividendIncome === "number") {
+        const v = conv(window.dividendIncome, d.currency);
+        if (v != null) { dividend += v; haveDividend = true; }
+      }
+      if (typeof window.rateOfReturn === "number") {
+        rateSum += window.rateOfReturn; rateCount += 1;
+      }
+    });
+  }
   const rateOfReturn = rateCount ? (rateSum / rateCount) * 100 : null;
+
+  // Period-aware gain tile — value + percent computed off the equity-series
+  // window the user picked at the top of the chart (1M / 3M / YTD / 1Y / ALL).
+  // Replaces the old static "Unrealized gain" tile so the headline gain
+  // updates as the user switches timeframes.
+  let periodTile;
+  if (periodAbs != null) {
+    const tone = periodAbs >= 0 ? "good" : "bad";
+    const sign = periodAbs >= 0 ? "+" : "−";
+    const val = sign + money(Math.abs(periodAbs), displayCur)
+      + (periodPct != null
+          ? ' <span class="md-tile-aux">'
+            + (periodPct >= 0 ? "+" : "") + periodPct.toFixed(2) + "%</span>"
+          : "");
+    periodTile = statTile(val, "Gain · " + range, tone);
+  } else if (haveGain) {
+    // Fall back to the all-time cost-basis gain when no series is available.
+    periodTile = statTile(money(totalGain, displayCur, true), "Unrealized gain",
+      totalGain >= 0 ? "good" : "bad");
+  } else {
+    periodTile = statTile("—", "Gain · " + range, "");
+  }
 
   const tiles = '<div class="md-tiles">'
     + statTile(haveValue ? money(totalValue, displayCur) : "—", "Portfolio value", "")
-    + statTile(haveGain ? money(totalGain, displayCur, true) : "—", "Unrealized gain",
-        haveGain ? (totalGain >= 0 ? "good" : "bad") : "")
+    + periodTile
     + statTile(gainPct == null ? "—"
         : (gainPct >= 0 ? "+" : "") + gainPct.toFixed(1) + "%",
         "Return on cost", gainPct == null ? "" : gainPct >= 0 ? "good" : "bad")
-    + statTile(rateOfReturn == null ? "—"
-        : (rateOfReturn >= 0 ? "+" : "") + rateOfReturn.toFixed(1) + "%",
-        "Rate of return", rateOfReturn == null ? "" : rateOfReturn >= 0 ? "good" : "bad")
+    + (rateOfReturn != null
+        ? statTile((rateOfReturn >= 0 ? "+" : "") + rateOfReturn.toFixed(1) + "%",
+            "Rate of return · " + range, rateOfReturn >= 0 ? "good" : "bad")
+        : "")
     + (haveDividend
-        ? statTile(money(dividend, displayCur), "Dividends", "good")
+        ? statTile(money(dividend, displayCur), "Dividends · " + range, "good")
         : "")
     + statTile(String(holdings.length),
         holdings.length === 1 ? "Holding" : "Holdings", "")
     + "</div>";
 
-  // Currency toggle, only meaningful when rates loaded and native ≠ ILS.
+  // Currency + range pills sit above the chart.
   let baseToggle = "";
   if (ilsRates && nativeCur !== "ILS") {
     const pill = (key, label) => '<button class="ins-pill'
@@ -3052,8 +3749,6 @@ function brokerageView() {
     baseToggle = '<div class="ins-toggle">' + pill("native", nativeCur)
       + pill("ILS", "ILS") + "</div>";
   }
-
-  // Time-range pills for the equity chart.
   const ranges = ["1M", "3M", "YTD", "1Y", "ALL"];
   const rangePills = '<div class="ins-toggle">' + ranges.map((r) =>
     '<button class="ins-pill' + (range === r ? " on" : "")
@@ -3069,90 +3764,247 @@ function brokerageView() {
     trendCard = '<div class="card"><div class="md-head">'
       + '<span class="md-month">Value over time</span>' + pill + "</div>"
       + '<div class="brk-ctrl">' + rangePills + baseToggle + "</div>"
-      + valueChart(series, displayCur) + "</div>";
-  } else if (fullSeries.length >= 2) {
-    // Series exists but the chosen window is empty.
+      + lineChart(series, displayCur, { tone: down ? "bad" : "good" }) + "</div>";
+  } else if (fullSeries.length >= 1) {
     trendCard = '<div class="card"><div class="md-head">'
       + '<span class="md-month">Value over time</span></div>'
       + '<div class="brk-ctrl">' + rangePills + baseToggle + "</div>"
-      + '<div class="ins-sub">No data in this window — try a wider range.</div></div>';
+      + '<div class="lc-empty">Only one data point so far — the line draws '
+      + "itself in once two syncs have landed in this window.</div></div>";
   } else {
     trendCard = '<div class="card"><div class="label">Value over time</div>'
       + '<div class="ins-sub">SnapTrade returned no historical equity data. '
       + "It is built up locally on every sync — hit <b>↻ Sync</b> a few times "
-      + "over the coming days to populate the graph.</div></div>";
+      + "to populate the graph.</div></div>";
   }
 
-  // Holdings allocation, consolidated by symbol across accounts.
+  // Account filter pills — only meaningful when there's more than one.
+  let acctFilterRow = "";
+  if (brkAccts.length > 1) {
+    const pill = (id, label) => '<button class="brk-acct-pill'
+      + (acctFilter === id ? " on" : "")
+      + '" data-action="brk-account" data-arg="' + esc(id) + '">'
+      + esc(label) + "</button>";
+    acctFilterRow = '<div class="brk-acct-row">' + pill("all", "All accounts")
+      + brkAccts.map((a) =>
+          pill(a.id, a.label || ("Account " + a.accountNumber))).join("")
+      + "</div>";
+  }
+
+  return tiles + trendCard + acctFilterRow
+    + holdingsPanel(holdings, holdSnaps, conv, useIls, displayCur,
+        haveValue ? totalValue : null, acctsInScope.length, range);
+}
+
+// --- Holdings panel --------------------------------------------------------
+
+// Builds the consolidated holdings allocation card. Each row is clickable;
+// the expanded state shows a stats grid and a per-holding sparkline.
+function holdingsPanel(holdings, holdSnaps, conv, useIls, displayCur, totalValue, acctCount, range) {
+  // Consolidate by symbol across accounts in scope, carrying every
+  // contributing accountId so the per-holding sparkline can pull its history.
   const bySym = {};
   holdings.forEach((h) => {
     const s = holdingStats(h);
     const e = bySym[h.symbol] || (bySym[h.symbol] = {
       symbol: h.symbol, description: h.description, units: 0,
-      value: 0, cost: 0, gain: 0, currency: h.currency, haveGain: false,
+      value: 0, cost: 0, gain: 0, price: h.price, currency: h.currency,
+      haveGain: false, accountIds: [],
     });
     e.units += h.units;
     if (s.value != null) e.value += s.value;
     if (s.cost != null) e.cost += s.cost;
     if (s.gain != null) { e.gain += s.gain; e.haveGain = true; }
+    e.accountIds.push(h.accountId);
   });
   const rows = Object.keys(bySym).map((k) => bySym[k])
     .sort((a, b) => b.value - a.value);
-  const allocTotal = rows.reduce((sum, r) => sum + r.value, 0) || 1;
+  const allocTotal = rows.reduce((sum, r) => sum + r.value, 0);
 
-  let alloc = '<div class="card"><div class="label">Holdings</div>';
-  if (rows.length) {
-    alloc += '<div class="ins-sub">' + rows.length + " position"
-      + (rows.length === 1 ? "" : "s") + " across " + brkAccts.length
-      + " account" + (brkAccts.length === 1 ? "" : "s") + "</div>";
-    alloc += rows.map((r) => {
-      // Allocation share is always native-vs-native — converting both sides
-      // to ILS would cancel out anyway. The displayed amount honors the
-      // currency toggle.
-      const pct = Math.round((r.value / allocTotal) * 100);
-      const gPct = r.haveGain && r.cost ? (r.gain / Math.abs(r.cost)) * 100 : null;
-      const gCls = gPct == null ? "flat" : gPct >= 0 ? "good" : "bad";
-      const shownVal = conv(r.value, r.currency);
-      const shownCur = useIls && shownVal != null && shownVal !== r.value
-        ? "ILS" : r.currency;
-      return '<div class="md-cat"><div class="md-cat-main">'
-        + '<div class="md-cat-top"><span class="md-cat-name">' + esc(r.symbol)
-        + (r.description ? ' <span class="hold-desc">' + esc(r.description)
-          + "</span>" : "")
-        + '</span><span class="md-cat-amt">' + money(shownVal, shownCur)
-        + "</span></div>"
-        + '<div class="md-cat-track"><div class="md-cat-fill" style="width:'
-        + Math.max(4, pct) + '%"></div></div>'
-        + '<div class="md-cat-d"><span class="hold-units">' + fmtUnits(r.units)
-        + " units</span>"
-        + (gPct == null ? "" : '<span class="hold-gain ' + gCls + '">'
-          + (gPct >= 0 ? "↑" : "↓") + " " + Math.abs(gPct).toFixed(1) + "%</span>")
-        + "</div></div>"
-        + '<span class="md-cat-pct">' + pct + "%</span></div>";
-    }).join("");
-  } else {
-    // The brokerage tab is showing, so a snapshot exists — but no positions
-    // came back. Usually SnapTrade is still doing its initial holdings sync
-    // (it can take a few minutes after linking), or the sync ran on an older
-    // build before holdings were wired up.
-    alloc += '<div class="empty" style="padding:6px 0">No positions yet — '
+  const total = totalValue != null ? totalValue
+    : rows.reduce((sum, r) => {
+        const v = conv(r.value, r.currency);
+        return sum + (v == null ? 0 : v);
+      }, 0);
+
+  // Card header: title + portfolio total + count.
+  let head = '<div class="hp-head"><div><div class="label">Holdings</div>'
+    + '<div class="hp-sub">' + rows.length + " position"
+    + (rows.length === 1 ? "" : "s") + " across "
+    + acctCount + " account" + (acctCount === 1 ? "" : "s") + "</div></div>"
+    + '<div class="hp-totals"><div class="hp-total-val">'
+    + money(total, displayCur) + "</div>"
+    + '<div class="hp-total-cap">Portfolio total</div></div></div>';
+
+  let body;
+  if (!rows.length) {
+    body = '<div class="empty" style="padding:14px 2px">No positions yet — '
       + "SnapTrade may still be syncing holdings (give it a few minutes after "
-      + "linking), or your last sync ran before the holdings update. Hit "
-      + "<b>↻ Sync</b> on the SnapTrade card and try again. Server logs "
-      + "(<code>web.sh</code> output) show the exact reason if the fetch failed.</div>";
+      + "linking). Hit <b>↻ Sync</b> on the SnapTrade card and try again.</div>";
+  } else {
+    body = '<div class="hp-list">' + rows.map((r, idx) =>
+      holdingRow(r, idx, allocTotal, holdSnaps, conv, useIls, displayCur, range)).join("")
+      + "</div>";
   }
-  alloc += "</div>";
+  return '<div class="card hp-card">' + head + body + "</div>";
+}
 
-  return tiles + trendCard + alloc;
+function holdingRow(r, idx, allocTotal, holdSnaps, conv, useIls, displayCur, range) {
+  const open = state.brkOpenHolding === r.symbol;
+  const pct = allocTotal ? (r.value / allocTotal) * 100 : 0;
+  const gPct = r.haveGain && r.cost ? (r.gain / Math.abs(r.cost)) * 100 : null;
+  const gCls = gPct == null ? "flat" : gPct >= 0 ? "good" : "bad";
+  const shownVal = conv(r.value, r.currency);
+  const shownCur = useIls && shownVal != null && shownVal !== r.value
+    ? "ILS" : r.currency;
+  const shownGain = conv(r.gain, r.currency);
+  const gainCur = useIls && shownGain != null && shownGain !== r.gain
+    ? "ILS" : r.currency;
+
+  // Coloured dot keys this row to its segment in the (future) allocation bar.
+  const dotColor = holdingColor(idx);
+  const gainPill = gPct == null ? "" : '<span class="hp-gain ' + gCls + '">'
+    + (gPct >= 0 ? "▲" : "▼") + " " + Math.abs(gPct).toFixed(2) + "%"
+    + (shownGain != null ? ' <span class="hp-gain-abs">'
+        + money(Math.abs(shownGain), gainCur) + "</span>" : "")
+    + "</span>";
+
+  const head = '<button class="hp-row' + (open ? " open" : "")
+    + '" data-action="brk-hold" data-arg="' + esc(r.symbol) + '">'
+    + '<span class="hp-dot" style="background:' + dotColor + '"></span>'
+    + '<div class="hp-id"><div class="hp-sym">' + esc(r.symbol) + "</div>"
+    + (r.description ? '<div class="hp-name">' + esc(r.description) + "</div>" : "")
+    + "</div>"
+    + '<div class="hp-bar"><div class="hp-bar-fill" style="width:'
+    + Math.max(2, pct) + "%;background:" + dotColor + '"></div></div>'
+    + '<div class="hp-figs"><div class="hp-val">' + money(shownVal, shownCur) + "</div>"
+    + '<div class="hp-pct">' + pct.toFixed(1) + "%</div></div>"
+    + '<div class="hp-gain-wrap">' + gainPill + "</div>"
+    + '<span class="hp-chev">' + (open ? "▾" : "▸") + "</span></button>";
+
+  const detail = open
+    ? holdingDetail(r, holdSnaps, conv, useIls, displayCur, range) : "";
+  return '<div class="hp-item' + (open ? " open" : "") + '">' + head + detail + "</div>";
+}
+
+function holdingDetail(r, holdSnaps, conv, useIls, displayCur, range) {
+  const avgPrice = r.cost && r.units ? r.cost / r.units : null;
+  const shownPrice = conv(r.price, r.currency);
+  const shownAvg = conv(avgPrice, r.currency);
+  const shownCost = conv(r.cost, r.currency);
+  const shownVal = conv(r.value, r.currency);
+  const shownGain = conv(r.gain, r.currency);
+  const cur = useIls && shownVal != null && shownVal !== r.value ? "ILS" : r.currency;
+
+  const stat = (label, value, tone) =>
+    '<div class="hd-stat"><div class="hd-stat-cap">' + esc(label) + "</div>"
+    + '<div class="hd-stat-val' + (tone ? " " + tone : "") + '">' + value + "</div></div>";
+
+  // Per-holding sparkline — collected from every account this symbol is held
+  // in. The range pill above the chart applies here too, so a "1Y" toggle
+  // narrows both the portfolio chart and every position's sparkline.
+  const fullSeries = buildHoldingSeries(holdSnaps, r.symbol, r.accountIds,
+    conv, r.currency);
+  const series = sliceRange(fullSeries, range || "ALL");
+
+  // Period-scoped gain comes from the sliced series; absolute gain still
+  // comes from cost basis (all-time). Two complementary numbers.
+  let periodGain = null, periodPct = null;
+  if (series.length >= 2) {
+    periodGain = series[series.length - 1].value - series[0].value;
+    if (series[0].value) periodPct = (periodGain / Math.abs(series[0].value)) * 100;
+  }
+  const periodTone = periodGain == null ? ""
+    : periodGain >= 0 ? "good" : "bad";
+  const periodVal = periodGain == null ? "—"
+    : (periodGain >= 0 ? "+" : "−") + money(Math.abs(periodGain), cur)
+      + (periodPct != null
+          ? ' <span class="md-tile-aux">' + (periodPct >= 0 ? "+" : "")
+            + periodPct.toFixed(2) + "%</span>"
+          : "");
+
+  const gainTone = r.gain == null ? "" : r.gain >= 0 ? "good" : "bad";
+  const stats = '<div class="hd-stats">'
+    + stat("Units", fmtUnits(r.units))
+    + stat("Last price", shownPrice == null ? "—" : money(shownPrice, cur))
+    + stat("Avg cost", shownAvg == null ? "—" : money(shownAvg, cur))
+    + stat("Market value", shownVal == null ? "—" : money(shownVal, cur))
+    + stat("Total cost", shownCost == null ? "—" : money(shownCost, cur))
+    + stat("Gain · " + (range || "ALL"), periodVal, periodTone)
+    + stat("Unrealized · ALL",
+        shownGain == null ? "—" : money(shownGain, cur, true), gainTone)
+    + "</div>";
+
+  // Attach per-point extras to the sparkline so the hover tooltip shows
+  // price + units alongside the market-value figure.
+  const seriesWithExtras = series.map((p) => {
+    const extras = [];
+    if (typeof p.price === "number") extras.push(["Price", money(p.price, cur)]);
+    if (typeof p.units === "number") extras.push(["Units", fmtUnits(p.units)]);
+    return extras.length ? Object.assign({}, p, { extras }) : p;
+  });
+
+  const chart = series.length >= 2
+    ? lineChart(seriesWithExtras, cur, { tone: periodTone || gainTone || "good",
+        height: 160, showAxis: true })
+    : (fullSeries.length >= 1
+        ? '<div class="hd-empty">No data in this window — try ALL.</div>'
+        : '<div class="hd-empty">Per-position history starts collecting today — '
+          + "the sparkline appears after a couple of syncs.</div>");
+
+  return '<div class="hp-detail">' + stats
+    + '<div class="hd-chart-wrap">' + chart + "</div></div>";
+}
+
+// Picks a stable colour for a holding by its rank. Brighter for the top
+// positions so the allocation reads at a glance.
+const HOLDING_PALETTE = ["#7c83ff", "#3dcd84", "#fcb932", "#f896c8",
+  "#5fb0ff", "#74d0c2", "#ffb74d", "#c2b3ff", "#ff8a76", "#a0a6ff"];
+function holdingColor(idx) {
+  return HOLDING_PALETTE[idx % HOLDING_PALETTE.length];
+}
+
+// Builds a per-holding equity series by summing this symbol's daily value
+// across every account it sits in. Currency conversion happens on each point.
+function buildHoldingSeries(holdSnaps, symbol, accountIds, conv, currency) {
+  const ids = new Set(accountIds);
+  const byDate = {};
+  holdSnaps.forEach((s) => {
+    if (s.symbol !== symbol || !ids.has(s.accountId)) return;
+    const v = conv(s.value, s.currency || currency);
+    if (v == null) return;
+    const e = byDate[s.date] || (byDate[s.date] = {
+      value: 0, units: 0, price: null, priceCur: s.currency || currency,
+    });
+    e.value += v;
+    e.units += s.units || 0;
+    // Price is per-share — when a symbol sits in multiple accounts they all
+    // see the same close, so keep the first non-null we see.
+    if (e.price == null && typeof s.price === "number") e.price = s.price;
+  });
+  return Object.keys(byDate).sort().map((d) => {
+    const e = byDate[d];
+    return {
+      date: d, value: e.value, units: e.units,
+      price: e.price != null ? conv(e.price, e.priceCur) : null,
+    };
+  });
 }
 
 // Picks the equity series the chart should draw. SnapTrade's reporting API
 // is the source of truth when available — it returns daily values going back
 // years on the very first sync. Hon's own snapshots (one per sync) are the
 // fallback when SnapTrade returned no history (e.g. brokerage still syncing).
-function buildEquitySeries(performance, snaps, conv) {
-  const byDate = {};
+// Picks the equity series the chart should draw, in fidelity order:
+//   1) SnapTrade's `getReportingCustomRange` (rich, daily, years back).
+//   2) Per-holding daily snapshots (Yahoo Finance backfill — units × close
+//      reconstructed per date, summed across positions with forward-fill so
+//      non-trading days don't drop positions off the running total).
+//   3) Hon's own per-sync account_value_snapshots (sparse, one per sync).
+function buildEquitySeries(performance, snaps, holdSnaps, conv) {
+  // 1) SnapTrade performance — connection-scope, sums across all accounts.
   let havePerformance = false;
+  const fromPerf = {};
   performance.forEach((p) => {
     const pts = (p.data && p.data.totalEquity) || [];
     if (pts.length) havePerformance = true;
@@ -3160,16 +4012,51 @@ function buildEquitySeries(performance, snaps, conv) {
     pts.forEach((pt) => {
       const v = conv(pt.value, pt.currency || pcur);
       if (v == null) return;
-      byDate[pt.date] = (byDate[pt.date] || 0) + v;
+      fromPerf[pt.date] = (fromPerf[pt.date] || 0) + v;
     });
   });
-  if (!havePerformance) {
-    snaps.forEach((s) => {
+  if (havePerformance) {
+    return Object.keys(fromPerf).sort()
+      .map((d) => ({ date: d, value: fromPerf[d] }));
+  }
+
+  // 2) Per-holding snapshots — forward-fill each (account, symbol) so a
+  //    missing day doesn't tank the running portfolio total.
+  if (holdSnaps && holdSnaps.length) {
+    const bySym = {};
+    holdSnaps.forEach((s) => {
       const v = conv(s.value, s.currency);
       if (v == null) return;
-      byDate[s.date] = (byDate[s.date] || 0) + v;
+      const k = s.accountId + ":" + s.symbol;
+      (bySym[k] = bySym[k] || []).push({ date: s.date, value: v });
     });
+    const keys = Object.keys(bySym);
+    keys.forEach((k) => bySym[k].sort((a, b) => a.date.localeCompare(b.date)));
+    const dateSet = new Set();
+    keys.forEach((k) => bySym[k].forEach((p) => dateSet.add(p.date)));
+    const dates = Array.from(dateSet).sort();
+    const cur = {};
+    keys.forEach((k) => { cur[k] = 0; });
+    const out = [];
+    for (const d of dates) {
+      let sum = 0, any = false;
+      for (const k of keys) {
+        const arr = bySym[k];
+        while (cur[k] + 1 < arr.length && arr[cur[k] + 1].date <= d) cur[k] += 1;
+        if (arr[cur[k]].date <= d) { sum += arr[cur[k]].value; any = true; }
+      }
+      if (any) out.push({ date: d, value: sum });
+    }
+    if (out.length) return out;
   }
+
+  // 3) Account-level snapshots — Hon's per-sync fallback.
+  const byDate = {};
+  snaps.forEach((s) => {
+    const v = conv(s.value, s.currency);
+    if (v == null) return;
+    byDate[s.date] = (byDate[s.date] || 0) + v;
+  });
   return Object.keys(byDate).sort()
     .map((d) => ({ date: d, value: byDate[d] }));
 }
@@ -3190,20 +4077,200 @@ function sliceRange(series, range) {
   return series.filter((p) => p.date >= iso);
 }
 
-// A bar chart of brokerage value over time, one bar per recorded snapshot.
-function valueChart(series, cur) {
-  const max = series.reduce((m, p) => Math.max(m, p.value), 0) || 1;
-  const min = series.reduce((m, p) => Math.min(m, p.value), max);
-  const span = max - min || max || 1;
-  const bars = series.map((p) => {
-    const h = 12 + Math.round(((p.value - min) / span) * 88);
-    return '<div class="vc-bar" title="' + esc(fmtDate(p.date)) + " · "
-      + esc(money(p.value, cur)) + '"><div class="vc-fill" style="height:'
-      + h + '%"></div></div>';
-  }).join("");
-  return '<div class="vc-chart">' + bars + "</div>"
-    + '<div class="vc-axis"><span>' + fmtDate(series[0].date) + "</span><span>"
-    + fmtDate(series[series.length - 1].date) + "</span></div>";
+// SVG line + area chart with hover crosshair and tooltip. The line draws
+// itself on mount; the area fades in behind. Points are sampled into pixel
+// coordinates server-side so the hover handler can find the nearest one in
+// O(1) without parsing the SVG.
+let lcUid = 0;
+function lineChart(series, cur, opts) {
+  opts = opts || {};
+  const height = opts.height || 220;
+  const tone = opts.tone || "good";
+  const showAxis = opts.showAxis !== false;
+  const W = 1000, H = 240; // viewBox units; preserveAspectRatio="none" stretches
+  const max = series.reduce((m, p) => Math.max(m, p.value), -Infinity);
+  const min = series.reduce((m, p) => Math.min(m, p.value), +Infinity);
+  const flat = max === min;
+  const range = flat ? 1 : max - min;
+  const pad = 14;
+  const xAt = (i) => series.length > 1 ? (i / (series.length - 1)) * W : W / 2;
+  // Flat series (every point identical) centers; otherwise scale linearly
+  // between min/max with a little top/bottom padding.
+  const yAt = (v) => flat ? H / 2 : H - pad - ((v - min) / range) * (H - pad * 2);
+
+  // Catmull-Rom-to-cubic-bezier smoothing turns the jagged daily line into a
+  // soft curve — the same kind of chart Robinhood / Wealthfront use. The math
+  // is straightforward: each cubic uses the two surrounding control points to
+  // pick its handles, with `tension` controlling how taut the curve feels.
+  function smoothPath() {
+    if (series.length < 2) {
+      const x = xAt(0), y = yAt(series[0].value);
+      return "M" + x + " " + y;
+    }
+    const pts = series.map((p, i) => ({ x: xAt(i), y: yAt(p.value) }));
+    const tension = 0.18;
+    let d = "M" + pts[0].x.toFixed(2) + " " + pts[0].y.toFixed(2);
+    for (let i = 0; i < pts.length - 1; i += 1) {
+      const p0 = pts[i - 1] || pts[i];
+      const p1 = pts[i];
+      const p2 = pts[i + 1];
+      const p3 = pts[i + 2] || p2;
+      const c1x = p1.x + (p2.x - p0.x) * tension;
+      const c1y = p1.y + (p2.y - p0.y) * tension;
+      const c2x = p2.x - (p3.x - p1.x) * tension;
+      const c2y = p2.y - (p3.y - p1.y) * tension;
+      d += " C" + c1x.toFixed(2) + " " + c1y.toFixed(2)
+        + " " + c2x.toFixed(2) + " " + c2y.toFixed(2)
+        + " " + p2.x.toFixed(2) + " " + p2.y.toFixed(2);
+    }
+    return d;
+  }
+  const line = smoothPath();
+  const area = line + " L" + W + " " + H + " L0 " + H + " Z";
+
+  const uid = "lc" + (++lcUid);
+  const color = tone === "bad" ? "var(--chart-down)" : "var(--chart-up)";
+  const glow = tone === "bad" ? "var(--chart-down-glow)" : "var(--chart-up-glow)";
+
+  // Embed per-point positions for the hover handler, plus a parallel JSON
+  // array carrying value/date/extras (price, units, change-since-start, …).
+  // Two channels keeps the hot-path split/parse cheap while still allowing
+  // rich content in the tooltip.
+  const firstValue = series.length ? series[0].value : 0;
+  const pts = series.map((p, i) => {
+    const xp = series.length > 1 ? (i / (series.length - 1)) * 100 : 50;
+    const yp = (yAt(p.value) / H) * 100;
+    return xp.toFixed(3) + "," + yp.toFixed(3);
+  }).join(";");
+  const meta = JSON.stringify(series.map((p) => {
+    const extras = (p.extras || []).slice();
+    // Auto "Change from start" extra — meaningful for every chart with at
+    // least two points; gives the hover an at-a-glance period context.
+    if (series.length > 1 && firstValue) {
+      const change = p.value - firstValue;
+      const pct = (change / Math.abs(firstValue)) * 100;
+      const sign = change >= 0 ? "+" : "−";
+      extras.push(["Since start",
+        sign + money(Math.abs(change), cur) + " · "
+        + (change >= 0 ? "+" : "") + pct.toFixed(2) + "%",
+        change >= 0 ? "good" : "bad"]);
+    }
+    return { v: p.value, d: p.date, e: extras };
+  }));
+
+  // Faint horizontal grid lines for value reference. Four bands feels right
+  // without crowding the chart.
+  let grid = "";
+  for (let i = 1; i < 5; i += 1) {
+    const y = (H / 5) * i;
+    grid += '<line x1="0" x2="' + W + '" y1="' + y + '" y2="' + y
+      + '" stroke="var(--chart-grid)" stroke-width="1" '
+      + 'vector-effect="non-scaling-stroke"/>';
+  }
+
+  const axis = showAxis
+    ? '<div class="lc-axis"><span>' + fmtDate(series[0].date) + "</span><span>"
+      + fmtDate(series[series.length - 1].date) + "</span></div>"
+    : "";
+
+  // Soft drop-shadow under the stroke so the line lifts off the card. A
+  // <filter> in the SVG defs handles it; matches the chart's tone colour.
+  const filter = '<filter id="' + uid + 'f" x="-10%" y="-30%" width="120%" height="160%">'
+    + '<feGaussianBlur stdDeviation="3.5" />'
+    + '<feComponentTransfer><feFuncA type="linear" slope="0.7"/></feComponentTransfer>'
+    + "</filter>";
+
+  return '<div class="lc-wrap" id="' + uid + '" data-cur="' + esc(cur)
+    + '" data-pts="' + esc(pts) + '" data-meta="' + esc(meta)
+    + '" style="height:' + height
+    + 'px" onmousemove="chartHover(this,event)" onmouseleave="chartLeave(this)" '
+    + 'ontouchmove="chartHover(this,event)" ontouchend="chartLeave(this)">'
+    + '<svg class="lc-svg lc-' + tone + '" viewBox="0 0 ' + W + " " + H
+    + '" preserveAspectRatio="none">'
+    + "<defs>" + filter
+    + '<linearGradient id="' + uid + 'g" x1="0" y1="0" x2="0" y2="1">'
+    + '<stop offset="0%" stop-color="' + color + '" stop-opacity="0.55"/>'
+    + '<stop offset="55%" stop-color="' + color + '" stop-opacity="0.18"/>'
+    + '<stop offset="100%" stop-color="' + color + '" stop-opacity="0"/>'
+    + "</linearGradient></defs>"
+    + "<g>" + grid + "</g>"
+    + '<path class="lc-glow" d="' + line + '" fill="none" stroke="' + glow
+    + '" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" '
+    + 'filter="url(#' + uid + 'f)" vector-effect="non-scaling-stroke"/>'
+    + '<path class="lc-area" d="' + area + '" fill="url(#' + uid + 'g)"/>'
+    + '<path class="lc-line" d="' + line + '" fill="none" stroke="' + color
+    + '" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" '
+    + 'pathLength="1000" vector-effect="non-scaling-stroke"/>'
+    + "</svg>"
+    + '<div class="lc-cross"></div>'
+    + '<div class="lc-dot lc-' + tone + '"><span class="lc-dot-pulse"></span></div>'
+    + '<div class="lc-tip lc-' + tone + '">'
+    + '<div class="lc-tip-val"></div>'
+    + '<div class="lc-tip-date"></div>'
+    + '<div class="lc-tip-extras"></div>'
+    + "</div>"
+    + "</div>" + axis;
+}
+
+// Moves the crosshair, dot and tooltip to the nearest data point under the
+// cursor. Called from inline mousemove/touchmove for zero extra binding work.
+// Positions live in `data-pts` (cheap split/parse); rich tooltip content
+// (value, date, extras) is parsed once from `data-meta` and cached.
+function chartHover(wrap, evt) {
+  if (!wrap.dataset.pts) return;
+  // Cache the parsed point array per wrapper to keep mousemove cheap.
+  let cache = wrap._lc;
+  if (!cache) {
+    cache = wrap._lc = {
+      pts: wrap.dataset.pts.split(";").map((s) => {
+        const p = s.split(",");
+        return { xp: +p[0], yp: +p[1] };
+      }),
+      meta: JSON.parse(wrap.dataset.meta || "[]"),
+    };
+  }
+  const cur = wrap.dataset.cur || "";
+  const rect = wrap.getBoundingClientRect();
+  const clientX = evt.touches && evt.touches[0]
+    ? evt.touches[0].clientX : evt.clientX;
+  const xPct = ((clientX - rect.left) / rect.width) * 100;
+  let bestI = -1, bestD = Infinity;
+  for (let i = 0; i < cache.pts.length; i += 1) {
+    const d = Math.abs(cache.pts[i].xp - xPct);
+    if (d < bestD) { bestD = d; bestI = i; }
+  }
+  if (bestI < 0) return;
+  const pt = cache.pts[bestI];
+  const m = cache.meta[bestI] || {};
+  const cross = wrap.querySelector(".lc-cross");
+  const dot = wrap.querySelector(".lc-dot");
+  const tip = wrap.querySelector(".lc-tip");
+  cross.style.left = pt.xp + "%"; cross.classList.add("on");
+  dot.style.left = pt.xp + "%"; dot.style.top = pt.yp + "%";
+  dot.classList.add("on");
+  tip.style.left = pt.xp + "%"; tip.classList.add("on");
+  tip.querySelector(".lc-tip-val").textContent = money(m.v, cur);
+  tip.querySelector(".lc-tip-date").textContent = fmtDate(m.d);
+  // Extras: each entry is [label, value, optionalTone].
+  const extrasEl = tip.querySelector(".lc-tip-extras");
+  if (m.e && m.e.length) {
+    extrasEl.innerHTML = m.e.map((row) => {
+      const tone = row[2] ? " " + row[2] : "";
+      return '<div class="lc-tip-row"><span class="lc-tip-k">'
+        + esc(row[0]) + '</span><span class="lc-tip-v' + tone + '">'
+        + esc(row[1]) + "</span></div>";
+    }).join("");
+    extrasEl.style.display = "";
+  } else {
+    extrasEl.innerHTML = "";
+    extrasEl.style.display = "none";
+  }
+  // Flip the tooltip to the right/left edge when it would overflow.
+  tip.classList.toggle("right", pt.xp > 80);
+  tip.classList.toggle("left", pt.xp < 20);
+}
+function chartLeave(wrap) {
+  wrap.querySelectorAll(".on").forEach((el) => el.classList.remove("on"));
 }
 
 // One billing cycle's spend breakdown — category split, transaction count and
@@ -3611,6 +4678,8 @@ function addConnectionModal() {
       + 'Pension &amp; savings<span class="pc-count">pension, gemel &amp; study fund</span></div>'
       + '<div class="pick-card" data-cat="asset"><span class="pc-emoji">💎</span>'
       + 'Other asset<span class="pc-count">cash, property…</span></div>'
+      + '<div class="pick-card" data-cat="loan"><span class="pc-emoji">📉</span>'
+      + 'Loan<span class="pc-count">mortgage, car loan, prime / CPI-linked</span></div>'
       + '<div class="pick-card" data-cat="splitwise"><span class="pc-emoji">🤝</span>'
       + 'Splitwise<span class="pc-count">split &amp; track expenses</span></div>';
       modal.innerHTML = "<h2>Add an asset</h2>"
@@ -4123,11 +5192,105 @@ function addConnectionModal() {
       if (!category) return renderCategoryStep();
       if (category === "car") return renderCarStep();
       if (category === "asset") return renderAssetStep();
+      if (category === "loan") return renderLoanStep();
       if (category === "brokerage") return renderBrokerageStep();
       if (category === "splitwise") return renderSplitwiseStep();
       if (category === "pension" && !selected) return renderPensionStep();
       if (!selected) return renderInstitutionStep();
       return renderCredentialStep();
+    };
+
+    // The loan form: name, principal, start date, term (years + months),
+    // track radio (fixed / prime / CPI-fixed / CPI-prime) and rate value.
+    // The "rate" label changes with the track so prime tracks ask for a
+    // margin over prime, not an absolute rate.
+    const renderLoanStep = () => {
+      const todayIso = new Date().toISOString().slice(0, 10);
+      modal.innerHTML = "<h2>Add a loan</h2>"
+        + '<button class="back-btn" data-x="back">‹ All categories</button>'
+        + '<p class="hint">Enter the original terms. Hon recomputes the current '
+        + "outstanding from a Spitzer schedule, the Bank of Israel prime rate "
+        + "and the CBS consumer price index — so the figure stays current "
+        + "without a manual update.</p>"
+        + '<div class="field"><label>Name</label>'
+        + '<input id="ln-name" type="text" placeholder="Mortgage track A"></div>'
+        + '<div class="field-row">'
+        + '<div class="field"><label>Amount taken</label>'
+        + '<input id="ln-principal" type="number" inputmode="decimal" min="0" step="100"></div>'
+        + '<div class="field"><label>Start date</label>'
+        + '<input id="ln-start" type="date" value="' + todayIso + '" max="' + todayIso + '"></div>'
+        + "</div>"
+        + '<div class="field-row">'
+        + '<div class="field"><label>Term — years</label>'
+        + '<input id="ln-yrs" type="number" inputmode="numeric" min="0" step="1" value="20"></div>'
+        + '<div class="field"><label>Term — months</label>'
+        + '<input id="ln-mos" type="number" inputmode="numeric" min="0" max="11" step="1" value="0"></div>'
+        + "</div>"
+        + '<div class="field"><label>Track</label>'
+        + '<div class="loan-tracks">'
+        + '<label class="loan-track" data-track="fixed"><input type="radio" name="ln-track" value="fixed" checked>'
+        + '<span class="lt-title">Fixed</span><span class="lt-sub">A set rate, not linked to anything.</span></label>'
+        + '<label class="loan-track" data-track="prime"><input type="radio" name="ln-track" value="prime">'
+        + '<span class="lt-title">Prime + margin</span><span class="lt-sub">Tracks the Bank of Israel prime rate.</span></label>'
+        + '<label class="loan-track" data-track="cpi-fixed"><input type="radio" name="ln-track" value="cpi-fixed">'
+        + '<span class="lt-title">CPI-linked · Fixed (צמודה קבועה)</span><span class="lt-sub">Set rate, principal tracks the CPI.</span></label>'
+        + '<label class="loan-track" data-track="cpi-prime"><input type="radio" name="ln-track" value="cpi-prime">'
+        + '<span class="lt-title">CPI-linked · Prime (צמודה משתנה)</span><span class="lt-sub">Prime + margin, principal tracks the CPI.</span></label>'
+        + "</div></div>"
+        + '<div class="field"><label id="ln-rate-label">Annual rate %</label>'
+        + '<input id="ln-rate" type="number" inputmode="decimal" step="0.01" placeholder="4.50"></div>'
+        + '<p class="hint" id="ln-rate-hint">For example, 4.5 = 4.5% per year.</p>'
+        + '<div class="modal-err" id="ln-err" hidden></div>'
+        + '<div class="modal-actions"><button data-x="cancel">Cancel</button>'
+        + '<button class="primary" id="ln-save">Add loan</button></div>';
+
+      const $ = (id) => modal.querySelector("#" + id);
+      const refreshRateLabel = () => {
+        const track = modal.querySelector('input[name="ln-track"]:checked').value;
+        const isPrime = track === "prime" || track === "cpi-prime";
+        $("ln-rate-label").textContent = isPrime ? "Margin over prime — annual %" : "Annual rate %";
+        $("ln-rate-hint").textContent = isPrime
+          ? "Prime is fetched live from the Bank of Israel. Enter the margin your bank quoted (e.g. 0.5 for prime + 0.5%, or -0.25 for prime − 0.25%)."
+          : "For example, 4.5 = 4.5% per year. CPI-linked tracks have their principal scaled by the index since the loan started.";
+      };
+      modal.querySelectorAll('input[name="ln-track"]').forEach((r) =>
+        r.addEventListener("change", refreshRateLabel));
+      refreshRateLabel();
+
+      $("ln-save").addEventListener("click", async () => {
+        const err = $("ln-err");
+        const name = $("ln-name").value.trim();
+        const principal = Number($("ln-principal").value);
+        const startDate = $("ln-start").value;
+        const yrs = Math.max(0, Math.round(Number($("ln-yrs").value) || 0));
+        const mos = Math.max(0, Math.round(Number($("ln-mos").value) || 0));
+        const termMonths = yrs * 12 + mos;
+        const rateType = modal.querySelector('input[name="ln-track"]:checked').value;
+        const rateValue = Number($("ln-rate").value);
+        const showErr = (msg) => { err.textContent = msg; err.hidden = false; };
+        err.hidden = true;
+        if (!name) return showErr("Name the loan.");
+        if (!Number.isFinite(principal) || principal <= 0) return showErr("Amount must be a positive number.");
+        if (!startDate) return showErr("Pick a start date.");
+        if (termMonths <= 0) return showErr("Term must be at least one month.");
+        if (!Number.isFinite(rateValue)) return showErr("Enter a rate (or margin) number.");
+
+        try {
+          await api("/loans", "POST", {
+            name, principal, startDate, termMonths, rateType, rateValue,
+          });
+          toast("Loan added.");
+          closeOverlay();
+          await loadAll();
+          render();
+        } catch (e) {
+          showErr(e && e.message ? e.message : "Could not save the loan.");
+        }
+      });
+
+      modal.querySelector('[data-x="back"]')
+        .addEventListener("click", () => { category = ""; render2(); });
+      bindCancel();
     };
     const submit = async (company) => {
       const creds = {};
@@ -4399,59 +5562,288 @@ function setSwitch(id, on) {
     + (on ? " checked" : "") + '><span class="switch-track"></span></span>';
 }
 
+// The card-provider picker shows the major Israeli card brands as toggleable
+// chips. Each brand expands to the substrings Hon actually looks for in bank
+// descriptions (Hebrew + English variants). Anything the user types that
+// doesn't belong to a brand becomes a removable "custom matcher" chip.
+const CARD_PROVIDERS_CATALOG = [
+  { id: "max", name: "Max", terms: ["max", "מקס"] },
+  { id: "isracard", name: "Isracard", terms: ["isracard", "ישראכרט"] },
+  { id: "cal", name: "Cal / Visa Cal", terms: ["cal", "כאל", "ויזה כאל"] },
+  { id: "amex", name: "American Express",
+    terms: ["american express", "אמריקן אקספרס"] },
+  { id: "leumi", name: "Leumi Card", terms: ["leumi card", "לאומי קארד"] },
+  { id: "diners", name: "Diners", terms: ["diners", "דיינרס"] },
+];
+const KNOWN_PROVIDER_TERMS = new Set(
+  CARD_PROVIDERS_CATALOG.flatMap((p) => p.terms.map((t) => t.toLowerCase())),
+);
+
+function providerPickerHtml() {
+  const terms = settings.cardProviders || [];
+  const lower = new Set(terms.map((t) => t.toLowerCase()));
+  const chips = CARD_PROVIDERS_CATALOG.map((p) => {
+    const on = p.terms.every((t) => lower.has(t.toLowerCase()));
+    return '<button type="button" class="chip' + (on ? " on" : "")
+      + '" data-provider="' + p.id + '">'
+      + '<span class="chip-dot"></span>' + esc(p.name) + "</button>";
+  }).join("");
+  const customs = terms.filter((t) => !KNOWN_PROVIDER_TERMS.has(t.toLowerCase()));
+  const customChips = customs.map((t) =>
+    '<span class="custom-chip"><span>' + esc(t) + "</span>"
+    + '<button type="button" data-remove-term="' + esc(t)
+    + '" aria-label="Remove">×</button></span>').join("");
+  return '<div id="set-providers-picker">'
+    + '<div class="chip-row">' + chips + "</div>"
+    + '<div class="custom-row">'
+    + '<span class="custom-row-label">Custom matchers</span>'
+    + '<input type="text" id="set-providers-add" autocomplete="off" '
+    + 'placeholder="Type a substring your bank uses, then press Enter">'
+    + '<div class="custom-chips">' + customChips + "</div>"
+    + "</div></div>";
+}
+
+// The settings card grid — shared between the full-page Settings tab and the
+// (now-unused) modal so behaviour matches if both are ever shown.
+function settingsCardsHtml() {
+  const days = [[1, "Calendar month — 1st"], [2, "2nd"], [5, "5th"],
+    [10, "10th"], [15, "15th"], [20, "20th"], [25, "25th"]];
+  const cur = days.find(([d]) => d === settings.monthStartDay) || days[0];
+  const tick = '<svg class="dd-opt-tick" viewBox="0 0 12 12" fill="none" '
+    + 'stroke="currentColor" stroke-width="2.5" stroke-linecap="round" '
+    + 'stroke-linejoin="round"><polyline points="2 6.5 5 9.5 10 3"/></svg>';
+  const chev = '<svg class="dd-chev" viewBox="0 0 12 8" fill="none" '
+    + 'stroke="currentColor" stroke-width="2" stroke-linecap="round" '
+    + 'stroke-linejoin="round"><path d="M1 1l5 5 5-5"/></svg>';
+  const startDay = '<div class="dd" id="set-startday" data-value="' + cur[0] + '">'
+    + '<button type="button" class="dd-trigger" aria-haspopup="listbox" '
+    + 'aria-expanded="false"><span class="dd-label">' + esc(cur[1]) + "</span>"
+    + chev + "</button>"
+    + '<div class="dd-menu" role="listbox">'
+    + days.map(([d, l]) => '<button type="button" role="option" class="dd-opt'
+        + (settings.monthStartDay === d ? " on" : "") + '" data-value="' + d
+        + '">' + tick + "<span>" + esc(l) + "</span></button>").join("")
+    + "</div></div>";
+  const scopes = [1, 2, 3, 6];
+  const incomeSeg = '<div class="seg" id="set-incomescope">'
+    + scopes.map((n) => '<button type="button" data-scope="' + n + '"'
+        + (settings.incomeAvgMonths === n ? ' class="on"' : "") + ">" + n
+        + "</button>").join("") + "</div>";
+  return setCard(0, "🧠", "AI engine", '<div id="set-model"></div>'
+      + '<p class="sub-hint" style="margin-top:9px">Smart categorization '
+      + "and insights need an AI model. Run one on this machine, or connect "
+      + "an Ollama server if this computer can't.</p>")
+    + setCard(40, "📅", "Billing cycle",
+        setRow("Month starts on",
+          "Group activity and budgets by your billing cycle instead of the "
+          + "calendar month.", startDay, true))
+    + setCard(80, "📊", "Spending projection",
+        setRow("Project recurring bills & income",
+          "Reserve monthly and bimonthly fixed bills every cycle, and treat "
+          + "income as a multi-month average, so the budget shows what to "
+          + "expect — not only what has posted.",
+          setSwitch("set-project", settings.projectRecurring))
+        + setRow("Income average window",
+          "How many recent months to average for expected income.",
+          incomeSeg, true))
+    + setCard(120, "💳", "Credit-card bills",
+        setRow("Hide card-bill totals",
+          "When a bank line is just the lump-sum card bill (already itemised "
+          + "under the card), keep it out of spending totals so it is not "
+          + "double-counted.",
+          setSwitch("set-hidecards", settings.hideCardTotals))
+        + setRow("Card-provider names",
+          "A bank line whose description contains any of these is treated as "
+          + "a card-bill total.",
+          providerPickerHtml(), true))
+    + setCard(160, "🤝", "Splitwise", '<div id="set-splitwise"></div>');
+}
+
+// Reads every control inside `root` into the `settings` object, persists, and
+// re-renders. Centralised so both auto-save (the full-page view) and the
+// modal's Save button stay in lockstep.
+async function commitSettings(root) {
+  settings.monthStartDay = Number(root.querySelector("#set-startday").dataset.value) || 1;
+  settings.projectRecurring = root.querySelector("#set-project").checked;
+  const segOn = root.querySelector("#set-incomescope button.on");
+  settings.incomeAvgMonths = segOn ? Number(segOn.dataset.scope) : 3;
+  settings.hideCardTotals = root.querySelector("#set-hidecards").checked;
+  // settings.cardProviders is maintained in place by the chip picker — chip
+  // toggles and custom-matcher edits mutate the array directly, so there is
+  // nothing to read out of the DOM here.
+  saveSettings();
+  state.activityMonth = null;   // re-pick against the new cycle
+  try { state.budget = await api(budgetUrl()); } catch (e) {}
+}
+
+// The full-page Settings view, opened from the sidebar tab. Wider and more
+// spacious than the old modal: cards arrange in a 2-column grid on wide
+// screens, headings are bigger, and changes save automatically — no Save
+// button to chase.
+function settingsView() {
+  return '<div class="settings-view"><div class="sec-head">'
+    + '<div class="label">Settings</div>'
+    + '<span class="set-saved" id="set-saved">Saved</span></div>'
+    + '<p class="set-intro">Pick your AI engine and tune how Hon reads your '
+    + "money. Changes save as you make them.</p>"
+    + '<div class="set-grid">' + settingsCardsHtml() + "</div></div>";
+}
+
+// Wires up controls inside the Settings view: segmented toggle, model section,
+// Splitwise section, and an auto-save listener on every change. The "Saved"
+// chip pulses each time a change lands so it's obvious work persisted.
+function bindSettings(root) {
+  llmPanelMode = null;
+  fillModelSection();
+  fillSplitwiseSection();
+
+  const seg = root.querySelector("#set-incomescope");
+  if (seg) {
+    seg.addEventListener("click", (e) => {
+      const b = e.target.closest("button");
+      if (!b) return;
+      seg.querySelectorAll("button").forEach((x) => x.classList.remove("on"));
+      b.classList.add("on");
+      autoSave();
+    });
+  }
+
+  const saveChip = root.querySelector("#set-saved");
+  let saveTimer = null;
+  async function autoSave() {
+    await commitSettings(root);
+    if (saveChip) {
+      saveChip.classList.add("on");
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => saveChip.classList.remove("on"), 1400);
+    }
+    // Re-render so the rest of the app reflects the new settings, but do
+    // it from the next tick so the input's own change handler can finish.
+    setTimeout(() => {
+      if (state.tab === "settings") {
+        // Avoid full re-render — it would tear down the controls mid-edit.
+        // Other tabs pick up the new settings on their next visit.
+      } else {
+        render();
+      }
+    }, 0);
+  }
+
+  // Auto-save on every control change (the switches and the dropdown).
+  root.querySelectorAll("#set-project, #set-hidecards")
+    .forEach((el) => el.addEventListener("change", autoSave));
+
+  // Custom dropdown for the billing-cycle day — opens its own styled popover,
+  // closes on outside click or Escape, and writes back via dataset.value.
+  const dd = root.querySelector("#set-startday");
+  if (dd) {
+    const trigger = dd.querySelector(".dd-trigger");
+    const menu = dd.querySelector(".dd-menu");
+    const close = () => {
+      dd.classList.remove("open");
+      trigger.setAttribute("aria-expanded", "false");
+    };
+    trigger.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const opening = !dd.classList.contains("open");
+      if (opening) {
+        // Open upward when there isn't enough room below — keeps the list
+        // from clipping past the bottom of the viewport on shorter windows.
+        const rect = dd.getBoundingClientRect();
+        const spaceBelow = window.innerHeight - rect.bottom;
+        const spaceAbove = rect.top;
+        const opts = menu.querySelectorAll(".dd-opt").length;
+        const estimated = Math.min(opts * 42 + 14, 320);
+        dd.classList.toggle("up",
+          spaceBelow < estimated + 12 && spaceAbove > spaceBelow);
+      }
+      dd.classList.toggle("open", opening);
+      trigger.setAttribute("aria-expanded", String(opening));
+    });
+    menu.addEventListener("click", (e) => {
+      const opt = e.target.closest(".dd-opt");
+      if (!opt) return;
+      const v = opt.dataset.value;
+      dd.dataset.value = v;
+      dd.querySelector(".dd-label").textContent = opt.querySelector("span").textContent;
+      dd.querySelectorAll(".dd-opt").forEach((o) => o.classList.toggle("on", o === opt));
+      close();
+      autoSave();
+    });
+    document.addEventListener("click", (e) => {
+      if (!dd.contains(e.target)) close();
+    });
+    dd.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") { close(); trigger.focus(); }
+    });
+  }
+
+  // Card-provider chip picker — toggle a brand, type a custom matcher, or
+  // remove one. Each interaction mutates settings.cardProviders in place,
+  // re-renders the picker so the chip states stay in sync, then auto-saves.
+  function refreshPicker() {
+    const host = root.querySelector("#set-providers-picker");
+    if (host) host.outerHTML = providerPickerHtml();
+  }
+  function termsEqual(a, b) {
+    return a.toLowerCase() === b.toLowerCase();
+  }
+  root.addEventListener("click", (e) => {
+    const chip = e.target.closest(".chip[data-provider]");
+    if (chip && root.contains(chip)) {
+      const id = chip.dataset.provider;
+      const provider = CARD_PROVIDERS_CATALOG.find((p) => p.id === id);
+      if (!provider) return;
+      const cur = settings.cardProviders || [];
+      const lower = new Set(cur.map((t) => t.toLowerCase()));
+      const on = provider.terms.every((t) => lower.has(t.toLowerCase()));
+      settings.cardProviders = on
+        ? cur.filter((t) => !provider.terms.some((p) => termsEqual(p, t)))
+        : cur.concat(provider.terms.filter((t) => !lower.has(t.toLowerCase())));
+      refreshPicker();
+      autoSave();
+      return;
+    }
+    const rm = e.target.closest("[data-remove-term]");
+    if (rm && root.contains(rm)) {
+      const term = rm.dataset.removeTerm;
+      settings.cardProviders = (settings.cardProviders || [])
+        .filter((t) => !termsEqual(t, term));
+      refreshPicker();
+      autoSave();
+    }
+  });
+  root.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    const input = e.target.closest("#set-providers-add");
+    if (!input) return;
+    e.preventDefault();
+    const v = input.value.trim();
+    if (!v) return;
+    const cur = settings.cardProviders || [];
+    const exists = cur.some((t) => termsEqual(t, v));
+    if (!exists) settings.cardProviders = cur.concat([v]);
+    input.value = "";
+    refreshPicker();
+    autoSave();
+    // Refocus the (newly-rendered) input so the user can keep adding.
+    const next = root.querySelector("#set-providers-add");
+    if (next) next.focus();
+  });
+}
+
+// Legacy entry point — kept so any stray callers still work. The modal now
+// hosts the same card grid as the full-page view, with explicit Save/Cancel.
 function settingsModal() {
   openModal((modal) => {
-    const days = [[1, "Calendar month — 1st"], [2, "2nd"], [5, "5th"],
-      [10, "10th"], [15, "15th"], [20, "20th"], [25, "25th"]];
-    const startDay = '<select id="set-startday">'
-      + days.map(([d, l]) => '<option value="' + d + '"'
-          + (settings.monthStartDay === d ? " selected" : "") + ">" + esc(l)
-          + "</option>").join("") + "</select>";
-    const scopes = [1, 2, 3, 6];
-    const incomeSeg = '<div class="seg" id="set-incomescope">'
-      + scopes.map((n) => '<button type="button" data-scope="' + n + '"'
-          + (settings.incomeAvgMonths === n ? ' class="on"' : "") + ">" + n
-          + "</button>").join("") + "</div>";
-
     modal.innerHTML = "<h2>Settings</h2>"
       + '<p class="hint">Choose your AI engine and tune how Hon reads '
-      + "your money.</p>"
-      + setCard(0, "🧠", "AI engine", '<div id="set-model"></div>'
-          + '<p class="sub-hint" style="margin-top:9px">Smart categorization '
-          + "and insights need an AI model. Run one on this machine, or connect "
-          + "an Ollama server if this computer can't.</p>")
-      + setCard(40, "📅", "Billing cycle",
-          setRow("Month starts on",
-            "Group activity and budgets by your billing cycle instead of the "
-            + "calendar month.", startDay, true))
-      + setCard(80, "📊", "Spending projection",
-          setRow("Project recurring bills & income",
-            "Reserve monthly and bimonthly fixed bills every cycle, and treat "
-            + "income as a multi-month average, so the budget shows what to "
-            + "expect — not only what has posted.",
-            setSwitch("set-project", settings.projectRecurring))
-          + setRow("Income average window",
-            "How many recent months to average for expected income.",
-            incomeSeg, true))
-      + setCard(120, "💳", "Credit-card bills",
-          setRow("Hide card-bill totals",
-            "When a bank line is just the lump-sum card bill (already itemised "
-            + "under the card), keep it out of spending totals so it is not "
-            + "double-counted.",
-            setSwitch("set-hidecards", settings.hideCardTotals))
-          + setRow("Card-provider names",
-            "A bank line whose description contains any of these is treated as "
-            + "a card-bill total.",
-            '<textarea id="set-providers" placeholder="One name per line">'
-            + esc((settings.cardProviders || []).join("\n")) + "</textarea>",
-            true))
-      + setCard(160, "🤝", "Splitwise", '<div id="set-splitwise"></div>')
+      + "your money.</p>" + settingsCardsHtml()
       + '<div class="modal-actions"><button data-x="cancel">Cancel</button>'
       + '<button class="primary" data-x="save">Save settings</button></div>';
-    llmPanelMode = null; // re-sync the engine panel to the saved mode
+    llmPanelMode = null;
     fillModelSection();
     fillSplitwiseSection();
-
     const seg = modal.querySelector("#set-incomescope");
     seg.addEventListener("click", (e) => {
       const b = e.target.closest("button");
@@ -4459,22 +5851,11 @@ function settingsModal() {
       seg.querySelectorAll("button").forEach((x) => x.classList.remove("on"));
       b.classList.add("on");
     });
-
     modal.querySelector('[data-x="cancel"]').addEventListener("click", closeOverlay);
     modal.querySelector('[data-x="save"]').addEventListener("click", async () => {
-      settings.monthStartDay = Number(modal.querySelector("#set-startday").value) || 1;
-      settings.projectRecurring = modal.querySelector("#set-project").checked;
-      const segOn = seg.querySelector("button.on");
-      settings.incomeAvgMonths = segOn ? Number(segOn.dataset.scope) : 3;
-      settings.hideCardTotals = modal.querySelector("#set-hidecards").checked;
-      settings.cardProviders = modal.querySelector("#set-providers").value
-        .split("\n").map((s) => s.trim()).filter(Boolean);
-      saveSettings();
-      state.activityMonth = null;   // re-pick against the new cycle
+      await commitSettings(modal);
       closeOverlay();
       toast("Settings saved.");
-      // The budget window follows the cycle start day — refetch it.
-      try { state.budget = await api(budgetUrl()); } catch (e) {}
       render();
     });
   });
@@ -4569,6 +5950,75 @@ async function removeAsset(id) {
     await loadAll();
     toast("Asset removed.");
   } catch (e) { toast(e.message, true); }
+}
+
+async function removeLoan(id) {
+  if (!confirm("Remove this loan?")) return;
+  try {
+    await api("/loans/" + id, "DELETE");
+    await loadAll();
+    render();
+    toast("Loan removed.");
+  } catch (e) { toast(e.message, true); }
+}
+
+// Edit-loan modal — same form as the add step, prefilled with the saved
+// loan. Track changes are not allowed (they would invalidate the CPI start
+// snapshot); the user can remove and re-add to switch tracks.
+function editLoanModal(loan) {
+  openModal((modal) => {
+    const yrs = Math.floor(loan.termMonths / 12);
+    const mos = loan.termMonths - yrs * 12;
+    modal.innerHTML = "<h2>Edit loan</h2>"
+      + '<div class="field"><label>Name</label>'
+      + '<input id="ln-name" type="text" value="' + esc(loan.name) + '"></div>'
+      + '<div class="field-row">'
+      + '<div class="field"><label>Amount taken</label>'
+      + '<input id="ln-principal" type="number" inputmode="decimal" min="0" step="100" value="' + loan.principal + '"></div>'
+      + '<div class="field"><label>Start date</label>'
+      + '<input id="ln-start" type="date" value="' + esc(loan.startDate) + '"></div>'
+      + "</div>"
+      + '<div class="field-row">'
+      + '<div class="field"><label>Term — years</label>'
+      + '<input id="ln-yrs" type="number" min="0" step="1" value="' + yrs + '"></div>'
+      + '<div class="field"><label>Term — months</label>'
+      + '<input id="ln-mos" type="number" min="0" max="11" step="1" value="' + mos + '"></div>'
+      + "</div>"
+      + '<div class="field"><label>'
+      + (loan.isPrime ? "Margin over prime — annual %" : "Annual rate %") + "</label>"
+      + '<input id="ln-rate" type="number" step="0.01" value="' + loan.rateValue + '"></div>'
+      + '<p class="hint">Track is <b>' + esc((LOAN_TRACK[loan.rateType] || LOAN_TRACK.fixed).label)
+      + "</b>. To change track, remove and re-add the loan so the index snapshot is re-taken.</p>"
+      + '<div class="modal-err" id="ln-err" hidden></div>'
+      + '<div class="modal-actions"><button data-x="cancel">Cancel</button>'
+      + '<button class="primary" id="ln-save">Save</button></div>';
+
+    modal.querySelector('[data-x="cancel"]').addEventListener("click", closeOverlay);
+    modal.querySelector("#ln-save").addEventListener("click", async () => {
+      const err = modal.querySelector("#ln-err");
+      const name = modal.querySelector("#ln-name").value.trim();
+      const principal = Number(modal.querySelector("#ln-principal").value);
+      const startDate = modal.querySelector("#ln-start").value;
+      const yrsV = Math.max(0, Math.round(Number(modal.querySelector("#ln-yrs").value) || 0));
+      const mosV = Math.max(0, Math.round(Number(modal.querySelector("#ln-mos").value) || 0));
+      const termMonths = yrsV * 12 + mosV;
+      const rateValue = Number(modal.querySelector("#ln-rate").value);
+      const showErr = (m) => { err.textContent = m; err.hidden = false; };
+      err.hidden = true;
+      if (!name) return showErr("Name the loan.");
+      if (!Number.isFinite(principal) || principal <= 0) return showErr("Amount must be a positive number.");
+      if (!startDate) return showErr("Pick a start date.");
+      if (termMonths <= 0) return showErr("Term must be at least one month.");
+      if (!Number.isFinite(rateValue)) return showErr("Enter a rate.");
+      try {
+        await api("/loans/" + loan.id, "PUT", { name, principal, startDate, termMonths, rateValue });
+        closeOverlay();
+        await loadAll();
+        render();
+        toast("Loan updated.");
+      } catch (e) { showErr(e && e.message ? e.message : "Could not save the loan."); }
+    });
+  });
 }
 
 // Marks a subscription cancelled — it moves out of Active into Cancelled, and
@@ -5094,6 +6544,12 @@ function handleAction(action, btn) {
       break;
     }
     case "remove-asset": if (id) removeAsset(id); break;
+    case "edit-loan": {
+      const l = id && (state.loans || []).find((x) => x.id === id);
+      if (l) editLoanModal(l);
+      break;
+    }
+    case "remove-loan": if (id) removeLoan(id); break;
     case "new-piggy": piggyModal(null); break;
     case "edit-piggy": {
       const b = id && (((state.budget || {}).piggy || {}).banks || [])
@@ -5143,6 +6599,20 @@ function handleAction(action, btn) {
     case "brk-base":
       if (btn && btn.dataset.arg) { state.brkBase = btn.dataset.arg; render(); }
       break;
+    case "brk-account":
+      if (btn && btn.dataset.arg) {
+        state.brkAccount = btn.dataset.arg;
+        state.brkOpenHolding = null;
+        render();
+      }
+      break;
+    case "brk-hold":
+      if (btn && btn.dataset.arg) {
+        state.brkOpenHolding = state.brkOpenHolding === btn.dataset.arg
+          ? null : btn.dataset.arg;
+        render();
+      }
+      break;
     case "view-month-activity":
       if (btn && btn.dataset.arg) {
         state.tab = "activity";
@@ -5166,6 +6636,8 @@ async function toggleNetWorth(kind, id, counted) {
   try {
     if (kind === "asset") {
       await api("/assets/" + id, "PUT", { excluded: excluded });
+    } else if (kind === "loan") {
+      await api("/loans/" + id + "/excluded", "PATCH", { excluded: excluded });
     } else {
       await api("/accounts/" + id + "/excluded", "PATCH", { excluded: excluded });
     }
@@ -5297,7 +6769,6 @@ document.getElementById("theme-toggle").addEventListener("click", () => {
     ? "dark" : "light";
   applyTheme(next);
 });
-document.getElementById("settings-btn").addEventListener("click", settingsModal);
 
 // Re-pack the Activity columns when the window width changes.
 let _resizeTimer;
@@ -5311,37 +6782,150 @@ window.addEventListener("resize", () => {
 
 // --- Vault gate & boot -----------------------------------------------------
 
+// Time-of-day greeting — "Good morning", "Good afternoon", "Good evening".
+function timeGreeting() {
+  const h = new Date().getHours();
+  if (h >= 5 && h < 12) return "Good morning";
+  if (h >= 12 && h < 18) return "Good afternoon";
+  return "Good evening";
+}
+
+// "shahar solomons" -> "Shahar Solomons". toUpperCase/toLowerCase on Hebrew
+// letters are no-ops, so Hebrew names pass through unchanged.
+function titleCase(s) {
+  return (s || "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(" ");
+}
+
+// Full-screen welcome / unlock screen with personalized greeting and animated
+// reveal. First run asks the user's name and creates the vault; later runs
+// greet by name (when stored) and just ask for the passphrase.
 function showGate(creating) {
   document.getElementById("app").hidden = true;
-  openModal((modal) => {
-    modal.innerHTML = "<h2>" + (creating ? "Set a vault passphrase" : "Unlock Hon") + "</h2>"
-      + '<p class="hint">' + (creating
-        ? "Your bank credentials are encrypted with this passphrase. There is no recovery — keep it safe."
-        : "Enter the passphrase that protects your stored credentials.")
-      + "</p>"
-      + '<div class="field"><input id="vault-pass" type="password" '
-      + 'placeholder="Passphrase" autocomplete="current-password"></div>'
-      + '<div class="modal-err" id="vault-err" hidden></div>'
-      + '<div class="modal-actions"><button class="primary" data-x="go">'
-      + (creating ? "Create vault" : "Unlock") + "</button></div>";
-    const input = modal.querySelector("#vault-pass");
-    input.focus();
-    const go = async () => {
-      const passphrase = input.value;
-      const err = modal.querySelector("#vault-err");
-      if (!passphrase) { err.textContent = "Enter a passphrase."; err.hidden = false; return; }
-      try {
-        await api("/vault/unlock", "POST", { passphrase });
-        sessionStorage.setItem("honVaultPass", passphrase);
-        closeOverlay();
-        document.getElementById("app").hidden = false;
-        await loadAll();
-      } catch (e) {
-        err.textContent = e.message; err.hidden = false;
-      }
-    };
-    modal.querySelector('[data-x="go"]').addEventListener("click", go);
-    input.addEventListener("keydown", (e) => { if (e.key === "Enter") go(); });
+  const overlays = document.getElementById("overlays");
+  overlays.innerHTML = "";
+  const name = localStorage.getItem("honUserName") || "";
+  const askName = !name;
+
+  // Greeting is rendered as two stacked lines: a small muted lead-in over a
+  // big gold "name" line. Falls back to clean copy when no name is stored.
+  let greetLead, greetName, subText, footText, btnText, passLabel;
+  if (creating) {
+    greetLead = "Welcome to";
+    greetName = "Hon";
+    subText = "Let's set up your private finance dashboard. Your bank "
+      + "credentials are encrypted with a passphrase only you know.";
+    footText = "Pick something memorable — there is no recovery if you lose it.";
+    btnText = "Create vault & continue";
+    passLabel = "Choose a passphrase";
+  } else if (name) {
+    greetLead = timeGreeting() + ",";
+    greetName = titleCase(name);
+    subText = "Welcome back. Unlock your vault to continue.";
+    footText = "";
+    btnText = "Unlock";
+    passLabel = "Passphrase";
+  } else {
+    greetLead = "Welcome";
+    greetName = "back";
+    subText = "Unlock your vault to continue.";
+    footText = "";
+    btnText = "Unlock";
+    passLabel = "Passphrase";
+  }
+  const helloHtml = '<div class="gate-greeting">'
+    + '<span class="gate-greet">' + esc(greetLead) + "</span>"
+    + '<h1 class="gate-name" title="' + esc(greetName) + '">'
+    + esc(greetName) + "</h1></div>";
+
+  const nameField = askName
+    ? '<div class="gate-field"><label for="gate-name">Your name</label>'
+      + '<input type="text" class="gate-input" id="gate-name" '
+      + 'autocomplete="given-name" placeholder="e.g. Shahar"></div>'
+    : "";
+
+  const gate = document.createElement("div");
+  gate.className = "gate";
+  gate.innerHTML =
+    '<div class="gate-content">'
+    + '<div class="gate-brand" aria-hidden="true">'
+    + '<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">'
+    + '<defs><linearGradient id="gb-g" x1="0" y1="0" x2="0" y2="1">'
+    + '<stop offset="0%" stop-color="#1f1810"/>'
+    + '<stop offset="100%" stop-color="#2d2010"/></linearGradient></defs>'
+    + '<g fill="url(#gb-g)">'
+    + '<rect x="4" y="7" width="24" height="4.6" rx="2.3"/>'
+    + '<rect x="4" y="7" width="4.6" height="21" rx="2.3"/>'
+    + '<rect x="23.4" y="14" width="4.6" height="14" rx="2.3"/></g>'
+    + '<path d="M5.5 7.8 L26.5 7.8" stroke="rgba(255,255,255,0.22)" '
+    + 'stroke-width="0.9" stroke-linecap="round" fill="none"/>'
+    + "</svg></div>"
+    + helloHtml
+    + '<p class="gate-sub">' + esc(subText) + "</p>"
+    + '<div class="gate-panel">'
+    + nameField
+    + '<div class="gate-field"><label for="gate-pass">' + esc(passLabel) + "</label>"
+    + '<input type="password" class="gate-input" id="gate-pass" '
+    + 'autocomplete="' + (creating ? "new-password" : "current-password") + '" '
+    + 'placeholder="Your secret passphrase"></div>'
+    + '<button type="button" class="gate-btn" id="gate-go">' + esc(btnText) + "</button>"
+    + '<div class="gate-err" id="gate-err"></div>'
+    + "</div>"
+    + (footText ? '<p class="gate-foot">' + esc(footText) + "</p>" : "")
+    + "</div>";
+  overlays.appendChild(gate);
+
+  const nameInput = gate.querySelector("#gate-name");
+  const passInput = gate.querySelector("#gate-pass");
+  const btn = gate.querySelector("#gate-go");
+  const err = gate.querySelector("#gate-err");
+
+  // Focus the first empty field a hair after the entrance animation settles.
+  setTimeout(() => {
+    if (nameInput && !nameInput.value) nameInput.focus();
+    else passInput.focus();
+  }, 480);
+
+  const showError = (msg) => {
+    err.textContent = msg;
+    err.classList.add("on");
+    passInput.focus();
+    passInput.select();
+  };
+
+  const go = async () => {
+    const passphrase = passInput.value;
+    if (!passphrase) return showError("Enter a passphrase.");
+    btn.disabled = true;
+    err.classList.remove("on");
+    try {
+      await api("/vault/unlock", "POST", { passphrase });
+      sessionStorage.setItem("honVaultPass", passphrase);
+      const typedName = nameInput ? nameInput.value.trim() : "";
+      if (typedName) localStorage.setItem("honUserName", typedName);
+      // Fade the gate out while the app shell appears behind it.
+      gate.classList.add("leaving");
+      document.getElementById("app").hidden = false;
+      setTimeout(() => { overlays.innerHTML = ""; }, 360);
+      await loadAll();
+    } catch (e) {
+      btn.disabled = false;
+      showError(e.message || "Unlock failed.");
+    }
+  };
+
+  btn.addEventListener("click", go);
+  [nameInput, passInput].forEach((el) => {
+    if (!el) return;
+    el.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      if (el === nameInput) passInput.focus();
+      else go();
+    });
   });
 }
 
