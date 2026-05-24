@@ -1,0 +1,92 @@
+# Build Hon's desktop installers for macOS, Windows and Linux and attach
+# them to the GitHub Release matching the pushed tag.
+#
+# Trigger: push a tag like `v0.3.0`. The workflow:
+#   1. spins up a runner per OS,
+#   2. installs the sidecar's deps + rebuilds its native modules
+#      against Electron's Node ABI,
+#   3. runs `electron-builder` to produce a .dmg / .exe / .AppImage,
+#   4. uploads each artifact to the Release.
+#
+# The workflow is unsigned by design — see electron/README.md for how to
+# add code signing later.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  # Allow re-running manually from the Actions tab on the same tag.
+  workflow_dispatch:
+
+permissions:
+  contents: write  # needed to attach assets to the Release
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            artifact-glob: electron/dist/*.dmg
+          - os: windows-latest
+            artifact-glob: electron/dist/*.exe
+          - os: ubuntu-latest
+            artifact-glob: electron/dist/*.AppImage
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            sidecar/package-lock.json
+
+      # Linux: AppImage tooling needs FUSE + libraries the Ubuntu runner
+      # doesn't ship by default. Without this the AppImage build silently
+      # produces an unpackable artifact.
+      - name: Install Linux AppImage prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libarchive-tools rpm
+
+      - name: Install sidecar dependencies
+        working-directory: sidecar
+        run: npm ci
+
+      - name: Install Electron app dependencies
+        # The Electron app's postinstall rebuilds the sidecar's native modules
+        # (better-sqlite3, node-llama-cpp) against Electron's Node ABI.
+        working-directory: electron
+        run: npm install
+
+      - name: Build installer
+        working-directory: electron
+        run: npm run dist
+        env:
+          # macOS code signing + notarization. The secrets are only set on
+          # the macOS runner — on Windows/Linux they're empty strings and
+          # electron-builder treats the build as unsigned for that OS.
+          # Setup: see electron/README.md and the repo's release notes.
+          CSC_LINK:                    ${{ secrets.MAC_CERT_BASE64 }}
+          CSC_KEY_PASSWORD:            ${{ secrets.MAC_CERT_PASSWORD }}
+          APPLE_ID:                    ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID:               ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.artifact-glob }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,22 @@
+{
+  "name": "hon-desktop",
+  "version": "0.3.0",
+  "description": "Hon desktop shell — hosts the local sidecar in a window.",
+  "private": true,
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron .",
+    "rebuild-sidecar": "electron-rebuild --module-dir ../sidecar",
+    "postinstall": "npm run rebuild-sidecar",
+    "dist": "electron-builder --config builder.yml",
+    "dist:mac": "electron-builder --mac --config builder.yml",
+    "dist:win": "electron-builder --win --config builder.yml",
+    "dist:linux": "electron-builder --linux --config builder.yml"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^3.6.0",
+    "electron": "^34.0.0",
+    "electron-builder": "^25.1.0"
+  }
+}
