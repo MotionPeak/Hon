@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-export const SCHEMA_VERSION = 20;
+export const SCHEMA_VERSION = 23;
 
 export interface DbHandle {
   db: Database.Database;
@@ -374,6 +374,71 @@ const MIGRATIONS: { version: number; sql: string }[] = [
       CREATE UNIQUE INDEX idx_loans_connection_external
         ON loans(connection_id, external_id)
         WHERE connection_id IS NOT NULL AND external_id IS NOT NULL;
+    `,
+  },
+  {
+    // Piggy banks can now be one-shot "lump-sum" reservations alongside the
+    // existing monthly set-asides: a fixed amount earmarked for a single
+    // future expense (taxes, a deposit), funded the first month it fits and
+    // then held in reserve — no recurring draw — until the user marks it
+    // used. `monthly_amount` is ignored for lump piggies.
+    version: 21,
+    sql: `
+      ALTER TABLE piggy_banks ADD COLUMN kind TEXT NOT NULL DEFAULT 'monthly';
+    `,
+  },
+  {
+    // User-editable spending categories. Replaces the hardcoded list in
+    // categorize.ts / budget.ts / app.html — the canonical category set
+    // now lives here so a user can add (Hobbies, Pets…) or re-classify an
+    // existing one ("Subscriptions" → essential instead of fixed). Built-in
+    // categories carry the original emoji/colour/group and are editable but
+    // not deletable; deleting a custom category reassigns its transactions
+    // to 'Other'. cat_group is one of essential/fixed/variable — the budget
+    // and frontend group breakdowns read from it directly.
+    version: 22,
+    sql: `
+      CREATE TABLE categories (
+        name        TEXT PRIMARY KEY,
+        emoji       TEXT NOT NULL DEFAULT '🏷️',
+        color       TEXT NOT NULL DEFAULT '#8C8FA8',
+        cat_group   TEXT NOT NULL DEFAULT 'variable',
+        sort_order  INTEGER NOT NULL DEFAULT 100,
+        is_builtin  INTEGER NOT NULL DEFAULT 0,
+        created_at  TEXT NOT NULL
+      );
+      INSERT INTO categories (name, emoji, color, cat_group, sort_order, is_builtin, created_at) VALUES
+        ('Groceries',     '🛒',  '#5CC773', 'essential', 10, 1, datetime('now')),
+        ('Dining',        '🍽️', '#F59942', 'essential', 20, 1, datetime('now')),
+        ('Transport',     '🚌',  '#5C9EF5', 'essential', 30, 1, datetime('now')),
+        ('Fuel',          '⛽',  '#EB736B', 'essential', 40, 1, datetime('now')),
+        ('Health',        '⚕️', '#ED6680', 'essential', 50, 1, datetime('now')),
+        ('Housing',       '🏠',  '#66B8BD', 'fixed',     60, 1, datetime('now')),
+        ('Utilities',     '💡',  '#F2C752', 'fixed',     70, 1, datetime('now')),
+        ('Insurance',     '🛡️', '#6E8FD6', 'fixed',     80, 1, datetime('now')),
+        ('Subscriptions', '🔁',  '#7D8CED', 'fixed',     90, 1, datetime('now')),
+        ('Education',     '📚',  '#73B39E', 'fixed',    100, 1, datetime('now')),
+        ('Fees',          '﹪',  '#B38C80', 'fixed',    110, 1, datetime('now')),
+        ('Shopping',      '🛍️', '#D975D6', 'variable', 120, 1, datetime('now')),
+        ('Entertainment', '🎭',  '#A880ED', 'variable', 130, 1, datetime('now')),
+        ('Travel',        '✈️', '#5CC7DB', 'variable', 140, 1, datetime('now')),
+        ('Income',        '💰',  '#4CD180', 'variable', 150, 1, datetime('now')),
+        ('Transfers',     '↔️', '#999EB8', 'variable', 160, 1, datetime('now')),
+        ('Other',         '▫️', '#8C8FA8', 'variable', 999, 1, datetime('now'));
+    `,
+  },
+  {
+    // A one-off, per-cycle "savings reserve" the user can dial in for the
+    // current month. The Variable Spending card deducts it (capped at the
+    // available pool) so the leftover reflects the saving plan. Not a piggy
+    // bank — no target, no recurring commitment, just "set aside X this
+    // month". The single global "expected_income_override" lives in `meta`.
+    version: 23,
+    sql: `
+      CREATE TABLE monthly_savings (
+        month  TEXT PRIMARY KEY,
+        amount REAL NOT NULL
+      );
     `,
   },
 ];

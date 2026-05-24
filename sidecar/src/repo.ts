@@ -1093,6 +1093,46 @@ export class Repo {
       .run(merchantKey);
   }
 
+  // --- Budget tweaks --------------------------------------------------------
+  // Manual expected-income override (single value in `meta`) and a per-month
+  // savings set-aside. Both feed into the Variable Spending calculation.
+
+  /** The user's manual "Expected income" override, or null when unset. */
+  getExpectedIncomeOverride(): number | null {
+    const raw = this.getMeta('expected_income_override');
+    if (raw == null) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  setExpectedIncomeOverride(value: number | null): void {
+    if (value == null || !Number.isFinite(value)) {
+      this.deleteMeta('expected_income_override');
+      return;
+    }
+    this.setMeta('expected_income_override', String(value));
+  }
+
+  /** Every per-month savings entry — small dict, returned in full to the UI. */
+  listMonthlySavings(): { month: string; amount: number }[] {
+    return this.db
+      .prepare('SELECT month, amount FROM monthly_savings')
+      .all() as { month: string; amount: number }[];
+  }
+
+  setMonthlySavings(month: string, amount: number): void {
+    if (amount <= 0) {
+      this.db.prepare('DELETE FROM monthly_savings WHERE month = ?').run(month);
+      return;
+    }
+    this.db
+      .prepare(
+        `INSERT INTO monthly_savings (month, amount) VALUES (?, ?)
+         ON CONFLICT (month) DO UPDATE SET amount = excluded.amount`,
+      )
+      .run(month, amount);
+  }
+
   /** ILS expense totals per category within [start, end) — ISO date strings. */
   monthlySpending(
     start: string,

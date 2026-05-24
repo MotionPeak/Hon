@@ -1045,6 +1045,89 @@ app.get('/rates', async (_req, reply) => {
   return { rates: { prime, cpiNow, asOf: new Date().toISOString() } };
 });
 
+// --- Categories ----------------------------------------------------------
+// User-editable spending categories. The seeded built-ins are returned with
+// `isBuiltin: true` so the UI can render delete-disabled for them.
+
+const VALID_GROUPS = new Set(['essential', 'fixed', 'variable']);
+function isValidGroup(v: unknown): v is 'essential' | 'fixed' | 'variable' {
+  return typeof v === 'string' && VALID_GROUPS.has(v);
+}
+
+app.get('/categories', async (_req, reply) => {
+  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+  return { categories: repo.listCategories() };
+});
+
+app.post('/categories', async (req, reply) => {
+  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+  const body = (req.body ?? {}) as {
+    name?: string; emoji?: string; color?: string;
+    catGroup?: string; sortOrder?: number;
+  };
+  const name = (body.name ?? '').trim();
+  if (!name) return reply.code(400).send({ error: 'a name is required' });
+  if (name.length > 40) return reply.code(400).send({ error: 'name is too long' });
+  if (repo.getCategory(name)) {
+    return reply.code(409).send({ error: 'a category with that name already exists' });
+  }
+  const emoji = (body.emoji ?? '🏷️').trim() || '🏷️';
+  const color = (body.color ?? '#8C8FA8').trim();
+  if (!/^#[0-9A-Fa-f]{6}$/.test(color)) {
+    return reply.code(400).send({ error: 'color must be a #RRGGBB hex string' });
+  }
+  const catGroup = isValidGroup(body.catGroup) ? body.catGroup : 'variable';
+  const sortOrder = Number.isFinite(body.sortOrder) ? Math.round(Number(body.sortOrder)) : 500;
+  const created = repo.createCategory({ name, emoji, color, catGroup, sortOrder });
+  return { category: created };
+});
+
+app.put('/categories/:name', async (req, reply) => {
+  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+  const { name } = req.params as { name: string };
+  const existing = repo.getCategory(name);
+  if (!existing) return reply.code(404).send({ error: 'category not found' });
+  const body = (req.body ?? {}) as {
+    emoji?: string; color?: string;
+    catGroup?: string; sortOrder?: number;
+  };
+  const fields: Parameters<typeof repo.updateCategory>[1] = {};
+  if (body.emoji !== undefined) {
+    const emoji = body.emoji.trim();
+    if (!emoji) return reply.code(400).send({ error: 'emoji cannot be empty' });
+    fields.emoji = emoji;
+  }
+  if (body.color !== undefined) {
+    if (!/^#[0-9A-Fa-f]{6}$/.test(body.color)) {
+      return reply.code(400).send({ error: 'color must be a #RRGGBB hex string' });
+    }
+    fields.color = body.color;
+  }
+  if (body.catGroup !== undefined) {
+    if (!isValidGroup(body.catGroup)) {
+      return reply.code(400).send({ error: 'catGroup must be essential, fixed or variable' });
+    }
+    fields.catGroup = body.catGroup;
+  }
+  if (body.sortOrder !== undefined && Number.isFinite(body.sortOrder)) {
+    fields.sortOrder = Math.round(Number(body.sortOrder));
+  }
+  repo.updateCategory(name, fields);
+  return { category: repo.getCategory(name) };
+});
+
+app.delete('/categories/:name', async (req, reply) => {
+  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+  const { name } = req.params as { name: string };
+  const existing = repo.getCategory(name);
+  if (!existing) return reply.code(404).send({ error: 'category not found' });
+  if (existing.isBuiltin) {
+    return reply.code(400).send({ error: 'built-in categories cannot be deleted' });
+  }
+  repo.deleteCategory(name);
+  return { ok: true };
+});
+
 // Resolves an Israeli licence plate to the car's make/model/year via the
 // government open-data portal. Registration specs only — no Israeli API
 // returns a market valuation, so the app estimates value itself.
@@ -1193,6 +1276,53 @@ app.put('/budgets', async (req, reply) => {
   return { ok: true };
 });
 
+// Manual override for the auto-averaged "Expected income". `value: null`
+// clears the override and restores the average.
+app.get('/budget/income-override', async (_req, reply) => {
+  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+  return { value: repo.getExpectedIncomeOverride() };
+});
+
+app.put('/budget/income-override', async (req, reply) => {
+  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+  const body = (req.body ?? {}) as { value?: number | null };
+  const raw = body.value;
+  if (raw == null) {
+    repo.setExpectedIncomeOverride(null);
+    return { ok: true };
+  }
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) {
+    return reply.code(400).send({ error: 'value must be a non-negative number or null' });
+  }
+  repo.setExpectedIncomeOverride(n);
+  return { ok: true };
+});
+
+// Per-month savings set-aside. The UI loads the whole dict (small) and PUTs
+// one month at a time. Amount 0 (or absent) clears that month's entry.
+app.get('/budget/savings', async (_req, reply) => {
+  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+  const savings: Record<string, number> = {};
+  for (const row of repo.listMonthlySavings()) savings[row.month] = row.amount;
+  return { savings };
+});
+
+app.put('/budget/savings', async (req, reply) => {
+  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+  const body = (req.body ?? {}) as { month?: string; amount?: number };
+  const month = (body.month ?? '').trim();
+  if (!/^\d{4}-\d{2}$/.test(month)) {
+    return reply.code(400).send({ error: 'month must be YYYY-MM' });
+  }
+  const n = Number(body.amount);
+  if (!Number.isFinite(n) || n < 0) {
+    return reply.code(400).send({ error: 'amount must be a non-negative number' });
+  }
+  repo.setMonthlySavings(month, n);
+  return { ok: true };
+});
+
 // Piggy banks — savings goals. The settled this-month status rides along in
 // the budget report's `piggy` block; these routes are CRUD only.
 app.post('/piggy', async (req, reply) => {
@@ -1200,23 +1330,31 @@ app.post('/piggy', async (req, reply) => {
   const body = (req.body ?? {}) as {
     name?: string;
     emoji?: string;
+    kind?: string;
     targetAmount?: number;
     monthlyAmount?: number;
   };
   const name = (body.name ?? '').trim();
   if (!name) return reply.code(400).send({ error: 'a name is required' });
+  const kind = body.kind === 'lump' ? 'lump' : 'monthly';
   const targetAmount = Number(body.targetAmount);
   if (!Number.isFinite(targetAmount) || targetAmount <= 0) {
     return reply.code(400).send({ error: 'a positive target amount is required' });
   }
-  const monthlyAmount = Number(body.monthlyAmount);
-  if (!Number.isFinite(monthlyAmount) || monthlyAmount <= 0) {
-    return reply.code(400).send({ error: 'a positive monthly amount is required' });
+  // Monthly piggies need a positive monthly figure; lump piggies fund the
+  // full target in one shot, so the field is irrelevant.
+  let monthlyAmount = 0;
+  if (kind === 'monthly') {
+    monthlyAmount = Number(body.monthlyAmount);
+    if (!Number.isFinite(monthlyAmount) || monthlyAmount <= 0) {
+      return reply.code(400).send({ error: 'a positive monthly amount is required' });
+    }
   }
   const emoji = (body.emoji ?? '').trim() || '🐷';
   const piggy = repo.createPiggyBank({
     name,
     emoji,
+    kind,
     targetAmount,
     monthlyAmount,
     currency: 'ILS',
@@ -1231,6 +1369,7 @@ app.put('/piggy/:id', async (req, reply) => {
   const body = (req.body ?? {}) as {
     name?: string;
     emoji?: string;
+    kind?: string;
     targetAmount?: number;
     monthlyAmount?: number;
     onHold?: boolean;
@@ -1238,10 +1377,14 @@ app.put('/piggy/:id', async (req, reply) => {
   const fields: Partial<{
     name: string;
     emoji: string;
+    kind: 'monthly' | 'lump';
     targetAmount: number;
     monthlyAmount: number;
     onHold: boolean;
   }> = {};
+  if (body.kind !== undefined) {
+    fields.kind = body.kind === 'lump' ? 'lump' : 'monthly';
+  }
   if (body.name !== undefined) {
     const name = body.name.trim();
     if (!name) return reply.code(400).send({ error: 'a name is required' });

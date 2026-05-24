@@ -1170,6 +1170,80 @@
   .set-grid .set-row.col { gap: 12px; }
   .set-grid .set-row-name { font-size: 14.5px; }
   .set-grid .set-row-sub { font-size: 12.5px; margin-top: 5px; }
+  /* Categories settings panel — sections of tiles grouped by umbrella, plus
+     the dashed-border "+ Add category" tile at the bottom. Each tile is a
+     clickable card; the user-created tiles also show a small ✕ in the corner
+     on hover for removal. */
+  .set-hint { color: var(--muted); font-size: 12.5px; margin: 0 0 16px;
+    line-height: 1.55; }
+  .cat-section + .cat-section { margin-top: 18px; }
+  .cat-section-head { display: flex; align-items: baseline; gap: 10px;
+    margin: 0 4px 10px; font-size: 11px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+  .cat-section-name { color: var(--text); }
+  .cat-section-count { font-size: 10px; padding: 1px 7px; border-radius: 999px;
+    background: var(--card-hi); color: var(--muted); letter-spacing: 0; }
+  .cat-grid { display: grid; gap: 10px;
+    grid-template-columns: repeat(auto-fill, minmax(125px, 1fr)); }
+  .cat-tile { position: relative; display: flex; flex-direction: column;
+    align-items: center; gap: 8px; padding: 14px 8px 12px; border-radius: 14px;
+    background: var(--card-hi); border: 1px solid transparent;
+    border-top: 3px solid var(--cat-color, var(--hairline-2));
+    cursor: pointer; transition: border-color .14s, transform .14s,
+    background-color .14s; user-select: none; }
+  .cat-tile:hover { border-color: var(--indigo); transform: translateY(-1px);
+    background: var(--card); }
+  .cat-tile-icon { width: 38px; height: 38px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    background: color-mix(in srgb, var(--cat-color) 18%, transparent);
+    font-size: 20px; line-height: 1; }
+  .cat-tile-name { font-size: 12.5px; font-weight: 600; color: var(--text);
+    text-align: center; max-width: 100%;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cat-tile-del { position: absolute; top: 5px; right: 5px;
+    width: 22px; height: 22px; border-radius: 50%; border: none;
+    background: rgba(0,0,0,0.25); color: #fff; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; line-height: 1; padding: 0; opacity: 0;
+    transition: opacity .14s, background-color .14s; }
+  .cat-tile:hover .cat-tile-del { opacity: 1; }
+  .cat-tile-del:hover { background: var(--red); }
+  .cat-add { display: flex; align-items: center; justify-content: center;
+    gap: 8px; width: 100%; margin-top: 18px; padding: 14px;
+    border: 1.5px dashed var(--hairline-2); border-radius: 14px;
+    background: transparent; color: var(--muted); cursor: pointer;
+    font-size: 13px; font-weight: 600;
+    transition: border-color .14s, color .14s, background-color .14s; }
+  .cat-add:hover { border-color: var(--indigo); color: var(--text);
+    background: var(--indigo-soft); }
+  .cat-add-icon { font-size: 18px; font-weight: 300; line-height: 1; }
+  /* Category add/edit modal — emoji grid, colour swatch grid, group cards. */
+  .ce-emoji-grid { display: grid; grid-template-columns: repeat(11, 1fr);
+    gap: 4px; margin-top: 4px; }
+  .ce-emoji { background: var(--card-hi); border: 1px solid transparent;
+    border-radius: 7px; padding: 6px 0; font-size: 17px; cursor: pointer;
+    line-height: 1; transition: border-color .12s, transform .12s; }
+  .ce-emoji:hover { border-color: var(--hairline-2); transform: translateY(-1px); }
+  .ce-emoji.on { border-color: var(--indigo); background: var(--indigo-soft); }
+  .ce-color-grid { display: grid; grid-template-columns: repeat(11, 1fr);
+    gap: 6px; margin-top: 4px; }
+  .ce-color { width: 100%; aspect-ratio: 1; border-radius: 50%;
+    border: 2px solid transparent; cursor: pointer; padding: 0;
+    transition: transform .12s, border-color .12s; }
+  .ce-color:hover { transform: scale(1.08); }
+  .ce-color.on { border-color: var(--text); transform: scale(1.1); }
+  .ce-groups { display: grid; gap: 8px; margin-top: 4px; }
+  .ce-group { display: grid; grid-template-columns: 22px 1fr; align-items: start;
+    gap: 10px; padding: 11px 13px; border: 1px solid var(--hairline-2);
+    border-radius: 11px; cursor: pointer;
+    transition: border-color .14s, background-color .14s; }
+  .ce-group:hover { border-color: var(--indigo); }
+  .ce-group.on { border-color: var(--indigo); background: var(--indigo-soft); }
+  .ce-group input { margin: 2px 0 0; accent-color: var(--indigo);
+    grid-column: 1; grid-row: 1 / span 2; }
+  .ce-group-name { display: block; font-weight: 700; font-size: 13px; }
+  .ce-group-sub { display: block; color: var(--muted); font-size: 11px;
+    margin-top: 2px; }
   /* Auto-save chip in the section header — pulses on each save. */
   .set-saved { margin-left: auto; font-size: 11.5px; font-weight: 700;
     letter-spacing: .4px; text-transform: uppercase; color: var(--green);
@@ -1334,6 +1408,11 @@
   .pgy-card:hover { transform: translateY(-3px); box-shadow: var(--shadow);
     border-color: var(--hairline-2); }
   .pgy-card.done { border-color: var(--green); }
+  /* Lump-sum piggies that have been fully funded read as a green-accented
+     reservation, distinct from monthly goal-reached cards (which use a
+     party emoji and "Goal reached" copy). */
+  .pgy-card.reserved { border-color: var(--green); }
+  .pgy-card.reserved .pgy-emoji { background: rgba(61,220,132,0.16); }
   .pgy-card-top { display: flex; align-items: center; gap: 11px; }
   .pgy-emoji { width: 44px; height: 44px; flex: none; border-radius: 13px;
     display: flex; align-items: center; justify-content: center; font-size: 23px;
@@ -1341,7 +1420,21 @@
   .pgy-card.done .pgy-emoji { background: rgba(61,220,132,0.16); }
   .pgy-name { font-size: 14.5px; font-weight: 700; white-space: nowrap;
     overflow: hidden; text-overflow: ellipsis; }
-  .pgy-monthly { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+  .pgy-monthly { font-size: 11.5px; color: var(--muted); margin-top: 2px;
+    display: inline-flex; align-items: center; gap: 6px; }
+  /* "one-time" pill next to the amount on lump-sum cards. */
+  .pgy-tag { font-size: 9.5px; font-weight: 800; letter-spacing: .4px;
+    text-transform: uppercase; padding: 2px 7px; border-radius: 999px;
+    background: rgba(61,220,132,0.16); color: var(--green); }
+  /* Modal segmented kind picker — two side-by-side options with a label and
+     a sub-label per side. */
+  .pgy-kind { display: grid !important; grid-template-columns: 1fr 1fr;
+    gap: 6px; padding: 4px; width: 100%; margin-bottom: 4px; }
+  .pgy-kind button { flex: 1; padding: 10px 12px; border-radius: 8px;
+    display: flex; flex-direction: column; gap: 3px; align-items: flex-start;
+    text-align: left; }
+  .pgy-kind-t { font-size: 13px; font-weight: 700; }
+  .pgy-kind-s { font-size: 11px; opacity: .75; font-weight: 500; }
   .pgy-body { display: flex; align-items: center; gap: 15px; }
   .pgy-ring { width: 88px; height: 88px; flex: none; border-radius: 50%;
     display: flex; align-items: center; justify-content: center;
@@ -1440,29 +1533,19 @@ const SYMBOLS = { ILS: "₪", NIS: "₪", USD: "$", EUR: "€", GBP: "£" };
 const CATEGORIES = ["Groceries","Dining","Transport","Fuel","Shopping","Utilities",
   "Housing","Insurance","Health","Entertainment","Subscriptions","Travel","Education",
   "Income","Transfers","Fees","Other"];
-// [emoji, accent colour] per category.
-const CATEGORY_STYLE = {
-  Groceries: ["🛒", "#5CC773"], Dining: ["🍽️", "#F59942"],
-  Transport: ["🚌", "#5C9EF5"], Fuel: ["⛽", "#EB736B"],
-  Shopping: ["🛍️", "#D975D6"], Utilities: ["💡", "#F2C752"],
-  Housing: ["🏠", "#66B8BD"], Insurance: ["🛡️", "#6E8FD6"],
-  Health: ["⚕️", "#ED6680"],
-  Entertainment: ["🎭", "#A880ED"], Subscriptions: ["🔁", "#7D8CED"],
-  Travel: ["✈️", "#5CC7DB"], Education: ["📚", "#73B39E"],
-  Income: ["💰", "#4CD180"], Transfers: ["↔️", "#999EB8"],
-  Fees: ["﹪", "#B38C80"], Other: ["▫️", "#8C8FA8"],
-};
-function catStyle(cat) { return CATEGORY_STYLE[cat] || CATEGORY_STYLE.Other; }
-
-// Spending umbrellas: recurring "fixed" bills, day-to-day "essential" spend,
-// and everything discretionary or miscellaneous as "variable".
-const ESSENTIAL_CATS = ["Groceries", "Dining", "Transport", "Fuel", "Health"];
-const FIXED_CATS = ["Utilities", "Housing", "Insurance", "Subscriptions",
-  "Education", "Fees"];
+// Category style + group come from the user-editable list at state.categories
+// (loaded from /categories on startup). The DEFAULT_CATEGORY_STYLE matches
+// the seeded built-ins so the UI renders sensibly even before state has been
+// populated, and gives unknown categories a neutral fallback.
+const DEFAULT_CATEGORY_STYLE = ["🏷️", "#8C8FA8"];
+function catStyle(cat) {
+  const row = (state.categories || []).find((c) => c.name === cat);
+  if (row) return [row.emoji, row.color];
+  return DEFAULT_CATEGORY_STYLE;
+}
 function catGroup(cat) {
-  if (ESSENTIAL_CATS.indexOf(cat) >= 0) return "essential";
-  if (FIXED_CATS.indexOf(cat) >= 0) return "fixed";
-  return "variable"; // Shopping, Entertainment, Travel, Other, Transfers, Income…
+  const row = (state.categories || []).find((c) => c.name === cat);
+  return row ? row.catGroup : "variable";
 }
 const GROUP_ORDER = ["essential", "fixed", "variable"];
 const GROUP_LABEL = { essential: "Essentials", fixed: "Fixed expenses",
@@ -1511,9 +1594,12 @@ const PIGGY_PLANS = [3, 6, 12, 24];
 const state = {
   companies: [], connections: [], accounts: [], transactions: [], assets: [],
   loans: [], rates: { prime: null, cpiNow: null },
+  categories: [],         // user-editable spending categories, from /categories
   summary: null, budget: null, insights: null, llm: null,
   merchantFreq: {},      // { merchantKey: "monthly"|"bimonthly"|"yearly" }
   cancelledSubs: {},     // { merchantKey: cancelledAtIso } — user-marked cancellations
+  incomeOverride: null,  // null | number — manual override for Expected income
+  monthlySavings: {},    // { "YYYY-MM": amount } — per-cycle savings set-aside
   scrapes: {}, categorize: null, tab: "overview",
   move: null,            // { txnId, picked, always } while moving a transaction
   activityMonth: null,   // "YYYY-MM" currently shown in the Activity tab
@@ -1760,8 +1846,9 @@ function txnRefundAmount(t) {
 
 async function loadAll() {
   try {
-    const [companies, connections, accounts, transactions, assets, loansResp, summary,
-           insights, llm, merchantFreq, brokerage, cancelledSubs] =
+    const [companies, connections, accounts, transactions, assets, loansResp, categoriesResp,
+           summary, insights, llm, merchantFreq, brokerage, cancelledSubs,
+           incomeOverrideResp, savingsResp] =
       await Promise.all([
         api("/companies").then((r) => r.companies),
         api("/connections").then((r) => r.connections),
@@ -1769,17 +1856,23 @@ async function loadAll() {
         api("/transactions?limit=1000").then((r) => r.transactions),
         api("/assets").then((r) => r.assets),
         api("/loans").catch(() => ({ loans: [], rates: { prime: null, cpiNow: null } })),
+        api("/categories").catch(() => ({ categories: [] })),
         api("/summary").then((r) => r.summary),
         api("/insights"),
         api("/llm"),
         api("/merchant-frequencies").then((r) => r.frequencies),
         api("/brokerage"),
         api("/subscriptions/cancelled").then((r) => r.cancelled),
+        api("/budget/income-override").catch(() => ({ value: null })),
+        api("/budget/savings").catch(() => ({ savings: {} })),
       ]);
     Object.assign(state, {
       companies, connections, accounts, transactions, assets,
       loans: loansResp.loans || [], rates: loansResp.rates || { prime: null, cpiNow: null },
+      categories: categoriesResp.categories || [],
       summary, insights, llm, merchantFreq, brokerage, cancelledSubs,
+      incomeOverride: incomeOverrideResp.value ?? null,
+      monthlySavings: savingsResp.savings || {},
     });
     // The budget is fetched once transactions are in state — its URL carries
     // the recurring projection, which is derived from those transactions.
@@ -2947,8 +3040,13 @@ function budgetProjection() {
   // No recurring income known yet — fall back to this cycle's actual income
   // (internal transfers excluded), never the raw server figure which counts
   // transfers as income.
-  const expectedIncome = earned.length
+  const computedIncome = earned.length
     ? earned.reduce((s, c) => s + win[c], 0) / earned.length : cycleIncome;
+  // The user can manually override the auto-averaged income from the budget
+  // editor — e.g. a known fixed salary that the average underestimates while
+  // still ramping up. The computed value is still kept for the editor to show
+  // as a placeholder/comparison.
+  const expectedIncome = state.incomeOverride != null ? state.incomeOverride : computedIncome;
 
   // Expected fixed commitment: every recurring fixed-group merchant reduced to
   // a monthly-equivalent. "Recurring" = a frequency is set, or it has charged
@@ -2999,9 +3097,16 @@ function projectedVariable(v) {
   const fixed = v.fixedSpent || 0;
   const committed = fixed + essential;
   const piggy = v.piggyFunded || 0;
-  const disposable = income - committed - piggy;
+  // This-month savings reserve — capped at whatever room is left so it never
+  // forces the leftover negative on its own. The wish is kept around for the
+  // UI to show "(capped at …)" when the cap kicks in.
+  const savingsWish = state.monthlySavings[currentCycleKey()] || 0;
+  const roomBeforeSavings = Math.max(0, income - committed - piggy);
+  const savings = Math.min(savingsWish, roomBeforeSavings);
+  const disposable = income - committed - piggy - savings;
   return { spent: v.spent, income: income, fixedSpent: fixed,
     essentialSpent: essential, committed: committed, piggyFunded: piggy,
+    savings: savings, savingsWish: savingsWish,
     disposable: disposable, allowed: disposable - v.spent, projected: true };
 }
 
@@ -3011,14 +3116,30 @@ function projectedVariable(v) {
 function variableCardHtml(v, currency) {
   const pool = v.disposable > 0 ? v.disposable : 0;
   const pct = pool > 0 ? Math.max(0, Math.min(100, (v.allowed / pool) * 100)) : 0;
+  // Lump-sum piggies funded this month — listed by name in the overdraft
+  // warning so the cause of the negative variable is obvious.
+  const banks = (((state.budget || {}).piggy || {}).banks || []);
+  const lumpFunded = banks.filter((b) =>
+    b.kind === "lump" && b.thisMonth.status === "funded" && b.thisMonth.amount > 0);
+  const lumpThisMonth = lumpFunded.reduce((s, b) => s + (b.thisMonth.amount || 0), 0);
+  const lumpNames = lumpFunded.map((b) => '"' + b.name + '"').join(", ");
   let cls = "", fillColor = "var(--green)", cap;
   if (!v.income && !v.committed && !v.spent) {
     cap = "No income or spending recorded this month yet.";
     fillColor = "var(--hairline-2)";
   } else if (v.disposable <= 0) {
     cls = "none"; fillColor = "var(--red)";
-    cap = "You're spending more than you're bringing in — there's no room "
-      + "for variable spending this month.";
+    const deficit = Math.abs(v.disposable);
+    if (lumpFunded.length && lumpThisMonth >= deficit / 2) {
+      // The lump set-asides explain (most of) the gap — call them out.
+      cap = "Setting aside " + money(lumpThisMonth, currency) + " for "
+        + lumpNames + " puts you " + money(deficit, currency)
+        + " over what's coming in this month. The reservation still stands — "
+        + "you'll need to dip into savings or cut back to absorb the gap.";
+    } else {
+      cap = "You're spending more than you're bringing in — there's no room "
+        + "for variable spending this month.";
+    }
   } else if (v.allowed <= 0) {
     cls = "none"; fillColor = "var(--red)";
     cap = "This month's discretionary room is used up — anything more eats "
@@ -3026,7 +3147,10 @@ function variableCardHtml(v, currency) {
   } else {
     cls = pct <= 20 ? "low" : "ok";
     fillColor = pct <= 20 ? "var(--amber)" : "var(--green)";
-    cap = "Free to spend on shopping, entertainment, travel and the like.";
+    cap = lumpFunded.length
+      ? "Free to spend after reserving " + money(lumpThisMonth, currency)
+        + " for " + lumpNames + " this month."
+      : "Free to spend on shopping, entertainment, travel and the like.";
   }
   const row = (k, val, out) => '<div class="bgt-var-row"><span class="k">' + k
     + '</span><span class="v' + (out ? " out" : "") + '">' + val + "</span></div>";
@@ -3042,8 +3166,18 @@ function variableCardHtml(v, currency) {
     + row(v.projected ? "Expected income" : "Money in", money(v.income, currency))
     + row(v.projected ? "Expected fixed + essentials" : "Fixed + essential spend",
         "− " + money(v.committed, currency), true)
-    + (v.piggyFunded
-        ? row("Piggy banks", "− " + money(v.piggyFunded, currency), true) : "")
+    + (lumpThisMonth
+        ? row("Set asides (one-time)", "− " + money(lumpThisMonth, currency), true)
+        : "")
+    + (v.savings > 0
+        ? row("Savings (this month)"
+            + (v.savingsWish && v.savingsWish > v.savings ? " · capped" : ""),
+            "− " + money(v.savings, currency), true)
+        : "")
+    + (v.piggyFunded - lumpThisMonth > 0
+        ? row("Piggy banks",
+            "− " + money(v.piggyFunded - lumpThisMonth, currency), true)
+        : "")
     + row("Variable spent", "− " + money(v.spent, currency), true)
     + "</div>"
     + (v.projected ? '<div class="bgt-var-note">Projected — fixed bills '
@@ -3131,15 +3265,19 @@ function piggyView() {
 
 function piggyCard(b) {
   const cur = b.currency || "ILS";
+  const lump = b.kind === "lump";
+  const reserved = lump && b.thisMonth.status === "reserved";
   const pct = Math.round((b.progress || 0) * 100);
   const deg = Math.max(0, Math.min(360, (b.progress || 0) * 360));
   const ringColor = b.complete ? "var(--green)"
+    : reserved ? "var(--green)"
     : b.onHold ? "var(--hairline-2)"
     : b.thisMonth.status === "skipped" ? "var(--amber)" : "var(--accent)";
+  const ringLabel = lump ? (reserved ? "reserved" : "set aside") : "saved";
   const ring = '<div class="pgy-ring" style="background:conic-gradient('
     + ringColor + " " + deg.toFixed(1) + "deg, var(--card-hi) 0)\">"
     + '<div class="pgy-hole"><div class="pgy-pct">' + pct + "%</div>"
-    + '<div class="pgy-pct-lbl">saved</div></div></div>';
+    + '<div class="pgy-pct-lbl">' + ringLabel + "</div></div></div>";
 
   let badge;
   if (b.complete) {
@@ -3149,6 +3287,19 @@ function piggyCard(b) {
     badge = '<div class="pgy-badge onhold"><span>⏸</span><span>On hold — you\'ve '
       + "paused this piggy bank. Resume it any time to start saving again."
       + "</span></div>";
+  } else if (lump) {
+    // Lump-sum piggies always fund the first month — they're a "have-to"
+    // commitment, not a "if-it-fits" goal. After that, they sit reserved
+    // until the user marks them used.
+    if (reserved) {
+      badge = '<div class="pgy-badge done"><span>🔒</span><span>'
+        + money(b.targetAmount, cur)
+        + " set aside — held until you mark it used.</span></div>";
+    } else {
+      badge = '<div class="pgy-badge funded"><span>✓</span><span>'
+        + money(b.thisMonth.amount, cur)
+        + " reserved this month — counts as a fixed commitment in your budget.</span></div>";
+    }
   } else if (b.thisMonth.status === "funded") {
     badge = '<div class="pgy-badge funded"><span>✓</span><span>'
       + money(b.thisMonth.amount, cur) + " set aside this month.</span></div>";
@@ -3158,30 +3309,52 @@ function piggyCard(b) {
   }
 
   let eta = "";
-  if (!b.complete && b.monthsLeft != null) {
+  if (!lump && !b.complete && b.monthsLeft != null) {
     eta = '<div class="pgy-eta">'
       + (b.monthsLeft <= 1 ? "About a month to go"
           : "About " + b.monthsLeft + " months to go")
       + " · " + money(b.monthlyAmount, cur) + "/mo</div>";
   }
 
+  const subline = lump
+    ? '<div class="pgy-monthly">' + money(b.targetAmount, cur)
+      + ' set aside <span class="pgy-tag">one-time</span></div>'
+    : '<div class="pgy-monthly">' + money(b.monthlyAmount, cur)
+      + " a month</div>";
+
+  // Lump piggies swap "Hold" for "Mark as used" — semantically the user is
+  // saying the reserved money has been spent on its intended target.
+  const middleAction = b.complete ? ""
+    : lump
+      ? (reserved
+          ? '<button class="mini" data-action="mark-piggy-used" data-id="'
+            + esc(b.id) + '">Mark as used</button>'
+          : '<button class="mini" data-action="toggle-hold" data-id="'
+            + esc(b.id) + '">' + (b.onHold ? "Resume" : "Hold") + "</button>")
+      : '<button class="mini" data-action="toggle-hold" data-id="' + esc(b.id)
+        + '">' + (b.onHold ? "Resume" : "Hold") + "</button>";
+
   return '<div class="pgy-card' + (b.complete ? " done" : "")
+    + (reserved ? " reserved" : "")
     + (b.onHold && !b.complete ? " onhold" : "") + '">'
     + '<div class="pgy-card-top"><div class="pgy-emoji">' + esc(b.emoji)
     + '</div><div style="flex:1;min-width:0"><div class="pgy-name">'
-    + esc(b.name) + '</div><div class="pgy-monthly">'
-    + money(b.monthlyAmount, cur) + " a month</div></div></div>"
+    + esc(b.name) + "</div>" + subline + "</div></div>"
     + '<div class="pgy-body">' + ring
     + '<div class="pgy-figs"><div class="pgy-saved">' + money(b.saved, cur)
-    + '</div><div class="pgy-target">of ' + money(b.targetAmount, cur)
-    + " goal · " + money(b.remaining, cur) + " to go</div>" + eta + "</div></div>"
+    + '</div><div class="pgy-target">'
+    + (lump
+        ? (reserved
+            ? "fully reserved · click <b>Mark as used</b> when paid"
+            : "of " + money(b.targetAmount, cur) + " to reserve")
+        : "of " + money(b.targetAmount, cur) + " goal · "
+          + money(b.remaining, cur) + " to go")
+    + "</div>" + eta + "</div></div>"
     + badge
     + '<div class="pgy-actions">'
     + '<button class="mini" data-action="edit-piggy" data-id="' + esc(b.id)
     + '">Edit</button>'
-    + (b.complete ? ""
-        : '<button class="mini" data-action="toggle-hold" data-id="' + esc(b.id)
-          + '">' + (b.onHold ? "Resume" : "Hold") + "</button>")
+    + middleAction
     + '<span class="spacer"></span>'
     + '<button class="mini danger" data-action="remove-piggy" data-id="'
     + esc(b.id) + '">Delete</button></div></div>';
@@ -3196,31 +3369,51 @@ function piggyModal(bank) {
     const sym = SYMBOLS.ILS;
     let emoji = bank ? bank.emoji : "🐷";
     let planSel = "custom"; // a PIGGY_PLANS month count, or "custom"
+    let kind = bank && bank.kind === "lump" ? "lump" : "monthly";
 
     const emojiRow = PIGGY_EMOJI.map((e) =>
       '<button type="button" class="pgy-em' + (e === emoji ? " on" : "")
       + '" data-emoji="' + esc(e) + '">' + e + "</button>").join("");
 
+    // Kind picker — "Monthly" vs "Set aside once". A lump piggy reserves the
+    // full target in one shot, no monthly draw; held until the user marks it
+    // used. Perfect for things like a tax bill or a deposit.
+    const kindRow = '<div class="seg pgy-kind" id="pgy-kind">'
+      + '<button type="button" data-kind="monthly"'
+      + (kind === "monthly" ? ' class="on"' : "")
+      + '><span class="pgy-kind-t">Monthly</span>'
+      + '<span class="pgy-kind-s">save each month</span></button>'
+      + '<button type="button" data-kind="lump"'
+      + (kind === "lump" ? ' class="on"' : "")
+      + '><span class="pgy-kind-t">Set aside once</span>'
+      + '<span class="pgy-kind-s">reserve a lump sum</span></button>'
+      + "</div>";
+
     modal.innerHTML = "<h2>" + (editing ? "Edit piggy bank" : "New piggy bank")
-      + "</h2><p class=\"hint\">What are you saving up for? Set a goal, choose "
-      + "how fast to get there, and Hon sets that much aside each month.</p>"
+      + "</h2><p class=\"hint\">What are you saving up for? Either grow it a "
+      + "little each month, or reserve a lump sum now for an upcoming bill.</p>"
+      + '<label class="fld-lbl">Type</label>' + kindRow
       + '<label class="fld-lbl">Icon</label>'
       + '<div class="pgy-em-row">' + emojiRow + "</div>"
       + '<label class="fld-lbl">Name</label>'
       + '<input id="pgy-name" type="text" maxlength="40" '
       + 'placeholder="New camera, summer trip…" value="'
       + esc(bank ? bank.name : "") + '">'
-      + '<label class="fld-lbl" style="margin-top:13px">Goal amount</label>'
+      + '<label class="fld-lbl" style="margin-top:13px" id="pgy-target-lbl">Goal amount</label>'
       + '<div class="pgy-amt"><span>' + sym + '</span>'
       + '<input id="pgy-target" type="number" min="0" step="50" placeholder="0" '
       + 'value="' + (bank ? bank.targetAmount : "") + '"></div>'
+      + '<div id="pgy-monthly-section">'
       + '<label class="fld-lbl">Monthly set-aside</label>'
       + '<div id="pgy-plans"></div>'
       + '<div class="pgy-custom"><span>' + sym + '</span>'
       + '<input id="pgy-monthly" type="number" min="0" step="10" '
       + 'placeholder="Custom amount" value="'
-      + (bank ? bank.monthlyAmount : "") + '"></div>'
-      + '<div id="pgy-eta" class="pgy-modal-eta" hidden></div>'
+      + (bank && bank.kind !== "lump" ? bank.monthlyAmount : "") + '"></div>'
+      + '<div id="pgy-eta" class="pgy-modal-eta" hidden></div></div>'
+      + '<div id="pgy-lump-note" class="pgy-modal-eta" hidden>'
+      + 'The full amount is reserved the first month it fits your budget, '
+      + 'then held until you mark it used.</div>'
       + '<div class="modal-actions"><button data-x="cancel">Cancel</button>'
       + '<button class="primary" data-x="save">'
       + (editing ? "Save changes" : "Create piggy bank") + "</button></div>";
@@ -3229,6 +3422,29 @@ function piggyModal(bank) {
     const monthlyInp = modal.querySelector("#pgy-monthly");
     const plansEl = modal.querySelector("#pgy-plans");
     const etaEl = modal.querySelector("#pgy-eta");
+    const monthlySection = modal.querySelector("#pgy-monthly-section");
+    const lumpNote = modal.querySelector("#pgy-lump-note");
+    const targetLbl = modal.querySelector("#pgy-target-lbl");
+    const kindRowEl = modal.querySelector("#pgy-kind");
+
+    // Toggle which fields are visible based on the chosen kind. A lump piggy
+    // hides the monthly section entirely (it doesn't recur), and renames the
+    // goal label so the user knows it's the one-time reservation amount.
+    function applyKind() {
+      const lump = kind === "lump";
+      monthlySection.hidden = lump;
+      lumpNote.hidden = !lump;
+      targetLbl.textContent = lump ? "Amount to set aside" : "Goal amount";
+    }
+    applyKind();
+    kindRowEl.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-kind]");
+      if (!btn) return;
+      kind = btn.dataset.kind === "lump" ? "lump" : "monthly";
+      kindRowEl.querySelectorAll("button")
+        .forEach((x) => x.classList.toggle("on", x === btn));
+      applyKind();
+    });
 
     // The suggested monthly amount to clear `target` in `months`, rounded up
     // to a tidy multiple of 10.
@@ -3306,10 +3522,16 @@ function piggyModal(bank) {
       const target = Number(targetInp.value);
       const monthly = Number(monthlyInp.value);
       if (!name) return toast("Give your piggy bank a name.", true);
-      if (!(target > 0)) return toast("Enter a goal amount.", true);
-      if (!(monthly > 0)) return toast("Choose a monthly set-aside.", true);
-      const body = { name: name, emoji: emoji,
-        targetAmount: target, monthlyAmount: monthly };
+      if (!(target > 0)) {
+        return toast(kind === "lump"
+          ? "Enter the amount to set aside." : "Enter a goal amount.", true);
+      }
+      if (kind !== "lump" && !(monthly > 0)) {
+        return toast("Choose a monthly set-aside.", true);
+      }
+      const body = { name: name, emoji: emoji, kind: kind,
+        targetAmount: target,
+        monthlyAmount: kind === "lump" ? target : monthly };
       try {
         if (editing) await api("/piggy/" + bank.id, "PUT", body);
         else await api("/piggy", "POST", body);
@@ -3339,6 +3561,27 @@ async function togglePiggyHold(id) {
     toast(onHold
       ? '"' + bank.name + '" is on hold — no set-aside until you resume it.'
       : '"' + bank.name + '" resumed — back to saving each month.');
+  } catch (e) {
+    if (e instanceof VaultLocked) return showGate();
+    toast(e.message, true);
+  }
+}
+
+// Marks a lump-sum piggy bank as actually used (the reserved money has been
+// paid out — taxes filed, deposit made, whatever). Removes it so it stops
+// reading as an active reservation; the funded ledger entry stays, so past
+// budgets still reflect the month the lump sum was set aside.
+async function markPiggyUsed(id) {
+  const bank = (((state.budget || {}).piggy || {}).banks || [])
+    .find((b) => b.id === id);
+  const label = bank ? '"' + bank.name + '"' : "this set-aside";
+  if (!confirm("Mark " + label + " as used? It will be removed from your "
+      + "list of active reservations.")) return;
+  try {
+    await api("/piggy/" + id, "DELETE");
+    state.budget = await api(budgetUrl());
+    render();
+    toast("Marked as used.");
   } catch (e) {
     if (e instanceof VaultLocked) return showGate();
     toast(e.message, true);
@@ -5415,10 +5658,37 @@ function budgetModal() {
       : "There's no room for variable spending this month — income is fully "
         + "taken up by fixed bills, essentials, and what's been spent already.";
 
+    // Manual override for the auto-averaged income. Placeholder shows the
+    // average so the user can compare; clearing the field restores the auto.
+    const overrideVal = state.incomeOverride != null ? String(state.incomeOverride) : "";
+    const computedIncomePlaceholder = Math.round(v.income || 0);
+    // This-month savings reserve (per cycle), not a piggy bank — the budget
+    // engine deducts it from the variable pool, capped at what's available.
+    const thisMonthKey = currentCycleKey();
+    const savingsVal = state.monthlySavings[thisMonthKey] != null
+      ? String(state.monthlySavings[thisMonthKey]) : "";
+
     modal.innerHTML = "<h2>Monthly budgets</h2>"
       + '<p class="hint">Give each essential category a monthly limit. Fixed '
       + "bills aren't budgeted, and variable spending is worked out "
       + "automatically from whatever's left. Leave blank for no limit.</p>"
+      + '<div class="bgt-group">This month</div>'
+      + '<div class="bm-row">'
+        + '<span class="bm-ico" style="background:#4CD18022;color:#4CD180">💰</span>'
+        + '<div class="bm-info"><div class="bm-name">Expected income</div>'
+        + '<div class="bm-spent">Override the auto-averaged figure with a '
+        + "known amount. Leave blank to use the average.</div></div>"
+        + '<div class="bm-input"><span class="bm-cur">' + symbol + "</span>"
+        + '<input id="bm-income-override" type="number" min="0" step="100" placeholder="'
+        + computedIncomePlaceholder + '" value="' + esc(overrideVal) + '"></div></div>'
+      + '<div class="bm-row">'
+        + '<span class="bm-ico" style="background:#5C9EF522;color:#5C9EF5">🏦</span>'
+        + '<div class="bm-info"><div class="bm-name">Set aside for savings</div>'
+        + '<div class="bm-spent">A one-off reserve for this month — not a piggy '
+        + "bank. Capped at what's free to spend after fixed bills and essentials.</div></div>"
+        + '<div class="bm-input"><span class="bm-cur">' + symbol + "</span>"
+        + '<input id="bm-savings" type="number" min="0" step="100" placeholder="0" value="'
+        + esc(savingsVal) + '"></div></div>'
       + '<div class="bm-summary"><span>Total budgeted</span>'
       + '<span id="bm-total">—</span></div>'
       + '<div class="bgt-group">Essentials</div>' + catRows(ESSENTIAL_CATS)
@@ -5459,12 +5729,36 @@ function budgetModal() {
         const was = current[cat] != null ? current[cat] : 0;
         if (amount !== was) updates.push({ category: cat, monthlyAmount: amount });
       });
+      // Income override + this-month savings — each PUT only if the user
+      // actually changed it, so the dev console stays quiet on a no-op save.
+      const incomeInput = modal.querySelector("#bm-income-override");
+      const savingsInput = modal.querySelector("#bm-savings");
+      const incomeRaw = incomeInput.value.trim();
+      const incomeNext = incomeRaw === "" ? null : Number(incomeRaw);
+      const incomePrev = state.incomeOverride;
+      const incomeChanged = (incomeNext == null) !== (incomePrev == null)
+        || (incomeNext != null && incomeNext !== incomePrev);
+      const savingsRaw = savingsInput.value.trim();
+      const savingsNext = savingsRaw === "" ? 0 : Number(savingsRaw) || 0;
+      const savingsPrev = state.monthlySavings[thisMonthKey] || 0;
+      const savingsChanged = savingsNext !== savingsPrev;
       try {
         for (const u of updates) await api("/budgets", "PUT", u);
+        if (incomeChanged) {
+          await api("/budget/income-override", "PUT", { value: incomeNext });
+          state.incomeOverride = incomeNext;
+        }
+        if (savingsChanged) {
+          await api("/budget/savings", "PUT",
+            { month: thisMonthKey, amount: savingsNext });
+          if (savingsNext > 0) state.monthlySavings[thisMonthKey] = savingsNext;
+          else delete state.monthlySavings[thisMonthKey];
+        }
         closeOverlay();
         state.budget = await api(budgetUrl());
         render();
-        toast(updates.length ? "Budgets saved." : "No changes.");
+        const changed = updates.length + (incomeChanged ? 1 : 0) + (savingsChanged ? 1 : 0);
+        toast(changed ? "Budgets saved." : "No changes.");
       } catch (e) { toast(e.message, true); }
     });
   });
@@ -5609,7 +5903,184 @@ function settingsCardsHtml() {
           "A bank line whose description contains any of these is treated as "
           + "a card-bill total.",
           providerPickerHtml(), true))
-    + setCard(160, "🤝", "Splitwise", '<div id="set-splitwise"></div>');
+    + setCard(160, "🤝", "Splitwise", '<div id="set-splitwise"></div>')
+    + setCard(200, "🏷️", "Categories", categoriesPanelHtml());
+}
+
+// Categories panel inside Settings. Lists every category grouped by umbrella,
+// each row clickable to edit. The "+ Add" button opens the same modal with
+// empty defaults. Built-ins are edit-only — Delete is hidden for them. A
+// re-fetch + re-render runs after every change so the new category lands
+// everywhere immediately.
+function categoriesPanelHtml() {
+  const byGroup = { essential: [], fixed: [], variable: [] };
+  (state.categories || [])
+    .slice()
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name))
+    .forEach((c) => { (byGroup[c.catGroup] || byGroup.variable).push(c); });
+
+  const groupBlock = (g) => {
+    const list = byGroup[g] || [];
+    if (!list.length) return "";
+    return '<div class="cat-section">'
+      + '<div class="cat-section-head">'
+      + '<span class="cat-section-name">' + esc(GROUP_LABEL[g]) + "</span>"
+      + '<span class="cat-section-count">' + list.length + "</span>"
+      + "</div>"
+      + '<div class="cat-grid">' + list.map(catSettingsTile).join("") + "</div>"
+      + "</div>";
+  };
+
+  return '<p class="set-hint">Tap any category to change its icon, colour, or '
+    + "whether it counts as an essential, fixed bill, or variable expense. "
+    + "Add your own — they apply everywhere, including the auto-categorizer.</p>"
+    + '<div id="set-categories">' + GROUP_ORDER.map(groupBlock).join("") + "</div>"
+    + '<button type="button" class="cat-add" data-action="new-category">'
+    + '<span class="cat-add-icon">+</span>'
+    + '<span class="cat-add-text">Add category</span></button>';
+}
+
+// One category as a clickable tile in the grid. The whole tile is the Edit
+// affordance; user-created tiles also carry a small ✕ in the corner. The
+// delegated click handler matches the inner ✕ button first (since closest()
+// returns the nearest [data-action]), so Edit only fires on the tile body.
+function catSettingsTile(c) {
+  const removeBtn = c.isBuiltin
+    ? ""
+    : '<button type="button" class="cat-tile-del" data-action="remove-category"'
+      + ' data-arg="' + esc(c.name) + '" title="Remove" aria-label="Remove">✕</button>';
+  return '<div class="cat-tile" data-action="edit-category" data-arg="'
+    + esc(c.name) + '" style="--cat-color:' + esc(c.color) + '" role="button" tabindex="0">'
+    + '<div class="cat-tile-icon">' + esc(c.emoji) + "</div>"
+    + '<div class="cat-tile-name">' + esc(c.name) + "</div>"
+    + removeBtn
+    + "</div>";
+}
+
+// Add / edit a category. `existing` is the category object when editing, or
+// null when creating. Built-ins can change everything except their name.
+const CATEGORY_EMOJI_CHOICES = [
+  "🛒","🍽️","🚌","⛽","🛍️","💡","🏠","🛡️","⚕️","🎭","🔁","✈️","📚","💰","↔️","﹪","▫️",
+  "☕","🍻","🎮","🎵","💊","🧾","🏋️","🐶","🐱","🎁","💼","🧰","🚲","🚗","✂️","💇","💅",
+  "📱","💻","🛏️","🧺","🪴","🌱","🧴","🍼","🎓","🪙","🪺","📉","📈","🎯","🪪",
+];
+const CATEGORY_COLOR_CHOICES = [
+  "#5CC773","#F59942","#5C9EF5","#EB736B","#D975D6","#F2C752","#66B8BD","#6E8FD6",
+  "#ED6680","#A880ED","#7D8CED","#5CC7DB","#73B39E","#4CD180","#B38C80","#999EB8","#8C8FA8",
+  "#FF8AA1","#B97AFF","#6FD09C","#FFD166",
+];
+
+function categoryModal(existing) {
+  openModal((modal) => {
+    const isEdit = !!existing;
+    const cur = existing || {
+      name: "", emoji: "🏷️", color: "#8C8FA8", catGroup: "variable",
+      isBuiltin: false,
+    };
+    const emojis = CATEGORY_EMOJI_CHOICES.map((e) =>
+      '<button type="button" class="ce-emoji' + (e === cur.emoji ? " on" : "")
+      + '" data-emoji="' + esc(e) + '">' + e + "</button>").join("");
+    const colors = CATEGORY_COLOR_CHOICES.map((c) =>
+      '<button type="button" class="ce-color' + (c === cur.color ? " on" : "")
+      + '" data-color="' + esc(c) + '" style="background:' + esc(c)
+      + '" aria-label="' + esc(c) + '"></button>').join("");
+    const groups = [
+      ["essential", "Essential", "Day-to-day, budgeted per category"],
+      ["fixed", "Fixed", "Recurring bill, tracked but not budgeted"],
+      ["variable", "Variable", "Discretionary, pools into the variable allowance"],
+    ];
+    const groupCards = groups.map(([g, label, sub]) =>
+      '<label class="ce-group' + (cur.catGroup === g ? " on" : "")
+      + '"><input type="radio" name="ce-group" value="' + g + '"'
+      + (cur.catGroup === g ? " checked" : "") + ">"
+      + '<span class="ce-group-name">' + esc(label) + "</span>"
+      + '<span class="ce-group-sub">' + esc(sub) + "</span></label>").join("");
+
+    modal.innerHTML = "<h2>" + (isEdit ? "Edit category" : "Add a category") + "</h2>"
+      + '<div class="field"><label>Name</label>'
+      + '<input id="ce-name" type="text" maxlength="40" value="' + esc(cur.name) + '"'
+      + (isEdit ? " disabled" : "") + "></div>"
+      + (isEdit && cur.isBuiltin
+          ? '<p class="hint">Built-in — name is fixed; everything else is editable.</p>'
+          : "")
+      + '<div class="field"><label>Icon</label>'
+      + '<div class="ce-emoji-grid">' + emojis + "</div></div>"
+      + '<div class="field"><label>Colour</label>'
+      + '<div class="ce-color-grid">' + colors + "</div></div>"
+      + '<div class="field"><label>Group</label>'
+      + '<div class="ce-groups">' + groupCards + "</div></div>"
+      + '<div class="modal-err" id="ce-err" hidden></div>'
+      + '<div class="modal-actions"><button data-x="cancel">Cancel</button>'
+      + '<button class="primary" id="ce-save">' + (isEdit ? "Save" : "Add") + "</button></div>";
+
+    let pickedEmoji = cur.emoji;
+    let pickedColor = cur.color;
+    modal.querySelectorAll(".ce-emoji").forEach((b) => {
+      b.addEventListener("click", () => {
+        pickedEmoji = b.dataset.emoji;
+        modal.querySelectorAll(".ce-emoji").forEach((x) => x.classList.toggle("on", x === b));
+      });
+    });
+    modal.querySelectorAll(".ce-color").forEach((b) => {
+      b.addEventListener("click", () => {
+        pickedColor = b.dataset.color;
+        modal.querySelectorAll(".ce-color").forEach((x) => x.classList.toggle("on", x === b));
+      });
+    });
+    modal.querySelectorAll(".ce-group input").forEach((r) => {
+      r.addEventListener("change", () => {
+        modal.querySelectorAll(".ce-group").forEach((g) =>
+          g.classList.toggle("on", g.querySelector("input").checked));
+      });
+    });
+    modal.querySelector('[data-x="cancel"]').addEventListener("click", closeOverlay);
+
+    modal.querySelector("#ce-save").addEventListener("click", async () => {
+      const err = modal.querySelector("#ce-err");
+      const name = (modal.querySelector("#ce-name").value || "").trim();
+      const group = modal.querySelector('input[name="ce-group"]:checked').value;
+      const showErr = (m) => { err.textContent = m; err.hidden = false; };
+      err.hidden = true;
+      if (!isEdit) {
+        if (!name) return showErr("Name the category.");
+        if (state.categories.some((c) => c.name === name)) {
+          return showErr("A category with that name already exists.");
+        }
+      }
+      try {
+        if (isEdit) {
+          await api("/categories/" + encodeURIComponent(cur.name), "PUT", {
+            emoji: pickedEmoji, color: pickedColor, catGroup: group,
+          });
+          toast("Category updated.");
+        } else {
+          await api("/categories", "POST", {
+            name, emoji: pickedEmoji, color: pickedColor, catGroup: group,
+            sortOrder: 500,
+          });
+          toast("Category added.");
+        }
+        closeOverlay();
+        const fresh = await api("/categories").catch(() => ({ categories: state.categories }));
+        state.categories = fresh.categories || state.categories;
+        render();
+      } catch (e) {
+        showErr((e && e.message) || "Could not save the category.");
+      }
+    });
+  });
+}
+
+async function removeCategoryByName(name) {
+  if (!confirm("Remove this category? Transactions tagged with it will become 'Other'.")) return;
+  try {
+    await api("/categories/" + encodeURIComponent(name), "DELETE");
+    const fresh = await api("/categories").catch(() => ({ categories: state.categories }));
+    state.categories = fresh.categories || state.categories;
+    await loadAll();
+    render();
+    toast("Category removed.");
+  } catch (e) { toast((e && e.message) || "Could not remove the category.", true); }
 }
 
 // Reads every control inside `root` into the `settings` object, persists, and
@@ -6503,6 +6974,18 @@ function handleAction(action, btn) {
       break;
     }
     case "remove-loan": if (id) removeLoan(id); break;
+    case "new-category": categoryModal(null); break;
+    case "edit-category": {
+      const arg = btn && btn.dataset.arg;
+      const c = arg && (state.categories || []).find((x) => x.name === arg);
+      if (c) categoryModal(c);
+      break;
+    }
+    case "remove-category": {
+      const arg = btn && btn.dataset.arg;
+      if (arg) removeCategoryByName(arg);
+      break;
+    }
     case "new-piggy": piggyModal(null); break;
     case "edit-piggy": {
       const b = id && (((state.budget || {}).piggy || {}).banks || [])
@@ -6512,6 +6995,7 @@ function handleAction(action, btn) {
     }
     case "toggle-hold": if (id) togglePiggyHold(id); break;
     case "remove-piggy": if (id) removePiggy(id); break;
+    case "mark-piggy-used": if (id) markPiggyUsed(id); break;
     case "month-prev": shiftMonth(1); break;
     case "month-next": shiftMonth(-1); break;
     case "toggle-select":
