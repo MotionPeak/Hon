@@ -1021,10 +1021,12 @@ async function readHarelBalances(
   // The client-view widget is a single-spa micro-frontend inside a cross-origin
   // iframe; after sign-in Harel shows a loading screen first and the balance
   // tiles render well after the iframe document loads. Poll the widget by
-  // running the real reader until it actually pulls a balance (up to ~75s) —
+  // running the real reader until it actually pulls a balance (up to ~3 min) —
   // a check that just looks for "any number" matches the loading screen's own
-  // digits and made the connector give up with a false "needs mapping".
-  const deadline = Date.now() + 75_000;
+  // digits and made the connector give up with a false "needs mapping". Some
+  // accounts (many products, slow connection) need well past a minute before
+  // the tiles paint, so the deadline is intentionally generous.
+  const deadline = Date.now() + 180_000;
   let frame: Frame | undefined;
   let found: { label: string; balance: number }[] = [];
   while (Date.now() < deadline) {
@@ -1044,11 +1046,14 @@ async function readHarelBalances(
     await delay(1500);
   }
 
-  // Always dump the widget frame's rendered HTML — if the reader missed, this
-  // is the material to map the tile structure precisely on the next pass.
-  if (frameDumpPath && frame) {
+  // Always dump *something* — if the iframe never appeared, dump the host page
+  // so we can see what Harel actually rendered (cookie wall, error page, etc.);
+  // otherwise dump the iframe content so we can map the tile structure on the
+  // next pass.
+  if (frameDumpPath) {
     try {
-      writeFileSync(frameDumpPath, await frame.content(), 'utf8');
+      const html = frame ? await frame.content() : await page.content();
+      writeFileSync(frameDumpPath, html, 'utf8');
     } catch {
       /* best effort */
     }
