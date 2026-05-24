@@ -195,6 +195,23 @@
     display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
   .balance-line b { color: var(--text); font-weight: 700; }
   .balance-sep { opacity: 0.5; }
+  /* Forward-look strip under the balance headline: end-of-cycle bank
+   * projection + delta against the current balance. Sits inside the same
+   * card with a hairline divider for visual separation. */
+  .balance-sub { margin-top: 18px; padding-top: 16px;
+    border-top: 1px solid var(--hairline); }
+  .balance-sub-head { font-size: 11px; font-weight: 700; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+  .balance-sub-row { display: flex; align-items: baseline;
+    justify-content: center; gap: 12px; }
+  .balance-sub-num { font-size: 22px; font-weight: 800;
+    font-variant-numeric: tabular-nums; }
+  .balance-sub-delta { font-size: 14px; font-weight: 700; }
+  .balance-sub-delta.good { color: var(--green); }
+  .balance-sub-delta.bad { color: var(--red); }
+  .balance-sub-line { color: var(--muted); font-size: 12px; margin-top: 8px;
+    line-height: 1.45; }
+  .balance-sub-line b { color: var(--text); font-weight: 700; }
   .ov-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px;
     align-items: start; }
   .ov-grid > section { margin-bottom: 0; }
@@ -2136,7 +2153,8 @@ function overviewView() {
 // A single big "this month's balance" headline — Expected income minus what
 // you've actually spent so far this cycle. Positive (green) is room to save;
 // negative (red) means you're outspending what's coming in. Sits at the top
-// of the Overview so the bottom-line answer is the first thing you see.
+// of the Overview so the bottom-line answer is the first thing you see, and
+// the projected end-of-cycle bank balance rides along below it.
 function balanceCard() {
   const b = state.budget;
   if (!b) return "";
@@ -2161,7 +2179,58 @@ function balanceCard() {
     + '<span>Income</span> <b>' + money(income, "ILS") + "</b>"
     + ' <span class="balance-sep">−</span> '
     + '<span>Spent</span> <b>' + money(spent, "ILS") + "</b>"
-    + "</div></section>";
+    + "</div>" + bankProjectionBlock(v) + "</section>";
+}
+
+// Forward look at the checking pot: today's bank balance plus the income
+// still expected to arrive minus the bills + savings still expected to go
+// out — the best-case end-of-cycle bank balance, ignoring further variable
+// spend. Returns "" when there's no bank account to project against.
+function bankProjectionBlock(v) {
+  const b = state.budget;
+  if (!b) return "";
+  // Sum the user's ILS bank-type checking accounts (skip cards, brokerages,
+  // pension, excluded). That's the pot bills are paid from.
+  const bankAccounts = (state.accounts || []).filter((a) => {
+    if (a.excluded || a.currency !== "ILS") return false;
+    const company = (state.companies || []).find((c) => c.id === a.companyId);
+    return company && company.type === "bank";
+  });
+  if (!bankAccounts.length) return "";
+  const bankNow = bankAccounts.reduce((s, a) => s + (a.balance || 0), 0);
+
+  // What's already in/out this cycle, in ILS.
+  const cur = currentCycleKey();
+  let incomeReceived = 0;
+  (state.transactions || []).forEach((t) => {
+    if (t.currency !== "ILS" || t.refundForId || t.category === "Transfers") return;
+    if (cycleKey(t.date) !== cur) return;
+    const amt = t.amount + txnRefundAmount(t);
+    if (amt > 0) incomeReceived += amt;
+  });
+
+  // What's still expected to happen for the rest of the cycle.
+  const p = budgetProjection();
+  const expectedFixed = (p && p.expectedFixed) || (v.fixedSpent || 0);
+  const essentialBudget = (b.essentials || []).reduce((s, l) => s + (l.budget || 0), 0);
+  const remainingIncome = Math.max(0, (v.income || 0) - incomeReceived);
+  const remainingFixed = Math.max(0, expectedFixed - (v.fixedSpent || 0));
+  const remainingEssentials = Math.max(0, essentialBudget - (v.essentialSpent || 0));
+  const savings = v.savings || 0;
+  const change = remainingIncome - remainingFixed - remainingEssentials - savings;
+  const endBalance = bankNow + change;
+  const up = change >= 0;
+  const sign = up ? "+" : "−";
+  const dcls = up ? "good" : "bad";
+  return '<div class="balance-sub">'
+    + '<div class="balance-sub-head">Projected bank balance at end of cycle</div>'
+    + '<div class="balance-sub-row">'
+    + '<div class="balance-sub-num">' + money(endBalance, "ILS") + "</div>"
+    + '<div class="balance-sub-delta ' + dcls + '">' + sign
+    + money(Math.abs(change), "ILS") + "</div></div>"
+    + '<div class="balance-sub-line">From <b>' + money(bankNow, "ILS")
+    + "</b> now · assumes remaining income arrives and reserved bills + "
+    + "savings go out, with no further variable spending.</div></div>";
 }
 
 // "This month" card — total spend, the month-over-month trend, and a donut
