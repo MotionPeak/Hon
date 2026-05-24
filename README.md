@@ -43,8 +43,8 @@ for your OS from the
 
 | OS | File | First-launch trust step |
 | --- | --- | --- |
-| **macOS — Apple Silicon (M-series)** | `Hon-macOS-arm64-x.y.z.dmg` | Right-click `Hon.app` → **Open** → **Open** in the prompt. Once. |
-| **macOS — Intel** | `Hon-macOS-x64-x.y.z.dmg` | Right-click `Hon.app` → **Open** → **Open** in the prompt. Once. |
+| **macOS — Apple Silicon (M-series)** | `Hon-macOS-arm64-x.y.z.dmg` | Drag `Hon.app` to `/Applications`, then in Terminal: `xattr -cr /Applications/Hon.app` and double-click. See note ↓. |
+| **macOS — Intel** | `Hon-macOS-x64-x.y.z.dmg` | Drag `Hon.app` to `/Applications`, then in Terminal: `xattr -cr /Applications/Hon.app` and double-click. See note ↓. |
 | **Windows** | `Hon-Windows-x.y.z-Setup.exe` | SmartScreen says "Windows protected your PC". Click **More info → Run anyway**. Once. |
 | **Linux** | `Hon-Linux-x.y.z.AppImage` | `chmod +x Hon-*.AppImage` and double-click, or run from a terminal. |
 
@@ -52,6 +52,13 @@ The installers bundle Node and the engine — no separate install. They are
 **unsigned** (Hon is one person's local-first project, not a commercial app
 with a paid developer cert), so each platform's one-time trust step above
 fires on first launch.
+
+> **Note on the macOS step.** Recent macOS versions show *"Hon" is damaged
+> and can't be opened* on an unsigned app downloaded via a browser — the
+> right-click → Open trick no longer works once Apple marks it quarantined.
+> The `xattr -cr /Applications/Hon.app` command strips that quarantine
+> flag; macOS then trusts it like any locally-built app. Run it once,
+> right after dragging Hon into Applications.
 
 Running Hon on an always-on machine you can reach from anywhere? See
 [NAS or home server](#run-it--nas-or-home-server).
