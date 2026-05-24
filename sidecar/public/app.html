@@ -219,6 +219,54 @@
   .sec-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
   .sec-head .spacer { margin-left: auto; }
 
+  /* --- Fixed-bills view (Expected fixed visualised) ----------------------- */
+  .rec-grand { font: 800 18px/1 ui-rounded, "SF Pro Rounded", system-ui;
+    color: var(--text); font-variant-numeric: tabular-nums; }
+  .rec-grand .rec-unit, .rec-amount .rec-unit, .rec-cat-total .rec-unit {
+    font-size: 10px; font-weight: 600; color: var(--muted);
+    margin-left: 3px; text-transform: lowercase; letter-spacing: 0; }
+  .rec-section { background: var(--bg-elev); border: 1px solid var(--hairline);
+    border-radius: 14px; padding: 14px 16px; margin-bottom: 12px; }
+  .rec-cat-head { display: flex; align-items: center; gap: 10px;
+    margin-bottom: 10px; padding-bottom: 9px;
+    border-bottom: 1px dashed var(--hairline); }
+  .rec-cat-icon { width: 26px; height: 26px; border-radius: 8px;
+    background: color-mix(in srgb, var(--cat-color) 18%, transparent);
+    color: var(--cat-color); display: flex; align-items: center;
+    justify-content: center; font-size: 14px; line-height: 1;
+    border: 1px solid color-mix(in srgb, var(--cat-color) 30%, transparent); }
+  .rec-cat-name { font-size: 13px; font-weight: 700; color: var(--text);
+    letter-spacing: 0.02em; }
+  .rec-cat-count { font-size: 10px; font-weight: 700; padding: 2px 8px;
+    border-radius: 999px; background: var(--card-hi); color: var(--muted); }
+  .rec-cat-total { margin-left: auto; font: 700 14px/1 ui-rounded,
+    "SF Pro Rounded", system-ui; color: var(--text);
+    font-variant-numeric: tabular-nums; }
+  .rec-list { display: flex; flex-direction: column; gap: 2px; }
+  .rec-row { display: flex; align-items: center; gap: 12px;
+    padding: 9px 10px; border-radius: 9px; cursor: pointer;
+    transition: background-color .12s; }
+  .rec-row:hover { background: var(--card-hi); }
+  .rec-main { flex: 1; min-width: 0; }
+  .rec-name { font-size: 14px; font-weight: 600; color: var(--text);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rec-meta { font-size: 11.5px; color: var(--muted); margin-top: 2px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rec-amount { font: 700 14px/1 ui-rounded, "SF Pro Rounded", system-ui;
+    color: var(--text); font-variant-numeric: tabular-nums;
+    white-space: nowrap; flex: none; }
+  /* ✕ removes a merchant from the Fixed-bills view (and from Expected fixed).
+     Subtle until the row is hovered, then becomes a clear red affordance —
+     same pattern as the categories ✕. */
+  .rec-remove { width: 24px; height: 24px; border-radius: 50%;
+    border: none; background: rgba(0,0,0,0.25); color: rgba(255,255,255,0.55);
+    cursor: pointer; display: flex; align-items: center;
+    justify-content: center; font-size: 11px; line-height: 1; padding: 0;
+    opacity: 0; flex: none; margin-left: 4px;
+    transition: opacity .14s, background-color .14s, color .14s, transform .12s; }
+  .rec-row:hover .rec-remove { opacity: 1; color: #fff; }
+  .rec-remove:hover { background: var(--red); color: #fff; transform: scale(1.1); }
+
   /* --- Net worth banner -------------------------------------------------- */
   .networth { position: relative; overflow: hidden; isolation: isolate;
     background: linear-gradient(140deg, var(--grad-1) 0%, var(--grad-2) 100%);
@@ -1648,6 +1696,15 @@ const SYMBOLS = { ILS: "₪", NIS: "₪", USD: "$", EUR: "€", GBP: "£" };
 const CATEGORIES = ["Groceries","Dining","Transport","Fuel","Shopping","Utilities",
   "Housing","Insurance","Health","Entertainment","Subscriptions","Travel","Education",
   "Income","Transfers","Fees","Other"];
+// The live list of category names — user-created ones included — ordered by
+// the same sortOrder catStyle uses, with the built-in CATEGORIES as a fallback
+// before state.categories has loaded.
+function categoryNames() {
+  if (!state.categories || !state.categories.length) return CATEGORIES;
+  return state.categories.slice()
+    .sort((a, b) => (a.sortOrder ?? 100) - (b.sortOrder ?? 100))
+    .map((c) => c.name);
+}
 // Category style + group come from the user-editable list at state.categories
 // (loaded from /categories on startup). The DEFAULT_CATEGORY_STYLE matches
 // the seeded built-ins so the UI renders sensibly even before state has been
@@ -1696,7 +1753,8 @@ const FIELD_LABELS = {
 const SECURE_FIELDS = new Set(["password", "consumerKey"]);
 const SNAPTRADE_ID = "snaptrade";
 const TABS = [["overview", "Overview", "📊"], ["assets", "Assets", "🏦"],
-  ["activity", "Activity", "🧾"], ["subscriptions", "Subscriptions", "🔁"],
+  ["activity", "Activity", "🧾"], ["recurring", "Fixed bills", "📆"],
+  ["subscriptions", "Subscriptions", "🔁"],
   ["piggy", "Piggy banks", "🐷"], ["insights", "Insights", "💡"],
   ["settings", "Settings", "⚙️"]];
 
@@ -2103,6 +2161,8 @@ function render() {
     content.innerHTML = accountsView();
   } else if (state.tab === "activity") {
     content.innerHTML = activityView();
+  } else if (state.tab === "recurring") {
+    content.innerHTML = recurringView();
   } else if (state.tab === "subscriptions") {
     content.innerHTML = subscriptionsView();
   } else if (state.tab === "piggy") {
@@ -2167,18 +2227,24 @@ function balanceCard() {
   const v = projectedVariable(b.variable
     || { income: 0, committed: 0, spent: 0, allowed: 0 });
   const income = v.income || 0;
-  // "Spent" here is the projected end-of-cycle figure — Expected fixed +
-  // essentials reserved — not the partial cash-out so far, so the headline
-  // reflects what the month is *committed* to, not what's happened yet.
+  // `committed` is fixed + essentials reserved for the whole cycle. We also
+  // subtract `varSpent` — variable purchases already settled this cycle —
+  // because that money is already gone too. Result: what's *really* free
+  // right now, with no more variable spending.
   const committed = v.committed || 0;
-  if (income <= 0 && committed <= 0) return "";
-  const net = income - committed;
+  const varSpent = v.spent || 0;
+  if (income <= 0 && committed <= 0 && varSpent <= 0) return "";
+  const net = income - committed - varSpent;
   const positive = net >= 0;
   const cls = positive ? "good" : "bad";
   const sign = positive ? "+" : "−";
   const cap = positive
-    ? "free this month after expected fixed + essentials"
-    : "short of what expected fixed + essentials need this month";
+    ? "free this month after fixed, essentials and variable spend so far"
+    : "short of what this month's commitments need";
+  const varLine = varSpent > 0
+    ? ' <span class="balance-sep">−</span> '
+      + '<span>Variable spent</span> <b>' + money(varSpent, "ILS") + "</b>"
+    : "";
   return '<section class="card balance-card">'
     + '<div class="balance-head">This month · ' + esc(cycleLabel(currentCycleKey())) + "</div>"
     + '<div class="balance-num ' + cls + '">' + sign
@@ -2189,6 +2255,7 @@ function balanceCard() {
     + ' <span class="balance-sep">−</span> '
     + '<span>Expected fixed + essentials</span> <b>'
     + money(committed, "ILS") + "</b>"
+    + varLine
     + "</div>" + bankProjectionBlock(v) + "</section>";
 }
 
@@ -3097,11 +3164,12 @@ function activityMonths() {
 function batchBar() {
   if (!state.selectMode) return "";
   const n = Object.keys(state.batch).length;
-  const cur = state.batchCat || CATEGORIES[0];
+  const allCats = categoryNames();
+  const cur = state.batchCat || allCats[0] || "Other";
   const [curEm, curColor] = catStyle(cur);
   let menu = "";
   if (state.batchOpen) {
-    menu = '<div class="bcat-menu">' + CATEGORIES.map((c) => {
+    menu = '<div class="bcat-menu">' + allCats.map((c) => {
       const [em, color] = catStyle(c);
       return '<div class="bcat-opt' + (c === cur ? " on" : "")
         + '" data-batch-cat="' + esc(c) + '">'
@@ -3152,7 +3220,7 @@ function activityView() {
     const cat = t.category || "Uncategorized";
     (groups[cat] || (groups[cat] = [])).push(t);
   });
-  const order = CATEGORIES.concat(["Uncategorized"]);
+  const order = categoryNames().concat(["Uncategorized"]);
   const cats = Object.keys(groups).sort((a, b) => {
     const ia = order.indexOf(a), ib = order.indexOf(b);
     return ((ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib)) || a.localeCompare(b);
@@ -3403,6 +3471,7 @@ function budgetProjection() {
   Object.keys(merch).forEach((key) => {
     const r = merch[key];
     const freq = state.merchantFreq[key];
+    if (freq === "ignore") return; // user explicitly excluded this merchant
     if (!freq && Object.keys(r.cycles).length < 2) return; // one-off — skip
     expectedFixed += monthlyEquivalent(r.charge, freq || "monthly");
   });
@@ -4063,7 +4132,7 @@ function movePanel() {
       + '<div class="rf-list">' + list + "</div></div>";
   }
 
-  const cats = CATEGORIES.map((cat) => {
+  const cats = categoryNames().map((cat) => {
     const [ce] = catStyle(cat);
     const on = cat === state.move.picked;
     return '<button class="move-cat' + (on ? " active" : "") + '" data-move-cat="'
@@ -5178,6 +5247,114 @@ function ensureSubAliases(activeNames, deadNames) {
       state.subAliasBusy = false; // model not ready — retry on a later render
     })
     .catch(() => { state.subAliasBusy = false; });
+}
+
+// Visualises the fixed-bill merchants that make up the "Expected fixed"
+// figure on the Overview card. Same per-merchant rollup the budget engine
+// uses: a fixed-category merchant counts as recurring once it has charged
+// in two or more cycles (or the user has set a frequency on it). Each
+// charge is reduced to a monthly-equivalent so the totals stack honestly.
+function recurringView() {
+  const merch = {};
+  state.transactions.forEach((t) => {
+    if (t.currency !== "ILS" || isCardTotal(t) || t.refundForId) return;
+    if (catGroup(t.category) !== "fixed") return;
+    const amt = t.amount + txnRefundAmount(t);
+    if (amt >= 0) return;
+    const key = merchantKey(t.description);
+    const r = merch[key] || (merch[key] = {
+      key, cycles: {}, count: 0, lastT: 0,
+      charge: 0, last: null,
+      desc: merchantName(t.description), category: t.category || "Other",
+    });
+    r.cycles[cycleKey(t.date)] = true;
+    r.count += 1;
+    const ts = new Date(t.date).getTime();
+    if (ts >= r.lastT) {
+      r.lastT = ts; r.charge = -amt; r.last = t;
+      r.desc = merchantName(t.description);
+      r.category = t.category || r.category;
+    }
+  });
+  const rows = Object.values(merch).filter((r) => {
+    const freq = state.merchantFreq[r.key];
+    if (freq === "ignore") return false; // user removed it from this view
+    return freq || Object.keys(r.cycles).length >= 2;
+  }).map((r) => {
+    const freq = state.merchantFreq[r.key] || "monthly";
+    return Object.assign({}, r, {
+      freq, monthly: monthlyEquivalent(r.charge, freq),
+    });
+  });
+
+  if (!rows.length) {
+    return '<div class="sec-head"><div class="label">Fixed bills</div></div>'
+      + '<div class="card empty">No recurring fixed bills detected yet. They '
+      + "appear here once a fixed-category charge (Housing / Utilities / "
+      + "Insurance / Subscriptions / Education / Fees) is seen in two or more "
+      + "billing cycles — or once you set a frequency on a charge by hand from "
+      + "the transaction editor.</div>";
+  }
+
+  const byCat = {};
+  rows.forEach((r) => { (byCat[r.category] || (byCat[r.category] = [])).push(r); });
+  Object.keys(byCat).forEach((k) => byCat[k].sort((a, b) => b.monthly - a.monthly));
+
+  const totalMonthly = rows.reduce((s, r) => s + r.monthly, 0);
+  const FREQ_LABEL = { monthly: "Monthly", bimonthly: "Bimonthly", yearly: "Yearly" };
+
+  // Categories ranked by their combined monthly cost — heaviest first.
+  const catOrder = Object.keys(byCat).sort(
+    (a, b) => byCat[b].reduce((s, r) => s + r.monthly, 0)
+              - byCat[a].reduce((s, r) => s + r.monthly, 0),
+  );
+
+  const sections = catOrder.map((cat) => {
+    const list = byCat[cat];
+    const [em, color] = catStyle(cat);
+    const groupTotal = list.reduce((s, r) => s + r.monthly, 0);
+    const rowsHtml = list.map((r) => {
+      const lastDate = r.last ? fmtDate(r.last.date) : "—";
+      const everyN = r.count === 1 ? "1 charge" : r.count + " charges";
+      const txnId = (r.last && r.last.id) || "";
+      // data-txn lives on .rec-main only — keeping it off the outer row
+      // means the ✕ button (a sibling, no data-txn ancestor) is not
+      // picked up by the txn-open click handler before its own action.
+      return '<div class="rec-row">'
+        + '<div class="rec-main" data-txn="' + esc(txnId) + '">'
+        + '<div class="rec-name">' + esc(r.desc) + "</div>"
+        + '<div class="rec-meta">' + esc(FREQ_LABEL[r.freq] || r.freq)
+        + " · " + money(r.charge, "ILS") + " per charge · last " + esc(lastDate)
+        + " · " + esc(everyN) + "</div></div>"
+        + '<div class="rec-amount">' + money(r.monthly, "ILS")
+        + '<span class="rec-unit">/mo</span></div>'
+        + '<button type="button" class="rec-remove" '
+        + 'data-action="ignore-recurring" data-arg="' + esc(r.key) + '" '
+        + 'title="Remove from Fixed bills — keeps the underlying transactions, '
+        + 'just stops counting this merchant toward Expected fixed" '
+        + 'aria-label="Remove">✕</button>'
+        + "</div>";
+    }).join("");
+    return '<div class="rec-section">'
+      + '<div class="rec-cat-head" style="--cat-color:' + esc(color) + '">'
+      + '<span class="rec-cat-icon">' + em + "</span>"
+      + '<span class="rec-cat-name">' + esc(cat) + "</span>"
+      + '<span class="rec-cat-count">' + list.length + "</span>"
+      + '<span class="rec-cat-total">' + money(groupTotal, "ILS")
+      + '<span class="rec-unit">/mo</span></span></div>'
+      + '<div class="rec-list">' + rowsHtml + "</div></div>";
+  }).join("");
+
+  return '<div class="sec-head"><div class="label">Fixed bills</div>'
+    + '<span class="spacer"></span>'
+    + '<span class="rec-grand">' + money(totalMonthly, "ILS")
+    + '<span class="rec-unit">/mo</span></span></div>'
+    + '<p class="hint">Every recurring fixed bill that builds the '
+    + '"Expected fixed" figure on the Overview. Each charge is reduced to a '
+    + "monthly equivalent (a bimonthly bill counts as half, a yearly "
+    + "subscription as 1/12). Tap a row to open that charge in the activity "
+    + "log; the per-charge frequency lives in the transaction editor.</p>"
+    + sections;
 }
 
 function subscriptionsView() {
@@ -6616,6 +6793,21 @@ function removeCategoryByName(name) {
   });
 }
 
+// Removes a merchant from the Fixed-bills view by tagging its frequency as
+// "ignore" — a real DB row, so the choice survives syncs and stops the
+// budget engine from counting it toward Expected fixed. Optimistic update,
+// then a reload of the live frequencies map so other views agree.
+async function ignoreRecurringMerchant(key) {
+  try {
+    await api("/merchant-frequency", "PUT", { key, frequency: "ignore" });
+    state.merchantFreq = Object.assign({}, state.merchantFreq, { [key]: "ignore" });
+    render();
+    toast("Removed from Fixed bills.");
+  } catch (e) {
+    toast((e && e.message) || "Could not remove the merchant.", true);
+  }
+}
+
 // Reads every control inside `root` into the `settings` object, persists, and
 // re-renders. Centralised so both auto-save (the full-page view) and the
 // modal's Save button stay in lockstep.
@@ -7168,7 +7360,7 @@ function shiftMonth(delta) {
 async function saveBatch() {
   const ids = Object.keys(state.batch);
   if (!ids.length) return;
-  const cat = state.batchCat || CATEGORIES[0];
+  const cat = state.batchCat || categoryNames()[0] || "Other";
   try {
     for (const id of ids) {
       await api("/transactions/" + id + "/category", "PATCH",
@@ -7536,6 +7728,11 @@ function handleAction(action, btn) {
     case "remove-category": {
       const arg = btn && btn.dataset.arg;
       if (arg) removeCategoryByName(arg);
+      break;
+    }
+    case "ignore-recurring": {
+      const arg = btn && btn.dataset.arg;
+      if (arg) ignoreRecurringMerchant(arg);
       break;
     }
     case "new-piggy": piggyModal(null); break;
