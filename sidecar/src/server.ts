@@ -576,6 +576,64 @@ app.get('/merchant-frequencies', async (_req, reply) => {
   return { frequencies };
 });
 
+// Per-merchant split count for shared bills (rent split with roommates,
+// a utility on a joint name, etc.). split_count >= 1; setting it to 1
+// (or passing splitCount: null) clears the override so the merchant
+// goes back to "100% yours" everywhere in the UI.
+app.get('/merchant-splits', async (_req, reply) => {
+  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+  const splits: Record<string, number> = {};
+  for (const row of repo.listMerchantSplits()) splits[row.merchantKey] = row.splitCount;
+  return { splits };
+});
+
+app.put('/merchant-split', async (req, reply) => {
+  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+  const body = (req.body ?? {}) as { key?: string; splitCount?: number | null };
+  const key = (body.key ?? '').trim();
+  if (!key) return reply.code(400).send({ error: 'a merchant key is required' });
+  if (body.splitCount == null || body.splitCount === 1) {
+    repo.clearMerchantSplit(key);
+    return { ok: true };
+  }
+  const n = Math.round(Number(body.splitCount));
+  if (!Number.isFinite(n) || n < 1 || n > 50) {
+    return reply.code(400).send({
+      error: 'splitCount must be a whole number between 1 and 50',
+    });
+  }
+  repo.setMerchantSplit(key, n);
+  return { ok: true };
+});
+
+// Per-category split count (e.g. Utilities ÷ 3 when shared with roommates).
+// splitCount >= 1; setting it to 1 or null clears the override.
+app.get('/category-splits', async (_req, reply) => {
+  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+  const splits: Record<string, number> = {};
+  for (const row of repo.listCategorySplits()) splits[row.category] = row.splitCount;
+  return { splits };
+});
+
+app.put('/category-split', async (req, reply) => {
+  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+  const body = (req.body ?? {}) as { category?: string; splitCount?: number | null };
+  const category = (body.category ?? '').trim();
+  if (!category) return reply.code(400).send({ error: 'a category is required' });
+  if (body.splitCount == null || body.splitCount === 1) {
+    repo.clearCategorySplit(category);
+    return { ok: true };
+  }
+  const n = Math.round(Number(body.splitCount));
+  if (!Number.isFinite(n) || n < 1 || n > 50) {
+    return reply.code(400).send({
+      error: 'splitCount must be a whole number between 1 and 50',
+    });
+  }
+  repo.setCategorySplit(category, n);
+  return { ok: true };
+});
+
 app.put('/merchant-frequency', async (req, reply) => {
   if (!repo) return reply.code(503).send({ error: 'database unavailable' });
   const body = (req.body ?? {}) as { key?: string; frequency?: string };
@@ -1103,8 +1161,8 @@ app.get('/rates', async (_req, reply) => {
 // User-editable spending categories. The seeded built-ins are returned with
 // `isBuiltin: true` so the UI can render delete-disabled for them.
 
-const VALID_GROUPS = new Set(['essential', 'fixed', 'variable']);
-function isValidGroup(v: unknown): v is 'essential' | 'fixed' | 'variable' {
+const VALID_GROUPS = new Set(['essential', 'fixed', 'variable', 'income']);
+function isValidGroup(v: unknown): v is 'essential' | 'fixed' | 'variable' | 'income' {
   return typeof v === 'string' && VALID_GROUPS.has(v);
 }
 
@@ -1159,7 +1217,7 @@ app.put('/categories/:name', async (req, reply) => {
   }
   if (body.catGroup !== undefined) {
     if (!isValidGroup(body.catGroup)) {
-      return reply.code(400).send({ error: 'catGroup must be essential, fixed or variable' });
+      return reply.code(400).send({ error: 'catGroup must be essential, fixed, variable, or income' });
     }
     fields.catGroup = body.catGroup;
   }

@@ -212,6 +212,17 @@
   .balance-sub-line { color: var(--muted); font-size: 12px; margin-top: 8px;
     line-height: 1.45; }
   .balance-sub-line b { color: var(--text); font-weight: 700; }
+  /* Itemised breakdown of the projected change — one row per ±component,
+     so a wrong projection is identifiable at a glance instead of just a
+     mystery headline. */
+  .balance-details { display: flex; flex-direction: column; gap: 4px;
+    margin-top: 10px; padding-top: 10px;
+    border-top: 1px dashed var(--hairline); }
+  .balance-detail { display: flex; justify-content: space-between;
+    font-size: 12px; color: var(--muted); }
+  .balance-detail-amt { font-weight: 700; font-variant-numeric: tabular-nums; }
+  .balance-detail-amt.good { color: var(--green); }
+  .balance-detail-amt.bad { color: var(--red); }
   .ov-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px;
     align-items: start; }
   .ov-grid > section { margin-bottom: 0; }
@@ -303,6 +314,8 @@
   .rec-amount { font: 700 14px/1 ui-rounded, "SF Pro Rounded", system-ui;
     color: var(--text); font-variant-numeric: tabular-nums;
     white-space: nowrap; flex: none; }
+  .rec-amount.good { color: var(--green); }
+  .rec-tot-row b.good { color: var(--green); }
   /* ✕ removes a merchant from the Fixed-bills view (and from Expected fixed).
      Subtle until the row is hovered, then becomes a clear red affordance —
      same pattern as the categories ✕. */
@@ -1787,9 +1800,9 @@ function catGroup(cat) {
   const row = (state.categories || []).find((c) => c.name === cat);
   return row ? row.catGroup : "variable";
 }
-const GROUP_ORDER = ["essential", "fixed", "variable"];
-const GROUP_LABEL = { essential: "Essentials", fixed: "Fixed expenses",
-  variable: "Variable expenses" };
+const GROUP_ORDER = ["income", "essential", "fixed", "variable"];
+const GROUP_LABEL = { income: "Income", essential: "Essentials",
+  fixed: "Fixed expenses", variable: "Variable expenses" };
 
 // A merchant key: the description with digit-bearing words dropped, so it
 // survives the varying transaction code scrapers append to each charge.
@@ -1822,6 +1835,7 @@ const SECURE_FIELDS = new Set(["password", "consumerKey"]);
 const SNAPTRADE_ID = "snaptrade";
 const TABS = [["overview", "Overview", "📊"], ["assets", "Assets", "🏦"],
   ["activity", "Activity", "🧾"], ["recurring", "Fixed bills", "📆"],
+  ["income", "Income", "💼"],
   ["subscriptions", "Subscriptions", "🔁"],
   ["piggy", "Piggy banks", "🐷"], ["insights", "Insights", "💡"],
   ["settings", "Settings", "⚙️"]];
@@ -2245,6 +2259,8 @@ function render() {
     content.innerHTML = activityView();
   } else if (state.tab === "recurring") {
     content.innerHTML = recurringView();
+  } else if (state.tab === "income") {
+    content.innerHTML = incomeView();
   } else if (state.tab === "subscriptions") {
     content.innerHTML = subscriptionsView();
   } else if (state.tab === "piggy") {
@@ -2306,16 +2322,13 @@ function overviewView() {
 function balanceCard() {
   const b = state.budget;
   if (!b) return "";
-  // Subtract the roommates' share of fixed-category charges from the raw
-  // fixedSpent the server reports, so the headline reflects what the user
-  // actually paid — not what the joint account was charged. Same adjustment
-  // the Fixed-bills page makes for its "Actually billed" total.
-  const baseVariable = Object.assign(
-    {}, b.variable || { income: 0, committed: 0, spent: 0, allowed: 0 },
-    { fixedSpent: ((b.variable && b.variable.fixedSpent) || 0)
-        - roommateShareThisCycle() },
+  // `projectedVariable` now picks `expectedFixedThisCycle` from the merchant
+  // rollup — which already accounts for category splits and only includes
+  // bills due this cycle — so the headline math is driven from the Fixed-
+  // bills page, with no extra adjustment needed here.
+  const v = projectedVariable(
+    b.variable || { income: 0, committed: 0, spent: 0, allowed: 0 },
   );
-  const v = projectedVariable(baseVariable);
   const income = v.income || 0;
   // `committed` is fixed + essentials reserved for the whole cycle. We also
   // subtract `varSpent` — variable purchases already settled this cycle —
@@ -2366,43 +2379,74 @@ function bankProjectionBlock(v) {
   if (!bankAccounts.length) return "";
   const bankNow = bankAccounts.reduce((s, a) => s + (a.balance || 0), 0);
 
-  // What's already in/out this cycle, in ILS.
   const cur = currentCycleKey();
-  let incomeReceived = 0;
-  (state.transactions || []).forEach((t) => {
-    if (t.currency !== "ILS" || t.refundForId || t.category === "Transfers") return;
-    if (cycleKey(t.date) !== cur) return;
-    const amt = t.amount + txnRefundAmount(t);
-    if (amt > 0) incomeReceived += amt;
-  });
+
+  // Expected recurring income — sourced from the Income tab so the two
+  // views agree. The total monthly is whatever sum of merchant averages
+  // is currently surfaced in /income (post-✕). Subtract what's already
+  // landed THIS CYCLE from those same merchants to get what's left to
+  // arrive — random inflows (transfers, refunds) the user dismissed from
+  // the income tab never enter the math, by design.
+  const recurringMonthly = recurringIncomeMerchants()
+    .reduce((s, r) => s + (r.avg || 0), 0);
+  const incomeReceived = recurringIncomeReceived(cur);
 
   // What's still expected to happen for the rest of the cycle. A savings
   // set-aside is deducted only when the user marked it a real transfer out
   // of the checking account; an earmark stays in the account untouched.
+  // Uses `expectedFixedThisCycle` (full charges of bills predicted to bill
+  // in this cycle), not the smoothed monthly-equivalent — so a bimonthly
+  // bill not due this month reserves ₪0 here, matching the headline above
+  // and the "Due this cycle" total on the Fixed bills page.
   const p = budgetProjection();
-  const expectedFixed = (p && p.expectedFixed) || (v.fixedSpent || 0);
+  const expectedFixed = (p && p.expectedFixedThisCycle != null
+    ? p.expectedFixedThisCycle
+    : (p && p.expectedFixed) || (v.fixedSpent || 0));
   const essentialBudget = (b.essentials || []).reduce((s, l) => s + (l.budget || 0), 0);
-  const remainingIncome = Math.max(0, (v.income || 0) - incomeReceived);
+  const remainingIncome = Math.max(0, recurringMonthly - incomeReceived);
   const remainingFixed = Math.max(0, expectedFixed - (v.fixedSpent || 0));
   const remainingEssentials = Math.max(0, essentialBudget - (v.essentialSpent || 0));
   const savingsOut = v.savingsTransferred ? (v.savings || 0) : 0;
-  const change = remainingIncome - remainingFixed - remainingEssentials - savingsOut;
+  // Reserve the headline's remaining variable allowance too — without it the
+  // projection ignores the discretionary spend the user will keep doing for
+  // the rest of the cycle and reads sunnier than reality. With it, the end
+  // balance honestly reflects "what's left in checking after income arrives
+  // AND everything the headline above commits to gets paid for."
+  const remainingVariable = Math.max(0, v.allowed || 0);
+  const change = remainingIncome - remainingFixed - remainingEssentials
+    - savingsOut - remainingVariable;
   const endBalance = bankNow + change;
   const up = change >= 0;
   const sign = up ? "+" : "−";
   const dcls = up ? "good" : "bad";
+  // Itemised breakdown of the +/− change so the user can see exactly which
+  // component is driving the projection. Rows always render — even at zero —
+  // because "this number is zero" is itself useful (it tells you why the
+  // headline is what it is in a way a missing row can't).
+  const detail = (label, amount, tone) => {
+    const sign = amount === 0 ? "" : tone === "good" ? "+" : "−";
+    const toneClass = amount === 0 ? "" : tone;
+    return '<div class="balance-detail"><span>' + label + "</span>"
+      + '<span class="balance-detail-amt ' + toneClass + '">' + sign
+      + money(Math.abs(amount), "ILS") + "</span></div>";
+  };
   return '<div class="balance-sub">'
     + '<div class="balance-sub-head">Projected bank balance at end of cycle</div>'
     + '<div class="balance-sub-row">'
     + '<div class="balance-sub-num">' + money(endBalance, "ILS") + "</div>"
     + '<div class="balance-sub-delta ' + dcls + '">' + sign
     + money(Math.abs(change), "ILS") + "</div></div>"
-    + '<div class="balance-sub-line">From <b>' + money(bankNow, "ILS")
-    + "</b> now · assumes remaining income arrives and reserved bills go "
-    + "out, with no further variable spending. "
-    + (v.savingsTransferred
-        ? "Savings reserve is being transferred out of this account."
-        : "Savings reserves stay in the account, just earmarked.")
+    + '<div class="balance-details">'
+    // Income and fixed bills are shown as separate rows now — netting them
+    // into one "+₪X" hid the fact that the bulk of the positive number is
+    // the same salary already counted in the headline above, which made the
+    // projection look like a phantom gain. Showing them apart makes
+    // "income arriving" and "bills still due" individually legible.
+    + detail("Income still to arrive", remainingIncome, "good")
+    + detail("Fixed bills still due", remainingFixed, "bad")
+    + detail("Essentials still budgeted", remainingEssentials, "bad")
+    + detail("Variable spend reserved", remainingVariable, "bad")
+    + detail("Savings transferred out", savingsOut, "bad")
     + "</div></div>";
 }
 
@@ -3545,6 +3589,12 @@ function budgetProjection() {
   // Expected fixed commitment: every recurring fixed-group merchant reduced to
   // a monthly-equivalent. "Recurring" = a frequency is set, or it has charged
   // in two or more distinct cycles (a one-off fixed expense is not reserved).
+  // Also computes a second figure, `expectedFixedThisCycle`, which is the
+  // full charge of every recurring merchant predicted to bill this cycle —
+  // a bimonthly bill counts in full the cycle it's due and zero the cycle in
+  // between, instead of always counting half. That's the figure the Overview
+  // headline uses ("Expected fixed + essentials" matches what your bank will
+  // actually be charged this cycle).
   const merch = {};
   state.transactions.forEach((t) => {
     if (t.currency !== "ILS" || isCardTotal(t) || t.refundForId) return;
@@ -3552,12 +3602,31 @@ function budgetProjection() {
     const amt = t.amount + txnRefundAmount(t);
     if (amt >= 0) return;
     const key = merchantKey(t.description);
-    const r = merch[key] || (merch[key] = { cycles: {}, lastT: 0, charge: 0 });
+    const r = merch[key] || (merch[key] = {
+      cycles: {}, lastT: 0, charge: 0, category: t.category || 'Other',
+    });
     r.cycles[cycleKey(t.date)] = true;
     const ts = new Date(t.date).getTime();
-    if (ts >= r.lastT) { r.lastT = ts; r.charge = -amt; }
+    if (ts >= r.lastT) {
+      r.lastT = ts; r.charge = -amt; r.category = t.category || r.category;
+    }
   });
+
+  // monthsBetweenCycleKeys: how many calendar months separate two YYYY-MM
+  // cycle keys. Negative for future, 0 for same cycle, positive for past.
+  // Cycles are calendar months (with a user-chosen start day), so the
+  // YYYY-MM portion is sufficient for "is the next bill due here?" math.
+  const ymToMonths = (s) => {
+    const [y, m] = s.split("-").map(Number);
+    return y * 12 + (m - 1);
+  };
+  const curCycle = currentCycleKey();
+  const curMonths = ymToMonths(curCycle);
+  const PERIOD_CYCLES = { monthly: 1, bimonthly: 2, yearly: 12 };
+  const catSplits = state.categorySplits || {};
+
   let expectedFixed = 0;
+  let expectedFixedThisCycle = 0;
   const cancelled = state.cancelledSubs || {};
   Object.keys(merch).forEach((key) => {
     const r = merch[key];
@@ -3565,10 +3634,27 @@ function budgetProjection() {
     if (freq === "ignore") return; // user explicitly excluded this merchant
     if (cancelled[key]) return; // marked cancelled in the Subscriptions tab
     if (!freq && Object.keys(r.cycles).length < 2) return; // one-off — skip
-    expectedFixed += monthlyEquivalent(r.charge, freq || "monthly");
+    const f = freq || "monthly";
+    const split = catSplits[r.category] || 1;
+    expectedFixed += monthlyEquivalent(r.charge, f) / split;
+    // Is this merchant due to bill this cycle?
+    //   - If it has already billed this cycle, count the actual charge.
+    //   - Else if at least one period has elapsed since its last bill, the
+    //     next one is due now (or overdue) — count it.
+    //   - Otherwise skip; it'll bill in a later cycle.
+    const lastCycle = cycleKey(new Date(r.lastT).toISOString());
+    const elapsed = curMonths - ymToMonths(lastCycle);
+    const period = PERIOD_CYCLES[f] || 1;
+    if (elapsed === 0 || elapsed >= period) {
+      expectedFixedThisCycle += r.charge / split;
+    }
   });
 
-  return { expectedIncome: expectedIncome, expectedFixed: expectedFixed };
+  return {
+    expectedIncome: expectedIncome,
+    expectedFixed: expectedFixed,
+    expectedFixedThisCycle: expectedFixedThisCycle,
+  };
 }
 
 // The variable-budget figures with recurring projection applied — income as a
@@ -3578,12 +3664,15 @@ function projectedVariable(v) {
   const p = budgetProjection();
   if (!p) return v;
   // Straightforward leftover formula:
-  //   variable = income − (essential budget + actual fixed spent)
+  //   variable = income − (essential budget + expected fixed this cycle)
   // Income is the multi-month average ("Expected income"); the essential
   // side reserves the budgets you set in Settings (the planning amount, so
-  // the leftover stays stable as essentials get used); fixed counts what has
-  // actually been spent on fixed bills this cycle. If essentials run past
-  // their budget, the overflow is counted so the leftover stays honest.
+  // the leftover stays stable as essentials get used). For fixed we prefer
+  // `expectedFixedThisCycle` from the merchant rollup — the FULL charge of
+  // every recurring merchant predicted to bill this cycle, with per-
+  // category splits applied. A bimonthly bill counts in full the cycle
+  // it's due and zero the cycle in between, instead of an average half-
+  // share. Falls back to the actual fixedSpent when the projection is off.
   const income = p.expectedIncome != null ? p.expectedIncome : v.income;
   const essentialBudget = ((state.budget && state.budget.essentials) || [])
     .reduce((s, l) => s + (l.budget || 0), 0);
@@ -3591,7 +3680,9 @@ function projectedVariable(v) {
   const essential = essentialBudget > 0
     ? Math.max(essentialBudget, essentialSpent)
     : essentialSpent;
-  const fixed = v.fixedSpent || 0;
+  const fixed = p.expectedFixedThisCycle != null
+    ? p.expectedFixedThisCycle
+    : (v.fixedSpent || 0);
   const committed = fixed + essential;
   const piggy = v.piggyFunded || 0;
   // This-month savings reserve — capped at whatever room is left so it never
@@ -5478,7 +5569,8 @@ function recurringView() {
     // Per-category split (e.g. Utilities ÷ 3 when shared with roommates).
     // Applied to every row in the section; the header pill is the edit
     // affordance. The total shown is the user's share, with the full bill
-    // as a small struck-through line when a split is active.
+    // as a small struck-through line when a split is active. (Same total is
+    // also shown on the header bar; "Due this cycle" lives lower down.)
     const catSplit = (state.categorySplits || {})[cat] || 1;
     const catShared = catSplit > 1;
     const splitPill = '<button type="button" class="rec-split'
@@ -5565,19 +5657,23 @@ function recurringView() {
   //      four-fold).
   // Showing both removes the mystery: when projected ≫ actual, fix the
   // frequencies on the offending merchants.
-  // Server's fixedSpent counts every fixed-category transaction at face
-  // value; subtract the roommates' share of split merchants this cycle so
-  // the page matches the user's actual pocket cost.
-  const serverFixedSpent = (state.budget && state.budget.variable
-    && state.budget.variable.fixedSpent) || 0;
-  const fixedActualThisCycle = serverFixedSpent - roommateShareThisCycle();
-  const headlineMatch = fixedActualThisCycle + essentialsReserved;
-  const projectedGapPositive = totalMonthly - fixedActualThisCycle;
+  // "Due this cycle" = the full charge of every merchant that's either
+  // already billed this cycle or is predicted to bill before the cycle
+  // ends, divided by the category split. This is the figure the Overview
+  // headline now uses — so the page total and the headline match exactly,
+  // and a bimonthly bill that won't bill this month contributes ₪0
+  // instead of an averaged half-share.
+  const fixedDueThisCycle = rows.reduce((s, r) => {
+    const status = fixedBillStatus(r);
+    if (status.cls === "muted") return s; // off-cycle, not due
+    return s + (r.fullCharge / r.split);
+  }, 0);
+  const headlineMatch = fixedDueThisCycle + essentialsReserved;
 
   const totalsStrip = essentialLines.length
     ? '<div class="rec-totals">'
-        + '<div class="rec-totals-cell"><span class="rec-totals-k">Fixed actual this cycle</span>'
-        + '<span class="rec-totals-v">' + money(fixedActualThisCycle, "ILS")
+        + '<div class="rec-totals-cell"><span class="rec-totals-k">Fixed due this cycle</span>'
+        + '<span class="rec-totals-v">' + money(fixedDueThisCycle, "ILS")
         + '<span class="rec-unit">/mo</span></span></div>'
         + '<span class="rec-totals-op">+</span>'
         + '<div class="rec-totals-cell"><span class="rec-totals-k">Essentials reserved</span>'
@@ -5594,29 +5690,145 @@ function recurringView() {
     + '<span class="spacer"></span>'
     + '<div class="rec-grand-pair">'
     + '<div class="rec-grand-item primary"><div class="rec-grand-num">'
-    + money(fixedActualThisCycle, "ILS") + '<span class="rec-unit">/mo</span></div>'
-    + '<div class="rec-grand-lab">Actually billed this cycle</div></div>'
+    + money(fixedDueThisCycle, "ILS") + '<span class="rec-unit">/mo</span></div>'
+    + '<div class="rec-grand-lab">Due this cycle</div></div>'
     + '<div class="rec-grand-item"><div class="rec-grand-num muted">'
     + money(totalMonthly, "ILS") + '<span class="rec-unit">/mo</span></div>'
-    + '<div class="rec-grand-lab">Projected · merchant amortization</div></div>'
+    + '<div class="rec-grand-lab">Monthly average</div></div>'
     + "</div></div>"
     + '<p class="hint"><b>Two totals.</b> '
-    + '<b>Actually billed this cycle</b> sums every fixed-category transaction '
-    + "that posted this cycle — this is what the Overview's "
-    + '"Expected fixed + essentials" uses, so it lines up with the headline. '
-    + '<b>Projected</b> sums each merchant\'s monthly-equivalent (a yearly bill '
-    + '÷ 12, a bimonthly ÷ 2). When projected is much higher than actual, some '
-    + "merchants are tagged with the wrong frequency — open the transaction "
-    + "editor on a row and pick the right one to fix the projection.</p>"
-    + (projectedGapPositive > Math.max(50, fixedActualThisCycle * 0.15)
-        ? '<div class="rec-mismatch">Gap between projected and actual is '
-          + money(projectedGapPositive, "ILS")
-          + ' /mo — likely a merchant tagged with the wrong frequency (default is monthly). '
-          + 'Check the merchants below whose monthly figure looks too high.</div>'
-        : "")
+    + '<b>Due this cycle</b> sums the full charge of every recurring merchant '
+    + "that's billing in this cycle — a bimonthly bill counts in full the cycle "
+    + "it's due and ₪0 the cycle between, instead of always counting half. "
+    + "This is what the Overview's <b>Expected fixed + essentials</b> uses, so "
+    + 'the headline lines up exactly with the bottom of this page. <b>Monthly '
+    + "average</b> sums each merchant's monthly-equivalent — the long-run "
+    + "smoothed cost regardless of which cycle a bill lands in.</p>"
     + sections
     + essentialsSection
     + totalsStrip;
+}
+
+// Source-of-truth scan for the user's recurring income. Returns one row per
+// merchant Hon considers a real income source — either because the user
+// marked it explicitly from the move sheet (freq === "income") or because
+// it appeared in two or more billing cycles. Merchants the user flagged
+// with the ✕ in the Income tab (freq === "ignore") are excluded. Used by
+// both the Income tab itself and the Overview's end-of-cycle projection.
+function recurringIncomeMerchants() {
+  const merch = {};
+  state.transactions.forEach((t) => {
+    if (t.currency !== "ILS" || t.refundForId) return;
+    if (t.category === "Transfers") return;
+    const amt = t.amount + txnRefundAmount(t);
+    if (amt <= 0) return;
+    const key = merchantKey(t.description);
+    const r = merch[key] || (merch[key] = {
+      key, cycles: {}, count: 0, total: 0, lastT: 0,
+      charge: 0, last: null,
+      desc: merchantName(t.description), category: t.category || "Income",
+    });
+    r.cycles[cycleKey(t.date)] = true;
+    r.count += 1;
+    r.total += amt;
+    const ts = new Date(t.date).getTime();
+    if (ts >= r.lastT) {
+      r.lastT = ts; r.charge = amt; r.last = t;
+      r.desc = merchantName(t.description);
+    }
+  });
+  return Object.values(merch).filter((r) => {
+    const freq = state.merchantFreq[r.key];
+    if (freq === "ignore") return false;
+    return freq === "income" || Object.keys(r.cycles).length >= 2;
+  }).map((r) => Object.assign({}, r, {
+    avg: r.total / Math.max(1, Object.keys(r.cycles).length),
+    marked: state.merchantFreq[r.key] === "income",
+  }));
+}
+
+// Sum of positive transactions in the given cycle that come from one of
+// the recurring-income merchants. The bank projection uses this to figure
+// out how much of the expected income has already landed.
+function recurringIncomeReceived(cycle) {
+  const keys = new Set(recurringIncomeMerchants().map((r) => r.key));
+  let sum = 0;
+  state.transactions.forEach((t) => {
+    if (t.currency !== "ILS" || t.refundForId) return;
+    if (t.category === "Transfers") return;
+    if (cycleKey(t.date) !== cycle) return;
+    if (!keys.has(merchantKey(t.description))) return;
+    const amt = t.amount + txnRefundAmount(t);
+    if (amt > 0) sum += amt;
+  });
+  return sum;
+}
+
+// Income tab. The mirror of Fixed bills, scoped to positive transactions:
+// lists every merchant Hon has detected as recurring income (or that the
+// user marked as income from the move sheet) so misclassified inflows can
+// be removed in one click. Removing a row sets the merchant's frequency to
+// "ignore", which strips it from the budget projection's expected income.
+function incomeView() {
+  const rows = recurringIncomeMerchants().sort((a, b) => b.avg - a.avg);
+
+  if (!rows.length) {
+    return '<div class="sec-head"><div class="label">Income</div></div>'
+      + '<div class="card empty">No recurring income detected yet. A positive '
+      + "transaction lands here once it has shown up in two or more billing "
+      + "cycles, or once you mark it as recurring income from the transaction "
+      + "editor. Removing a row stops it from inflating <b>Expected income</b> "
+      + "in the budget — useful for transfers or refunds Hon mistakenly saw "
+      + "as salary.</div>";
+  }
+
+  const totalMonthly = rows.reduce((s, r) => s + r.avg, 0);
+
+  const list = rows.map((r) => {
+    const lastDate = r.last ? fmtDate(r.last.date) : "—";
+    const cycles = Object.keys(r.cycles).length;
+    const seenN = cycles === 1 ? "1 cycle" : cycles + " cycles";
+    const txnId = (r.last && r.last.id) || "";
+    const tag = r.marked
+      ? '<span class="rec-tag rec-tag-good" title="Marked as recurring income">marked</span>'
+      : '<span class="rec-tag rec-tag-muted" title="Detected automatically — appears in two or more cycles">auto</span>';
+    return '<div class="rec-row">'
+      + '<div class="rec-main" data-txn="' + esc(txnId) + '">'
+      + '<div class="rec-name">' + esc(r.desc) + " " + tag + "</div>"
+      + '<div class="rec-meta">' + money(r.charge, "ILS") + " per inflow · "
+      + "last " + esc(lastDate) + " · " + esc(seenN) + "</div></div>"
+      + '<div class="rec-amount good">' + money(r.avg, "ILS")
+      + '<span class="rec-unit">/mo avg</span></div>'
+      + '<button type="button" class="rec-remove" '
+      + 'data-action="ignore-income" data-arg="' + esc(r.key) + '" '
+      + 'title="Remove from Income — keeps the underlying transactions, just '
+      + 'stops counting this merchant toward Expected income" '
+      + 'aria-label="Remove">✕</button>'
+      + "</div>";
+  }).join("");
+
+  const totals = '<div class="rec-totals">'
+    + '<div class="rec-tot-row"><span>Recurring income / month</span>'
+    + '<b class="good">' + money(totalMonthly, "ILS") + "</b></div></div>";
+
+  return '<div class="sec-head"><div class="label">Income</div></div>'
+    + '<p class="hint" style="margin-bottom:14px">Recurring inflows Hon counts '
+    + "as <b>Expected income</b> in the budget. Remove anything that isn't really "
+    + "income — a refund, a transfer between your own accounts, money a friend "
+    + "paid you back — so the projection stays honest.</p>"
+    + '<section class="rec-section">' + list + "</section>"
+    + totals;
+}
+
+async function ignoreIncomeMerchant(key) {
+  try {
+    await api("/merchant-frequency", "PUT", { key, frequency: "ignore" });
+    state.merchantFreq = Object.assign({}, state.merchantFreq, { [key]: "ignore" });
+    render();
+    toast("Removed from Income.");
+  } catch (e) {
+    toast((e && e.message) || "Could not remove the merchant.", true);
+  }
 }
 
 function subscriptionsView() {
@@ -6852,7 +7064,7 @@ function settingsCardsHtml() {
 // re-fetch + re-render runs after every change so the new category lands
 // everywhere immediately.
 function categoriesPanelHtml() {
-  const byGroup = { essential: [], fixed: [], variable: [] };
+  const byGroup = { income: [], essential: [], fixed: [], variable: [] };
   (state.categories || [])
     .slice()
     .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name))
@@ -6928,6 +7140,7 @@ function categoryModal(existing) {
       + '" data-color="' + esc(c) + '" style="background:' + esc(c)
       + '" aria-label="' + esc(c) + '"></button>').join("");
     const groups = [
+      ["income", "Income", "Inflow — counted as money in, never spending"],
       ["essential", "Essential", "Day-to-day, budgeted per category"],
       ["fixed", "Fixed", "Recurring bill, tracked but not budgeted"],
       ["variable", "Variable", "Discretionary, pools into the variable allowance"],
@@ -8168,6 +8381,11 @@ function handleAction(action, btn) {
     case "ignore-recurring": {
       const arg = btn && btn.dataset.arg;
       if (arg) ignoreRecurringMerchant(arg);
+      break;
+    }
+    case "ignore-income": {
+      const arg = btn && btn.dataset.arg;
+      if (arg) ignoreIncomeMerchant(arg);
       break;
     }
     case "split-merchant": {

@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-export const SCHEMA_VERSION = 25;
+export const SCHEMA_VERSION = 28;
 
 export interface DbHandle {
   db: Database.Database;
@@ -422,8 +422,8 @@ const MIGRATIONS: { version: number; sql: string }[] = [
         ('Shopping',      '🛍️', '#D975D6', 'variable', 120, 1, datetime('now')),
         ('Entertainment', '🎭',  '#A880ED', 'variable', 130, 1, datetime('now')),
         ('Travel',        '✈️', '#5CC7DB', 'variable', 140, 1, datetime('now')),
-        ('Income',        '💰',  '#4CD180', 'variable', 150, 1, datetime('now')),
-        ('Transfers',     '↔️', '#999EB8', 'variable', 160, 1, datetime('now')),
+        ('Income',        '💰',  '#4CD180', 'income',   150, 1, datetime('now')),
+        ('Transfers',     '↔️', '#999EB8', 'income',   160, 1, datetime('now')),
         ('Other',         '▫️', '#8C8FA8', 'variable', 999, 1, datetime('now'));
     `,
   },
@@ -525,6 +525,48 @@ const MIGRATIONS: { version: number; sql: string }[] = [
     version: 25,
     sql: `
       ALTER TABLE monthly_savings ADD COLUMN transferred INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
+  {
+    // Bills the user shares with roommates / partners: per-merchant
+    // split_count means "I pay 1/N of every charge from this merchant".
+    // Independent of merchant_recurrence (a merchant can be split without
+    // being tagged as recurring, and vice versa). The Fixed bills view
+    // divides displayed amounts by split_count; raw transactions are left
+    // unchanged so the original charges still match the bank.
+    version: 26,
+    sql: `
+      CREATE TABLE merchant_splits (
+        merchant_key TEXT PRIMARY KEY,
+        split_count  INTEGER NOT NULL CHECK (split_count >= 1),
+        created_at   TEXT NOT NULL
+      );
+    `,
+  },
+  {
+    // Per-CATEGORY split (e.g. Utilities ÷ 3 when shared with roommates).
+    // The user-level mental model is "I share this whole category with N
+    // people", so the divisor lives on the category rather than per
+    // merchant. Applies to every fixed-bill row inside that category in
+    // the Fixed-bills view, the section totals, and the headline.
+    version: 27,
+    sql: `
+      CREATE TABLE category_splits (
+        category    TEXT PRIMARY KEY,
+        split_count INTEGER NOT NULL CHECK (split_count >= 1),
+        created_at  TEXT NOT NULL
+      );
+    `,
+  },
+  {
+    // Income gets its own cat_group so it doesn't sit under "Variable
+    // expenses" on the Activity page. The budget engine already excludes
+    // positive amounts from spending sums, so this is purely a UI / grouping
+    // change — no math shift.
+    version: 28,
+    sql: `
+      UPDATE categories SET cat_group = 'income'
+        WHERE name IN ('Income', 'Transfers');
     `,
   },
 ];

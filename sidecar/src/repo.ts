@@ -1118,6 +1118,64 @@ export class Repo {
       .run(merchantKey);
   }
 
+  // --- Merchant splits ------------------------------------------------------
+  // Bills the user shares with N other people: split_count is the divisor
+  // (e.g. 3 = "I pay 1/3 of every charge"). Used by the Fixed bills view to
+  // show the user's actual share alongside the full bill.
+
+  listMerchantSplits(): { merchantKey: string; splitCount: number }[] {
+    return this.db
+      .prepare(
+        'SELECT merchant_key AS merchantKey, split_count AS splitCount FROM merchant_splits',
+      )
+      .all() as { merchantKey: string; splitCount: number }[];
+  }
+
+  setMerchantSplit(merchantKey: string, splitCount: number): void {
+    this.db
+      .prepare(
+        `INSERT INTO merchant_splits (merchant_key, split_count, created_at)
+         VALUES (?, ?, ?)
+         ON CONFLICT (merchant_key) DO UPDATE SET split_count = excluded.split_count`,
+      )
+      .run(merchantKey, splitCount, new Date().toISOString());
+  }
+
+  clearMerchantSplit(merchantKey: string): void {
+    this.db
+      .prepare('DELETE FROM merchant_splits WHERE merchant_key = ?')
+      .run(merchantKey);
+  }
+
+  // --- Category splits ------------------------------------------------------
+  // Per-category divisor (e.g. Utilities ÷ 3 when shared with roommates).
+  // The Fixed-bills view multiplies every row in the category by 1/N and
+  // adjusts section totals + the headline reservation accordingly.
+
+  listCategorySplits(): { category: string; splitCount: number }[] {
+    return this.db
+      .prepare(
+        'SELECT category, split_count AS splitCount FROM category_splits',
+      )
+      .all() as { category: string; splitCount: number }[];
+  }
+
+  setCategorySplit(category: string, splitCount: number): void {
+    this.db
+      .prepare(
+        `INSERT INTO category_splits (category, split_count, created_at)
+         VALUES (?, ?, ?)
+         ON CONFLICT (category) DO UPDATE SET split_count = excluded.split_count`,
+      )
+      .run(category, splitCount, new Date().toISOString());
+  }
+
+  clearCategorySplit(category: string): void {
+    this.db
+      .prepare('DELETE FROM category_splits WHERE category = ?')
+      .run(category);
+  }
+
   // --- Cancelled subscriptions ----------------------------------------------
   // Subscriptions the user has explicitly marked cancelled. `cancelled_at` is
   // the moment the mark was set — the UI flags any charge after that as a
@@ -1732,8 +1790,10 @@ export interface Category {
   emoji: string;
   /** Accent colour as a hex string, e.g. "#5CC773". */
   color: string;
-  /** Spending umbrella the budget and group breakdowns use. */
-  catGroup: 'essential' | 'fixed' | 'variable';
+  /** Spending umbrella the budget and group breakdowns use. `income` is the
+   *  fourth bucket — categories in it represent inflows and are excluded
+   *  from every spending sum. */
+  catGroup: 'essential' | 'fixed' | 'variable' | 'income';
   sortOrder: number;
   /** True for the seeded categories — they cannot be deleted, only edited. */
   isBuiltin: boolean;
@@ -1752,7 +1812,8 @@ interface CategoryRow {
 
 function toCategory(row: CategoryRow): Category {
   const group: Category['catGroup'] =
-    row.catGroup === 'essential' || row.catGroup === 'fixed' ? row.catGroup : 'variable';
+    row.catGroup === 'essential' || row.catGroup === 'fixed' || row.catGroup === 'income'
+      ? row.catGroup : 'variable';
   return { ...row, catGroup: group, isBuiltin: row.isBuiltin !== 0 };
 }
 
