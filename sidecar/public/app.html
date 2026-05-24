@@ -262,17 +262,21 @@
   .row.nw-off .amount { text-decoration: line-through; }
   .asset-card.nw-off .conn-total { text-decoration: line-through; opacity: 0.6; }
   /* Loan card — debt visualised with a progress bar, monthly payment, and
-     a coloured pill for the rate track (fixed / prime / CPI-linked). */
+     a coloured pill for the rate track (fixed / prime / CPI-linked).
+     Entry animations are scoped to `.tab-enter` so they fire once on tab
+     navigation, not on every re-render — without the scope, sync polling
+     would replay them every 1.5s and the card would flash. */
   @keyframes loan-card-in { from { opacity: 0; transform: translateY(8px); } }
   @keyframes loan-bar-fill { from { width: 0; } }
-  .loan-card { animation: loan-card-in .35s ease-out; }
+  .tab-enter .loan-card { animation: loan-card-in .35s ease-out; }
   .loan-card .conn-total { color: var(--red); }
   .loan-card.nw-off { opacity: 0.65; }
   .loan-card.nw-off .conn-total { text-decoration: line-through; opacity: 0.6; }
   .loan-bar { height: 8px; background: var(--card-hi); border-radius: 999px;
     overflow: hidden; margin: 14px 0 12px; }
   .loan-bar > span { display: block; height: 100%; border-radius: 999px;
-    background: linear-gradient(90deg, var(--indigo), #5c51c4);
+    background: linear-gradient(90deg, var(--indigo), #5c51c4); }
+  .tab-enter .loan-bar > span {
     animation: loan-bar-fill 1.1s cubic-bezier(.2,.7,.2,1); }
   .loan-stats { display: grid; grid-template-columns: repeat(3, 1fr);
     gap: 10px 14px; margin-top: 4px; }
@@ -5703,14 +5707,18 @@ function budgetModal() {
       + '<div class="bm-row">'
         + '<span class="bm-ico" style="background:#5C9EF522;color:#5C9EF5">🏦</span>'
         + '<div class="bm-info"><div class="bm-name">Set aside for savings</div>'
-        + '<div class="bm-spent">A one-off reserve for this month — not a piggy '
-        + "bank. Capped at what's free to spend after fixed bills and essentials.</div></div>"
+        + '<div class="bm-spent" id="bm-savings-cap">A one-off reserve for this '
+        + "month — not a piggy bank.</div></div>"
         + '<div class="bm-input"><span class="bm-cur">' + symbol + "</span>"
         + '<input id="bm-savings" type="number" min="0" step="100" placeholder="0" value="'
         + esc(savingsVal) + '"></div></div>'
       + '<div class="bm-summary"><span>Total budgeted</span>'
       + '<span id="bm-total">—</span></div>'
-      + '<div class="bgt-group">Essentials</div>' + catRows(ESSENTIAL_CATS)
+      + '<div class="bgt-group">Essentials</div>'
+      + catRows((state.categories || [])
+          .filter((c) => c.catGroup === "essential")
+          .sort((a, x) => (a.sortOrder ?? 100) - (x.sortOrder ?? 100))
+          .map((c) => c.name))
       + '<div class="bgt-group">Variable spending · allowed right now</div>'
       + '<div class="bm-var"><div class="bm-var-amt">'
       + money(v.allowed > 0 ? v.allowed : 0, cur) + "</div>"
@@ -5720,6 +5728,26 @@ function budgetModal() {
 
     const totalEl = modal.querySelector("#bm-total");
     const inputs = [...modal.querySelectorAll("[data-budget]")];
+    const incomeInputEl = modal.querySelector("#bm-income-override");
+    const savingsInputEl = modal.querySelector("#bm-savings");
+    const savingsCapEl = modal.querySelector("#bm-savings-cap");
+    // The room left for a savings reserve, computed from the values currently
+    // in the modal — so editing the income override or an essential budget
+    // updates the cap immediately, no save-and-reopen needed.
+    function savingsCap() {
+      const incomeRaw = incomeInputEl.value.trim();
+      const income = incomeRaw === "" ? (v.income || 0) : (Number(incomeRaw) || 0);
+      // Essentials reserve max(budget, already-spent) — matches projectedVariable.
+      let essential = 0;
+      inputs.forEach((inp) => {
+        const amount = inp.value.trim() === "" ? 0 : Number(inp.value) || 0;
+        const sp = Number(inp.dataset.spent) || 0;
+        essential += amount > 0 ? Math.max(amount, sp) : sp;
+      });
+      const fixed = v.fixedSpent || 0;
+      const piggy = v.piggyFunded || 0;
+      return Math.max(0, income - fixed - essential - piggy);
+    }
     function refresh() {
       let total = 0;
       inputs.forEach((inp) => {
@@ -5734,8 +5762,21 @@ function budgetModal() {
           : ratio > 0.85 ? "var(--amber)" : "var(--green)";
       });
       totalEl.textContent = money(total, cur);
+      const cap = savingsCap();
+      const wishRaw = savingsInputEl.value.trim();
+      const wish = wishRaw === "" ? 0 : Number(wishRaw) || 0;
+      const over = wish > cap;
+      savingsCapEl.textContent =
+        "A one-off reserve for this month — not a piggy bank. Up to "
+        + money(cap, cur) + " free to set aside right now"
+        + (over ? " — your " + money(wish, cur) + " will be capped." : ".");
+      savingsCapEl.style.color = over ? "var(--amber)" : "";
+      savingsInputEl.max = String(Math.round(cap));
+      savingsInputEl.placeholder = "max " + Math.round(cap);
     }
     inputs.forEach((inp) => inp.addEventListener("input", refresh));
+    incomeInputEl.addEventListener("input", refresh);
+    savingsInputEl.addEventListener("input", refresh);
     refresh();
 
     modal.querySelector('[data-x="cancel"]').addEventListener("click", closeOverlay);
@@ -6368,7 +6409,10 @@ async function scrape(conn) {
   if (state.scrapes[conn.id] && state.scrapes[conn.id].phase === "running") return;
   state.scrapes[conn.id] = {
     phase: "running",
-    message: "Signing in — you may be asked for a verification code.",
+    // Placeholder — the engine overwrites this within a beat with the live
+    // progress (e.g. "Reconnecting with your saved session…" when cookies
+    // are still valid, or "Logging in…" for a fresh sign-in).
+    message: "Starting sync…",
   };
   render();
   try {
