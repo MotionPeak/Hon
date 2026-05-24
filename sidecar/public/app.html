@@ -222,6 +222,46 @@
   /* --- Fixed-bills view (Expected fixed visualised) ----------------------- */
   .rec-grand { font: 800 18px/1 ui-rounded, "SF Pro Rounded", system-ui;
     color: var(--text); font-variant-numeric: tabular-nums; }
+  /* Essentials block on the Fixed-bills page — visually a sibling of the
+     merchant sections, but slightly muted to read as "this is a budget, not
+     a per-merchant rollup". A coloured dot keys each row to its category. */
+  .rec-section-essentials { background: var(--card-hi);
+    border-color: var(--hairline-2); }
+  .rec-essential-dot { display: inline-block; width: 9px; height: 9px;
+    border-radius: 50%; flex: none; }
+  .rec-section-note { font-size: 11.5px; color: var(--muted); margin-top: 10px;
+    padding-top: 9px; border-top: 1px dashed var(--hairline);
+    line-height: 1.5; }
+  /* Bottom totals strip: fixed + essentials = Overview headline, three
+     boxes joined by + and = so the math reads at a glance. */
+  .rec-totals { display: flex; align-items: stretch; gap: 6px;
+    margin-top: 14px; flex-wrap: wrap; }
+  .rec-totals-cell { display: flex; flex-direction: column; gap: 4px;
+    padding: 12px 16px; border-radius: 12px; background: var(--bg-elev);
+    border: 1px solid var(--hairline); flex: 1; min-width: 130px; }
+  .rec-totals-final { border-color: var(--indigo); background: var(--indigo-soft); }
+  .rec-totals-k { font-size: 10.5px; font-weight: 700; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.06em; }
+  .rec-totals-v { font: 800 17px/1 ui-rounded, "SF Pro Rounded", system-ui;
+    color: var(--text); font-variant-numeric: tabular-nums; }
+  .rec-totals-op { align-self: center; font: 700 18px/1 ui-rounded,
+    "SF Pro Rounded", system-ui; color: var(--muted); padding: 0 4px; }
+  /* Dual-total header: actual-this-cycle (the headline-matching figure)
+     on the left, projected (merchant amortization) on the right, with the
+     primary one slightly larger so the reconciliation number reads first. */
+  .rec-grand-pair { display: flex; gap: 18px; align-items: flex-end; }
+  .rec-grand-item { display: flex; flex-direction: column; align-items: flex-end;
+    gap: 2px; }
+  .rec-grand-num { font: 800 18px/1 ui-rounded, "SF Pro Rounded", system-ui;
+    color: var(--text); font-variant-numeric: tabular-nums; }
+  .rec-grand-num.muted { color: var(--muted); font-size: 14px; font-weight: 700; }
+  .rec-grand-item.primary .rec-grand-num { font-size: 20px; }
+  .rec-grand-lab { font-size: 10px; font-weight: 700; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.06em; white-space: nowrap; }
+  .rec-mismatch { background: rgba(245,181,74,0.10);
+    border: 1px solid rgba(245,181,74,0.25);
+    color: var(--amber); border-radius: 10px; padding: 10px 13px;
+    font-size: 12px; line-height: 1.5; margin: -4px 0 12px; }
   .rec-grand .rec-unit, .rec-amount .rec-unit, .rec-cat-total .rec-unit {
     font-size: 10px; font-weight: 600; color: var(--muted);
     margin-left: 3px; text-transform: lowercase; letter-spacing: 0; }
@@ -266,6 +306,22 @@
     transition: opacity .14s, background-color .14s, color .14s, transform .12s; }
   .rec-row:hover .rec-remove { opacity: 1; color: #fff; }
   .rec-remove:hover { background: var(--red); color: #fff; transform: scale(1.1); }
+  /* ÷N pill — click to set how many people split the bill. Lit up when the
+     split is active (>1), muted-outline when 1 (no split). */
+  .rec-split { padding: 4px 9px; border-radius: 999px; border: 1px solid var(--hairline-2);
+    background: transparent; color: var(--muted); cursor: pointer;
+    font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums;
+    flex: none; margin-left: 6px; line-height: 1.2;
+    transition: border-color .14s, color .14s, background-color .14s, transform .12s; }
+  .rec-split:hover { border-color: var(--indigo); color: var(--text); }
+  .rec-split.on { border-color: var(--indigo); background: var(--indigo-soft);
+    color: var(--text); }
+  .rec-amount-full { font-size: 10.5px; font-weight: 600; color: var(--muted);
+    text-decoration: line-through; margin-top: 3px; }
+  /* Split-modal preview line — appears below the people-count input. */
+  .sp-preview { font-size: 12.5px; color: var(--muted); padding: 10px 12px;
+    background: var(--card-hi); border-radius: 9px; margin: 4px 0 8px;
+    line-height: 1.5; }
 
   /* --- Net worth banner -------------------------------------------------- */
   .networth { position: relative; overflow: hidden; isolation: isolate;
@@ -1773,6 +1829,7 @@ const state = {
   transactionLinks: [],   // [{ expenseId, refundId, amount }]
   summary: null, budget: null, insights: null, llm: null,
   merchantFreq: {},      // { merchantKey: "monthly"|"bimonthly"|"yearly" }
+  merchantSplits: {},    // { merchantKey: N }  N = "I pay 1/N of each charge"
   cancelledSubs: {},     // { merchantKey: cancelledAtIso } — user-marked cancellations
   incomeOverride: null,  // null | number — manual override for Expected income
   monthlySavings: {},    // { "YYYY-MM": { amount, transferred } } — per-cycle savings set-aside
@@ -2096,7 +2153,7 @@ async function loadAll() {
   try {
     const [companies, connections, accounts, transactions, assets, loansResp, categoriesResp,
            summary, insights, llm, merchantFreq, brokerage, cancelledSubs,
-           incomeOverrideResp, savingsResp, linksResp] =
+           incomeOverrideResp, savingsResp, linksResp, splitsResp] =
       await Promise.all([
         api("/companies").then((r) => r.companies),
         api("/connections").then((r) => r.connections),
@@ -2114,6 +2171,7 @@ async function loadAll() {
         api("/budget/income-override").catch(() => ({ value: null })),
         api("/budget/savings").catch(() => ({ savings: {} })),
         api("/transaction-links").catch(() => ({ links: [] })),
+        api("/merchant-splits").catch(() => ({ splits: {} })),
       ]);
     Object.assign(state, {
       companies, connections, accounts, transactions, assets,
@@ -2123,6 +2181,7 @@ async function loadAll() {
       incomeOverride: incomeOverrideResp.value ?? null,
       monthlySavings: savingsResp.savings || {},
       transactionLinks: linksResp.links || [],
+      merchantSplits: splitsResp.splits || {},
     });
     // The budget is fetched once transactions are in state — its URL carries
     // the recurring projection, which is derived from those transactions.
@@ -2224,8 +2283,16 @@ function overviewView() {
 function balanceCard() {
   const b = state.budget;
   if (!b) return "";
-  const v = projectedVariable(b.variable
-    || { income: 0, committed: 0, spent: 0, allowed: 0 });
+  // Subtract the roommates' share of fixed-category charges from the raw
+  // fixedSpent the server reports, so the headline reflects what the user
+  // actually paid — not what the joint account was charged. Same adjustment
+  // the Fixed-bills page makes for its "Actually billed" total.
+  const baseVariable = Object.assign(
+    {}, b.variable || { income: 0, committed: 0, spent: 0, allowed: 0 },
+    { fixedSpent: ((b.variable && b.variable.fixedSpent) || 0)
+        - roommateShareThisCycle() },
+  );
+  const v = projectedVariable(baseVariable);
   const income = v.income || 0;
   // `committed` is fixed + essentials reserved for the whole cycle. We also
   // subtract `varSpent` — variable purchases already settled this cycle —
@@ -3468,10 +3535,12 @@ function budgetProjection() {
     if (ts >= r.lastT) { r.lastT = ts; r.charge = -amt; }
   });
   let expectedFixed = 0;
+  const cancelled = state.cancelledSubs || {};
   Object.keys(merch).forEach((key) => {
     const r = merch[key];
     const freq = state.merchantFreq[key];
     if (freq === "ignore") return; // user explicitly excluded this merchant
+    if (cancelled[key]) return; // marked cancelled in the Subscriptions tab
     if (!freq && Object.keys(r.cycles).length < 2) return; // one-off — skip
     expectedFixed += monthlyEquivalent(r.charge, freq || "monthly");
   });
@@ -5276,14 +5345,26 @@ function recurringView() {
       r.category = t.category || r.category;
     }
   });
+  const cancelled = state.cancelledSubs || {};
   const rows = Object.values(merch).filter((r) => {
     const freq = state.merchantFreq[r.key];
     if (freq === "ignore") return false; // user removed it from this view
+    // A merchant the user marked cancelled in the Subscriptions tab no
+    // longer counts as an active fixed bill here — that organization is the
+    // source of truth, so the two views agree on what's actually running.
+    if (cancelled[r.key]) return false;
     return freq || Object.keys(r.cycles).length >= 2;
   }).map((r) => {
     const freq = state.merchantFreq[r.key] || "monthly";
+    const split = (state.merchantSplits || {})[r.key] || 1;
+    const fullMonthly = monthlyEquivalent(r.charge, freq);
     return Object.assign({}, r, {
-      freq, monthly: monthlyEquivalent(r.charge, freq),
+      freq,
+      split,
+      fullCharge: r.charge,
+      myCharge: r.charge / split,
+      fullMonthly,
+      monthly: fullMonthly / split,        // user's share — used in every total
     });
   });
 
@@ -5317,17 +5398,37 @@ function recurringView() {
       const lastDate = r.last ? fmtDate(r.last.date) : "—";
       const everyN = r.count === 1 ? "1 charge" : r.count + " charges";
       const txnId = (r.last && r.last.id) || "";
-      // data-txn lives on .rec-main only — keeping it off the outer row
-      // means the ✕ button (a sibling, no data-txn ancestor) is not
-      // picked up by the txn-open click handler before its own action.
+      // When a split is set, the amount cell shows the user's share, with
+      // the full bill as a small struck-through line. The "÷N" pill is the
+      // edit affordance — click to change or clear the split. data-txn
+      // lives on .rec-main only so the action buttons (✕, ÷N) don't trip
+      // the txn-open handler.
+      const isShared = r.split > 1;
+      const splitBtn = '<button type="button" class="rec-split'
+        + (isShared ? " on" : "")
+        + '" data-action="split-merchant" data-arg="' + esc(r.key)
+        + '" title="' + (isShared
+            ? "You pay 1/" + r.split + " of every charge. Click to change."
+            : "Share this bill with roommates / partner")
+        + '">÷' + r.split + "</button>";
+      const amountCell = isShared
+        ? '<div class="rec-amount">' + money(r.monthly, "ILS")
+            + '<span class="rec-unit">/mo</span>'
+            + '<div class="rec-amount-full">of ' + money(r.fullMonthly, "ILS")
+            + "</div></div>"
+        : '<div class="rec-amount">' + money(r.monthly, "ILS")
+            + '<span class="rec-unit">/mo</span></div>';
+      const metaCharge = isShared
+        ? money(r.myCharge, "ILS") + " your share · "
+          + money(r.fullCharge, "ILS") + " full"
+        : money(r.charge, "ILS") + " per charge";
       return '<div class="rec-row">'
         + '<div class="rec-main" data-txn="' + esc(txnId) + '">'
         + '<div class="rec-name">' + esc(r.desc) + "</div>"
         + '<div class="rec-meta">' + esc(FREQ_LABEL[r.freq] || r.freq)
-        + " · " + money(r.charge, "ILS") + " per charge · last " + esc(lastDate)
+        + " · " + metaCharge + " · last " + esc(lastDate)
         + " · " + esc(everyN) + "</div></div>"
-        + '<div class="rec-amount">' + money(r.monthly, "ILS")
-        + '<span class="rec-unit">/mo</span></div>'
+        + amountCell + splitBtn
         + '<button type="button" class="rec-remove" '
         + 'data-action="ignore-recurring" data-arg="' + esc(r.key) + '" '
         + 'title="Remove from Fixed bills — keeps the underlying transactions, '
@@ -5345,16 +5446,117 @@ function recurringView() {
       + '<div class="rec-list">' + rowsHtml + "</div></div>";
   }).join("");
 
+  // Reconcile this page's fixed-only total with the Overview headline
+  // Reconciliation with the Overview "Expected fixed + essentials" headline:
+  // render an additional Essentials-reserved section — one row per essential
+  // category with its reserved amount — so the user can see the full math
+  // (fixed merchants + essentials = headline) in actual rows, not just text.
+  const essentialLines = ((state.budget && state.budget.essentials) || [])
+    .map((l) => ({
+      category: l.category,
+      budget: l.budget || 0,
+      spent: l.spent || 0,
+      reserved: Math.max(l.budget || 0, l.spent || 0),
+    }))
+    .filter((l) => l.reserved > 0)
+    .sort((a, b) => b.reserved - a.reserved);
+  const essentialsReserved = essentialLines.reduce((s, l) => s + l.reserved, 0);
+  const combined = totalMonthly + essentialsReserved;
+
+  let essentialsSection = "";
+  if (essentialLines.length) {
+    const rowsHtml = essentialLines.map((l) => {
+      const [em, color] = catStyle(l.category);
+      const over = l.budget > 0 && l.spent > l.budget;
+      const meta = l.budget > 0
+        ? "Budget " + money(l.budget, "ILS")
+            + " · spent " + money(l.spent, "ILS") + " this cycle"
+            + (over ? " · over budget" : "")
+        : "No budget set · using spend so far (" + money(l.spent, "ILS") + ")";
+      return '<div class="rec-row">'
+        + '<div class="rec-main">'
+        + '<div class="rec-name" style="display:flex;align-items:center;gap:8px">'
+        + '<span class="rec-essential-dot" style="background:' + esc(color) + '"></span>'
+        + esc(l.category) + "</div>"
+        + '<div class="rec-meta">' + esc(meta) + "</div></div>"
+        + '<div class="rec-amount">' + money(l.reserved, "ILS")
+        + '<span class="rec-unit">/mo</span></div></div>';
+    }).join("");
+    essentialsSection = '<div class="rec-section rec-section-essentials">'
+      + '<div class="rec-cat-head" style="--cat-color:#F2C752">'
+      + '<span class="rec-cat-icon">🥗</span>'
+      + '<span class="rec-cat-name">Essentials reserved</span>'
+      + '<span class="rec-cat-count">' + essentialLines.length + "</span>"
+      + '<span class="rec-cat-total">' + money(essentialsReserved, "ILS")
+      + '<span class="rec-unit">/mo</span></span></div>'
+      + '<div class="rec-list">' + rowsHtml + "</div>"
+      + '<div class="rec-section-note">Budgeted per category in Settings — '
+      + "not pulled from merchants. The reserved amount is the larger of the "
+      + "category budget and what's already been spent this cycle.</div></div>";
+  }
+
+  // Two different fixed totals to expose:
+  //   1. ACTUAL — fixed-category transactions that actually posted this cycle.
+  //      This is what the Overview's "Expected fixed + essentials" uses, so
+  //      it's the number that reconciles with the headline.
+  //   2. PROJECTED — sum of each merchant's monthly-equivalent (a yearly
+  //      bill ÷ 12, a bimonthly ÷ 2). Useful for planning, but inflates if
+  //      merchants are mis-tagged (a quarterly bill marked monthly billows
+  //      four-fold).
+  // Showing both removes the mystery: when projected ≫ actual, fix the
+  // frequencies on the offending merchants.
+  // Server's fixedSpent counts every fixed-category transaction at face
+  // value; subtract the roommates' share of split merchants this cycle so
+  // the page matches the user's actual pocket cost.
+  const serverFixedSpent = (state.budget && state.budget.variable
+    && state.budget.variable.fixedSpent) || 0;
+  const fixedActualThisCycle = serverFixedSpent - roommateShareThisCycle();
+  const headlineMatch = fixedActualThisCycle + essentialsReserved;
+  const projectedGapPositive = totalMonthly - fixedActualThisCycle;
+
+  const totalsStrip = essentialLines.length
+    ? '<div class="rec-totals">'
+        + '<div class="rec-totals-cell"><span class="rec-totals-k">Fixed actual this cycle</span>'
+        + '<span class="rec-totals-v">' + money(fixedActualThisCycle, "ILS")
+        + '<span class="rec-unit">/mo</span></span></div>'
+        + '<span class="rec-totals-op">+</span>'
+        + '<div class="rec-totals-cell"><span class="rec-totals-k">Essentials reserved</span>'
+        + '<span class="rec-totals-v">' + money(essentialsReserved, "ILS")
+        + '<span class="rec-unit">/mo</span></span></div>'
+        + '<span class="rec-totals-op">=</span>'
+        + '<div class="rec-totals-cell rec-totals-final"><span class="rec-totals-k">'
+        + 'Matches Overview</span><span class="rec-totals-v">'
+        + money(headlineMatch, "ILS") + '<span class="rec-unit">/mo</span></span></div>'
+        + "</div>"
+    : "";
+
   return '<div class="sec-head"><div class="label">Fixed bills</div>'
     + '<span class="spacer"></span>'
-    + '<span class="rec-grand">' + money(totalMonthly, "ILS")
-    + '<span class="rec-unit">/mo</span></span></div>'
-    + '<p class="hint">Every recurring fixed bill that builds the '
-    + '"Expected fixed" figure on the Overview. Each charge is reduced to a '
-    + "monthly equivalent (a bimonthly bill counts as half, a yearly "
-    + "subscription as 1/12). Tap a row to open that charge in the activity "
-    + "log; the per-charge frequency lives in the transaction editor.</p>"
-    + sections;
+    + '<div class="rec-grand-pair">'
+    + '<div class="rec-grand-item primary"><div class="rec-grand-num">'
+    + money(fixedActualThisCycle, "ILS") + '<span class="rec-unit">/mo</span></div>'
+    + '<div class="rec-grand-lab">Actually billed this cycle</div></div>'
+    + '<div class="rec-grand-item"><div class="rec-grand-num muted">'
+    + money(totalMonthly, "ILS") + '<span class="rec-unit">/mo</span></div>'
+    + '<div class="rec-grand-lab">Projected · merchant amortization</div></div>'
+    + "</div></div>"
+    + '<p class="hint"><b>Two totals.</b> '
+    + '<b>Actually billed this cycle</b> sums every fixed-category transaction '
+    + "that posted this cycle — this is what the Overview's "
+    + '"Expected fixed + essentials" uses, so it lines up with the headline. '
+    + '<b>Projected</b> sums each merchant\'s monthly-equivalent (a yearly bill '
+    + '÷ 12, a bimonthly ÷ 2). When projected is much higher than actual, some '
+    + "merchants are tagged with the wrong frequency — open the transaction "
+    + "editor on a row and pick the right one to fix the projection.</p>"
+    + (projectedGapPositive > Math.max(50, fixedActualThisCycle * 0.15)
+        ? '<div class="rec-mismatch">Gap between projected and actual is '
+          + money(projectedGapPositive, "ILS")
+          + ' /mo — likely a merchant tagged with the wrong frequency (default is monthly). '
+          + 'Check the merchants below whose monthly figure looks too high.</div>'
+        : "")
+    + sections
+    + essentialsSection
+    + totalsStrip;
 }
 
 function subscriptionsView() {
@@ -6794,6 +6996,94 @@ function removeCategoryByName(name) {
 }
 
 // Removes a merchant from the Fixed-bills view by tagging its frequency as
+// Sum of the roommates' (not-yours) share of every fixed-category charge
+// this cycle. Used to subtract from the server's raw fixedSpent so totals
+// reflect the user's actual pocket cost.
+function roommateShareThisCycle() {
+  const splits = state.merchantSplits || {};
+  if (!Object.keys(splits).length) return 0;
+  const key = currentCycleKey();
+  let share = 0;
+  state.transactions.forEach((t) => {
+    if (t.currency !== "ILS" || isCardTotal(t) || t.refundForId) return;
+    if (catGroup(t.category) !== "fixed") return;
+    if (cycleKey(t.date) !== key) return;
+    const amt = t.amount + txnRefundAmount(t);
+    if (amt >= 0) return;
+    const n = splits[merchantKey(t.description)] || 1;
+    if (n <= 1) return;
+    share += -amt * (n - 1) / n;
+  });
+  return share;
+}
+
+// Opens the split-bill modal. Picks how many people share the merchant's
+// charges so the Fixed-bills page shows only the user's slice. "1" or
+// Remove clears the split entirely.
+function splitMerchantModal(key) {
+  const current = (state.merchantSplits || {})[key] || 1;
+  let last = null;
+  state.transactions.forEach((t) => {
+    if (catGroup(t.category) !== "fixed" || t.refundForId) return;
+    if (merchantKey(t.description) !== key) return;
+    const amt = t.amount + txnRefundAmount(t);
+    if (amt >= 0) return;
+    if (!last || new Date(t.date) > new Date(last.date)) last = t;
+  });
+  const fullAmount = last ? -(last.amount + txnRefundAmount(last)) : 0;
+  const merchName = last ? merchantName(last.description) : key;
+  openModal((modal) => {
+    modal.innerHTML = "<h2>Split with roommates</h2>"
+      + '<p class="hint"><b>' + esc(merchName) + "</b> charges "
+      + (last ? money(fullAmount, "ILS") : "the bill")
+      + ". Pick how many people share each charge — Hon will show only your "
+      + "share everywhere this merchant appears. The underlying transactions "
+      + "stay untouched so the bank figures still reconcile.</p>"
+      + '<div class="field"><label>Total people splitting (including you)</label>'
+      + '<input id="sp-count" type="number" min="1" max="50" step="1" value="'
+      + current + '"></div>'
+      + '<div class="sp-preview" id="sp-preview"></div>'
+      + '<div class="modal-actions"><button data-x="cancel">Cancel</button>'
+      + (current > 1
+          ? '<button class="danger" id="sp-clear">Remove split</button>'
+          : "")
+      + '<button class="primary" id="sp-save">Save</button></div>';
+    const input = modal.querySelector("#sp-count");
+    const preview = modal.querySelector("#sp-preview");
+    const refresh = () => {
+      const n = Math.max(1, Math.round(Number(input.value) || 1));
+      if (last && n > 1) {
+        preview.innerHTML = "Your share per charge: <b>"
+          + money(fullAmount / n, "ILS") + "</b> · roommates pay <b>"
+          + money(fullAmount * (n - 1) / n, "ILS") + "</b>";
+      } else {
+        preview.innerHTML = "No split — the full amount counts as yours.";
+      }
+    };
+    input.addEventListener("input", refresh);
+    refresh();
+    const save = async (n) => {
+      try {
+        await api("/merchant-split", "PUT", { key, splitCount: n });
+        const fresh = await api("/merchant-splits")
+          .catch(() => ({ splits: state.merchantSplits }));
+        state.merchantSplits = fresh.splits || state.merchantSplits;
+        closeOverlay();
+        render();
+        toast(n > 1 ? "Split ÷" + n + " saved." : "Split removed.");
+      } catch (e) {
+        toast((e && e.message) || "Could not save the split.", true);
+      }
+    };
+    modal.querySelector('[data-x="cancel"]').addEventListener("click", closeOverlay);
+    modal.querySelector("#sp-save").addEventListener("click", () => {
+      save(Math.max(1, Math.round(Number(input.value) || 1)));
+    });
+    const clear = modal.querySelector("#sp-clear");
+    if (clear) clear.addEventListener("click", () => save(1));
+  });
+}
+
 // "ignore" — a real DB row, so the choice survives syncs and stops the
 // budget engine from counting it toward Expected fixed. Optimistic update,
 // then a reload of the live frequencies map so other views agree.
@@ -7733,6 +8023,11 @@ function handleAction(action, btn) {
     case "ignore-recurring": {
       const arg = btn && btn.dataset.arg;
       if (arg) ignoreRecurringMerchant(arg);
+      break;
+    }
+    case "split-merchant": {
+      const arg = btn && btn.dataset.arg;
+      if (arg) splitMerchantModal(arg);
       break;
     }
     case "new-piggy": piggyModal(null); break;
