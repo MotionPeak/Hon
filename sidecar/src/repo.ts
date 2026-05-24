@@ -1168,23 +1168,26 @@ export class Repo {
   }
 
   /** Every per-month savings entry — small dict, returned in full to the UI. */
-  listMonthlySavings(): { month: string; amount: number }[] {
-    return this.db
-      .prepare('SELECT month, amount FROM monthly_savings')
-      .all() as { month: string; amount: number }[];
+  listMonthlySavings(): { month: string; amount: number; transferred: boolean }[] {
+    const rows = this.db
+      .prepare('SELECT month, amount, transferred FROM monthly_savings')
+      .all() as { month: string; amount: number; transferred: number }[];
+    return rows.map((r) => ({ ...r, transferred: r.transferred !== 0 }));
   }
 
-  setMonthlySavings(month: string, amount: number): void {
+  setMonthlySavings(month: string, amount: number, transferred: boolean): void {
     if (amount <= 0) {
       this.db.prepare('DELETE FROM monthly_savings WHERE month = ?').run(month);
       return;
     }
     this.db
       .prepare(
-        `INSERT INTO monthly_savings (month, amount) VALUES (?, ?)
-         ON CONFLICT (month) DO UPDATE SET amount = excluded.amount`,
+        `INSERT INTO monthly_savings (month, amount, transferred) VALUES (?, ?, ?)
+         ON CONFLICT (month) DO UPDATE SET
+           amount = excluded.amount,
+           transferred = excluded.transferred`,
       )
-      .run(month, amount);
+      .run(month, amount, transferred ? 1 : 0);
   }
 
   /** ILS expense totals per category within [start, end) — ISO date strings. */

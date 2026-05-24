@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-export const SCHEMA_VERSION = 24;
+export const SCHEMA_VERSION = 25;
 
 export interface DbHandle {
   db: Database.Database;
@@ -516,6 +516,15 @@ const MIGRATIONS: { version: number; sql: string }[] = [
         SELECT 1 FROM refund_used u
         WHERE u.refund_id = t.id AND u.used >= ABS(t.amount) - 0.005
       );
+    `,
+  },
+  {
+    // Whether a month's savings set-aside is a real transfer out of the
+    // checking account (1) or just a budget earmark that stays in (0). The
+    // bank-balance projection deducts only the transferred ones.
+    version: 25,
+    sql: `
+      ALTER TABLE monthly_savings ADD COLUMN transferred INTEGER NOT NULL DEFAULT 0;
     `,
   },
 ];

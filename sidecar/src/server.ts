@@ -1347,16 +1347,25 @@ app.put('/budget/income-override', async (req, reply) => {
 
 // Per-month savings set-aside. The UI loads the whole dict (small) and PUTs
 // one month at a time. Amount 0 (or absent) clears that month's entry.
+// `transferred` records whether the set-aside is a real transfer out of the
+// checking account or just an earmark that stays in — the bank-balance
+// projection deducts only the transferred ones.
 app.get('/budget/savings', async (_req, reply) => {
   if (!repo) return reply.code(503).send({ error: 'database unavailable' });
-  const savings: Record<string, number> = {};
-  for (const row of repo.listMonthlySavings()) savings[row.month] = row.amount;
+  const savings: Record<string, { amount: number; transferred: boolean }> = {};
+  for (const row of repo.listMonthlySavings()) {
+    savings[row.month] = { amount: row.amount, transferred: row.transferred };
+  }
   return { savings };
 });
 
 app.put('/budget/savings', async (req, reply) => {
   if (!repo) return reply.code(503).send({ error: 'database unavailable' });
-  const body = (req.body ?? {}) as { month?: string; amount?: number };
+  const body = (req.body ?? {}) as {
+    month?: string;
+    amount?: number;
+    transferred?: boolean;
+  };
   const month = (body.month ?? '').trim();
   if (!/^\d{4}-\d{2}$/.test(month)) {
     return reply.code(400).send({ error: 'month must be YYYY-MM' });
@@ -1365,7 +1374,7 @@ app.put('/budget/savings', async (req, reply) => {
   if (!Number.isFinite(n) || n < 0) {
     return reply.code(400).send({ error: 'amount must be a non-negative number' });
   }
-  repo.setMonthlySavings(month, n);
+  repo.setMonthlySavings(month, n, Boolean(body.transferred));
   return { ok: true };
 });
 

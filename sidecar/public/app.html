@@ -1029,6 +1029,10 @@
   .bm-name { font-size: 13.5px; font-weight: 600; }
   .bm-spent { font-size: 11.5px; color: var(--faint); margin-top: 1px; }
   .bm-spent.over { color: var(--red); }
+  .bm-toggle { display: flex; align-items: flex-start; gap: 7px; margin-top: 6px;
+    font-size: 11.5px; color: var(--muted); cursor: pointer; line-height: 1.4; }
+  .bm-toggle input { width: 14px; height: 14px; margin-top: 2px;
+    flex: 0 0 auto; accent-color: var(--accent); cursor: pointer; }
   /* Quick "Max" chip for the savings reserve row — fills the input with
      whatever's free after this month's fixed bills + essentials + piggies. */
   .bm-max-btn { padding: 5px 10px; border-radius: 7px;
@@ -1713,7 +1717,7 @@ const state = {
   merchantFreq: {},      // { merchantKey: "monthly"|"bimonthly"|"yearly" }
   cancelledSubs: {},     // { merchantKey: cancelledAtIso } — user-marked cancellations
   incomeOverride: null,  // null | number — manual override for Expected income
-  monthlySavings: {},    // { "YYYY-MM": amount } — per-cycle savings set-aside
+  monthlySavings: {},    // { "YYYY-MM": { amount, transferred } } — per-cycle savings set-aside
   scrapes: {}, categorize: null, tab: "overview",
   move: null,            // { txnId, picked, always } while moving a transaction
   activityMonth: null,   // "YYYY-MM" currently shown in the Activity tab
@@ -2215,17 +2219,17 @@ function bankProjectionBlock(v) {
     if (amt > 0) incomeReceived += amt;
   });
 
-  // What's still expected to happen for the rest of the cycle. Savings is
-  // a budget reservation, not a transfer — by default the set-aside stays
-  // in the checking account, just earmarked — so it does NOT shrink the
-  // projected bank balance here.
+  // What's still expected to happen for the rest of the cycle. A savings
+  // set-aside is deducted only when the user marked it a real transfer out
+  // of the checking account; an earmark stays in the account untouched.
   const p = budgetProjection();
   const expectedFixed = (p && p.expectedFixed) || (v.fixedSpent || 0);
   const essentialBudget = (b.essentials || []).reduce((s, l) => s + (l.budget || 0), 0);
   const remainingIncome = Math.max(0, (v.income || 0) - incomeReceived);
   const remainingFixed = Math.max(0, expectedFixed - (v.fixedSpent || 0));
   const remainingEssentials = Math.max(0, essentialBudget - (v.essentialSpent || 0));
-  const change = remainingIncome - remainingFixed - remainingEssentials;
+  const savingsOut = v.savingsTransferred ? (v.savings || 0) : 0;
+  const change = remainingIncome - remainingFixed - remainingEssentials - savingsOut;
   const endBalance = bankNow + change;
   const up = change >= 0;
   const sign = up ? "+" : "−";
@@ -2238,8 +2242,11 @@ function bankProjectionBlock(v) {
     + money(Math.abs(change), "ILS") + "</div></div>"
     + '<div class="balance-sub-line">From <b>' + money(bankNow, "ILS")
     + "</b> now · assumes remaining income arrives and reserved bills go "
-    + "out, with no further variable spending. Savings reserves stay in "
-    + "the account, just earmarked.</div></div>";
+    + "out, with no further variable spending. "
+    + (v.savingsTransferred
+        ? "Savings reserve is being transferred out of this account."
+        : "Savings reserves stay in the account, just earmarked.")
+    + "</div></div>";
 }
 
 // "This month" card — total spend, the month-over-month trend, and a donut
@@ -3429,13 +3436,16 @@ function projectedVariable(v) {
   // This-month savings reserve — capped at whatever room is left so it never
   // forces the leftover negative on its own. The wish is kept around for the
   // UI to show "(capped at …)" when the cap kicks in.
-  const savingsWish = state.monthlySavings[currentCycleKey()] || 0;
+  const savingsEntry = state.monthlySavings[currentCycleKey()] || {};
+  const savingsWish = savingsEntry.amount || 0;
+  const savingsTransferred = !!savingsEntry.transferred;
   const roomBeforeSavings = Math.max(0, income - committed - piggy);
   const savings = Math.min(savingsWish, roomBeforeSavings);
   const disposable = income - committed - piggy - savings;
   return { spent: v.spent, income: income, fixedSpent: fixed,
     essentialSpent: essential, committed: committed, piggyFunded: piggy,
     savings: savings, savingsWish: savingsWish,
+    savingsTransferred: savingsTransferred,
     disposable: disposable, allowed: disposable - v.spent, projected: true };
 }
 
@@ -6087,9 +6097,13 @@ function budgetModal() {
     const computedIncomePlaceholder = Math.round(v.income || 0);
     // This-month savings reserve (per cycle), not a piggy bank — the budget
     // engine deducts it from the variable pool, capped at what's available.
+    // `transferred` toggles whether it leaves the checking account or just
+    // earmarks it: the bank-balance projection deducts only when transferred.
     const thisMonthKey = currentCycleKey();
-    const savingsVal = state.monthlySavings[thisMonthKey] != null
-      ? String(state.monthlySavings[thisMonthKey]) : "";
+    const savingsEntry = state.monthlySavings[thisMonthKey] || {};
+    const savingsVal = savingsEntry.amount != null && savingsEntry.amount > 0
+      ? String(savingsEntry.amount) : "";
+    const transferredInit = !!savingsEntry.transferred;
 
     modal.innerHTML = "<h2>Monthly budgets</h2>"
       + '<p class="hint">Give each essential category a monthly limit. Fixed '
@@ -6108,7 +6122,11 @@ function budgetModal() {
         + '<span class="bm-ico" style="background:#5C9EF522;color:#5C9EF5">🏦</span>'
         + '<div class="bm-info"><div class="bm-name">Set aside for savings</div>'
         + '<div class="bm-spent" id="bm-savings-cap">A one-off reserve for this '
-        + "month — not a piggy bank.</div></div>"
+        + "month — not a piggy bank.</div>"
+        + '<label class="bm-toggle"><input type="checkbox" id="bm-savings-transferred"'
+        + (transferredInit ? " checked" : "") + ">"
+        + '<span>Transfer out of checking — when off, the reserve is just '
+        + "earmarked and stays in the account.</span></label></div>"
         + '<button type="button" id="bm-savings-max" class="bm-max-btn" '
         + 'title="Set this month\'s reserve to every shekel left over">Max</button>'
         + '<div class="bm-input"><span class="bm-cur">' + symbol + "</span>"
@@ -6213,8 +6231,12 @@ function budgetModal() {
         || (incomeNext != null && incomeNext !== incomePrev);
       const savingsRaw = savingsInput.value.trim();
       const savingsNext = savingsRaw === "" ? 0 : Number(savingsRaw) || 0;
-      const savingsPrev = state.monthlySavings[thisMonthKey] || 0;
-      const savingsChanged = savingsNext !== savingsPrev;
+      const transferredNext = modal.querySelector("#bm-savings-transferred").checked;
+      const savingsPrevEntry = state.monthlySavings[thisMonthKey] || {};
+      const savingsPrev = savingsPrevEntry.amount || 0;
+      const transferredPrev = !!savingsPrevEntry.transferred;
+      const savingsChanged = savingsNext !== savingsPrev
+        || transferredNext !== transferredPrev;
       try {
         for (const u of updates) await api("/budgets", "PUT", u);
         if (incomeChanged) {
@@ -6223,9 +6245,14 @@ function budgetModal() {
         }
         if (savingsChanged) {
           await api("/budget/savings", "PUT",
-            { month: thisMonthKey, amount: savingsNext });
-          if (savingsNext > 0) state.monthlySavings[thisMonthKey] = savingsNext;
-          else delete state.monthlySavings[thisMonthKey];
+            { month: thisMonthKey, amount: savingsNext, transferred: transferredNext });
+          if (savingsNext > 0) {
+            state.monthlySavings[thisMonthKey] = {
+              amount: savingsNext, transferred: transferredNext,
+            };
+          } else {
+            delete state.monthlySavings[thisMonthKey];
+          }
         }
         closeOverlay();
         state.budget = await api(budgetUrl());
