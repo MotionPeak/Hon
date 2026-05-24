@@ -1200,14 +1200,27 @@
   .cat-tile-name { font-size: 12.5px; font-weight: 600; color: var(--text);
     text-align: center; max-width: 100%;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* ✕ always visible at a low opacity so it's discoverable on every tile;
+     hovering the tile lights it up, and hovering it directly turns red. */
   .cat-tile-del { position: absolute; top: 5px; right: 5px;
     width: 22px; height: 22px; border-radius: 50%; border: none;
-    background: rgba(0,0,0,0.25); color: #fff; cursor: pointer;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 11px; line-height: 1; padding: 0; opacity: 0;
-    transition: opacity .14s, background-color .14s; }
-  .cat-tile:hover .cat-tile-del { opacity: 1; }
-  .cat-tile-del:hover { background: var(--red); }
+    background: rgba(0,0,0,0.35); color: rgba(255,255,255,0.55);
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    font-size: 11px; line-height: 1; padding: 0; opacity: 0.55;
+    transition: opacity .14s, background-color .14s, color .14s, transform .12s; }
+  .cat-tile:hover .cat-tile-del { opacity: 1; color: #fff; }
+  .cat-tile-del:hover { background: var(--red); color: #fff;
+    transform: scale(1.1); }
+  /* Delete-confirmation preview — the category's own icon + name, mirroring
+     how it appears in the panel so the user is clear which one they're
+     about to remove. */
+  .cat-del-preview { display: flex; align-items: center; gap: 12px;
+    padding: 14px; border-radius: 12px; background: var(--card-hi);
+    border-left: 3px solid var(--cat-color, var(--hairline-2));
+    margin: 6px 0 4px; }
+  .cat-del-preview .cat-tile-icon { width: 44px; height: 44px;
+    background: color-mix(in srgb, var(--cat-color) 18%, transparent); }
+  .cat-del-name { font-size: 16px; font-weight: 700; color: var(--text); }
   .cat-add { display: flex; align-items: center; justify-content: center;
     gap: 8px; width: 100%; margin-top: 18px; padding: 14px;
     border: 1.5px dashed var(--hairline-2); border-radius: 14px;
@@ -1266,6 +1279,12 @@
   /* When open, lift the dd above sibling grid cards so the popover paints
    * over them instead of being clipped behind the next row. */
   .dd.open { z-index: 90; }
+  /* Each .set-card forms its own stacking context (its fade-up animation
+   * makes one), so the .dd-menu's z-index is trapped inside the card and the
+   * next card paints over it. When a card contains an open dropdown, lift
+   * the whole card above its siblings so the menu can spill out. */
+  .set-card { position: relative; }
+  .set-card:has(.dd.open) { z-index: 100; }
   .dd-trigger { width: 100%; display: inline-flex; align-items: center;
     justify-content: space-between; gap: 10px;
     background: var(--card-hi); border: 1px solid var(--hairline-2);
@@ -5945,7 +5964,11 @@ function categoriesPanelHtml() {
 // delegated click handler matches the inner ✕ button first (since closest()
 // returns the nearest [data-action]), so Edit only fires on the tile body.
 function catSettingsTile(c) {
-  const removeBtn = c.isBuiltin
+  // The whole tile is clickable for Edit; the ✕ button carries its own
+  // data-action so the delegated click handler matches it before reaching
+  // the tile's edit action. Every category is deletable except "Other" —
+  // it's the fallback target for removed categories' transactions.
+  const removeBtn = c.name === "Other"
     ? ""
     : '<button type="button" class="cat-tile-del" data-action="remove-category"'
       + ' data-arg="' + esc(c.name) + '" title="Remove" aria-label="Remove">✕</button>';
@@ -6071,16 +6094,45 @@ function categoryModal(existing) {
   });
 }
 
-async function removeCategoryByName(name) {
-  if (!confirm("Remove this category? Transactions tagged with it will become 'Other'.")) return;
-  try {
-    await api("/categories/" + encodeURIComponent(name), "DELETE");
-    const fresh = await api("/categories").catch(() => ({ categories: state.categories }));
-    state.categories = fresh.categories || state.categories;
-    await loadAll();
-    render();
-    toast("Category removed.");
-  } catch (e) { toast((e && e.message) || "Could not remove the category.", true); }
+// Opens a small confirmation modal before deleting a category. The body
+// shows the category's own emoji + name, plus the count of transactions
+// that will be reassigned to Other — so the user sees the impact before
+// committing. Count is computed client-side from state.transactions (the
+// same data /summary etc. read from), so it doesn't need an API round-trip.
+function removeCategoryByName(name) {
+  const cat = (state.categories || []).find((c) => c.name === name);
+  if (!cat) return;
+  const count = (state.transactions || []).filter((t) => t.category === name).length;
+  const txnLine = count === 0
+    ? "No transactions are currently tagged with it — clean delete."
+    : count + " transaction" + (count === 1 ? "" : "s")
+      + " will move to Other.";
+  openModal((modal) => {
+    modal.innerHTML = '<h2>Remove "' + esc(cat.name) + '"?</h2>'
+      + '<div class="cat-del-preview" style="--cat-color:' + esc(cat.color) + '">'
+      + '<div class="cat-tile-icon">' + esc(cat.emoji) + "</div>"
+      + '<div class="cat-del-name">' + esc(cat.name) + "</div></div>"
+      + '<p class="hint">' + esc(txnLine)
+      + " Merchant rules and the cached categorizer hits for this category "
+      + "will also reset to Other. You can re-create it later if needed.</p>"
+      + '<div class="modal-actions"><button data-x="cancel">Cancel</button>'
+      + '<button class="danger" id="cat-del-go">Remove category</button></div>';
+    modal.querySelector('[data-x="cancel"]').addEventListener("click", closeOverlay);
+    modal.querySelector("#cat-del-go").addEventListener("click", async () => {
+      try {
+        await api("/categories/" + encodeURIComponent(name), "DELETE");
+        closeOverlay();
+        await loadAll();
+        render();
+        toast(count > 0
+          ? 'Removed "' + name + '" — ' + count + " transaction"
+            + (count === 1 ? "" : "s") + " moved to Other."
+          : 'Removed "' + name + '".');
+      } catch (e) {
+        toast((e && e.message) || "Could not remove the category.", true);
+      }
+    });
+  });
 }
 
 // Reads every control inside `root` into the `settings` object, persists, and
