@@ -6,12 +6,38 @@ categorizes spending with AI, and builds budgets and insights — entirely on
 your own machine. **No financial data ever leaves your computer.** There is no
 Hon server, no account, no telemetry.
 
-Hon runs on **macOS, Linux, and Windows** as a local web app.
+Hon runs on **macOS, Linux, and Windows** as a desktop app.
 
-The whole of Hon is the **engine** (`sidecar/`) — a local Node process that does
-the scraping, encrypted storage (SQLite), categorization and AI work. It speaks
-HTTP on `127.0.0.1` only and also serves the complete web UI, so Hon runs on any
-OS with Node.
+## Download
+
+Grab the installer for your OS from the
+[**latest release**](https://github.com/shaharsolomons/Hon/releases/latest):
+
+| OS | File | First-launch trust step |
+| --- | --- | --- |
+| **macOS** | `Hon-x.y.z.dmg` (Apple Silicon + Intel) | Right-click `Hon.app` → **Open** → **Open** in the prompt. Once. |
+| **Windows** | `Hon-Setup-x.y.z.exe` | SmartScreen says "Windows protected your PC". Click **More info → Run anyway**. Once. |
+| **Linux** | `Hon-x.y.z.AppImage` | `chmod +x Hon-*.AppImage` and double-click, or run from a terminal. |
+
+The installers are **unsigned** — Hon is one person's local-first project, not
+a commercial app, so a paid developer cert isn't worth it yet. The one-time
+trust steps above only happen on first launch.
+
+Prefer the source path or running Hon on a NAS? Skip to
+[Run from source](#run-from-source-macos-linux-windows) or
+[NAS or home server](#run-it--nas-or-home-server).
+
+---
+
+## How Hon is built
+
+The whole of Hon is the **engine** (`sidecar/`) — a local Node process that
+does the scraping, encrypted storage (SQLite), categorization and AI work. It
+speaks HTTP on `127.0.0.1` only and serves the complete web UI.
+
+The downloadable apps are a thin **Electron shell** (`electron/`) that spawns
+the engine and opens a window pointed at it. Same engine, same web UI, just
+packaged as a double-clickable app per OS.
 
 ---
 
@@ -23,12 +49,14 @@ OS with Node.
 - [AI engine](#ai-engine)
 - [Tech stack & tools](#tech-stack--tools)
 - [Requirements](#requirements)
-- [Run it — web app](#run-it--web-app-macos-linux-windows)
+- [Run from source](#run-from-source-macos-linux-windows)
 - [Run it — NAS or home server](#run-it--nas-or-home-server)
 - [Setup inside the app](#setup-inside-the-app)
 - [Where data lives](#where-data-lives)
+- [External APIs & data sources](#external-apis--data-sources)
 - [Project layout](#project-layout)
 - [Sidecar scripts](#sidecar-scripts)
+- [Build the desktop installers](#build-the-desktop-installers)
 
 ---
 
@@ -167,11 +195,15 @@ clients — no SDK.
 
 ## Requirements
 
-- [Node.js](https://nodejs.org) 22.12 or later
+For the downloadable apps: nothing — Node is bundled inside.
 
-## Run it — web app (macOS, Linux, Windows)
+For running from source or hacking on Hon: [Node.js](https://nodejs.org)
+22.12 or later.
 
-The sidecar starts and opens the web UI in your default browser.
+## Run from source (macOS, Linux, Windows)
+
+The sidecar starts and opens the web UI in your default browser — no Electron
+shell, useful for development.
 
 ```bash
 cd sidecar
@@ -250,14 +282,48 @@ run:
 
 ## Where data lives
 
-All local, under `~/Library/Application Support/Hon/`:
+All local, in the OS-conventional app-data directory:
+
+| OS | Default path |
+| --- | --- |
+| macOS | `~/Library/Application Support/Hon/` |
+| Linux | `$XDG_DATA_HOME/Hon/` — falls back to `~/.local/share/Hon/` |
+| Windows | `%APPDATA%\Hon\` — typically `C:\Users\<name>\AppData\Roaming\Hon\` |
+
+Inside it:
 
 - `hon.db` — SQLite database (accounts, transactions, budgets, **encrypted**
-  credentials)
+  credentials, session cookies)
 - `models/` — the downloaded LLM model
+- `browser-profiles/` — persistent Chrome profiles for Meitav/Menora; keeps
+  you signed in across runs so a re-sync skips the login
 - `debug/` — best-effort page dumps from the pension connector, for diagnosis
 
-This directory is never part of the repo; `*.db` and `data/` are gitignored.
+Override the path with the `HON_DATA_DIR` env var when launching the sidecar.
+The directory is never part of the repo; `*.db` and `data/` are gitignored.
+
+## External APIs & data sources
+
+Everything Hon talks to. No analytics, no telemetry, no Hon-run backend —
+your data only goes to your institutions and the public/third-party services
+below.
+
+| Service | Used for | Endpoint(s) |
+| --- | --- | --- |
+| **Bank & card portals** (via [`israeli-bank-scrapers`](https://github.com/eshaham/israeli-bank-scrapers)) | Account balances + transactions | Each institution's own customer portal: Hapoalim, Leumi, Mizrahi-Tefahot, Discount, Mercantile, Union, FIBI group (Beinleumi / Otsar Hahayal / Massad / Pagi), Yahav, Max, Visa Cal, Isracard, Amex |
+| **Pension portals** (Hon's own puppeteer connector — `src/pension.ts`) | Pension / gemel / קרן השתלמות balances | Migdal, Harel, Clal — automated OTP login; Meitav, Menora — visible Chromium window (you sign in once; cookies persist) |
+| **SnapTrade** | Brokerage aggregation (Interactive Brokers, etc.) | `api.snaptrade.com` via [official SDK](https://snaptrade.com) |
+| **Splitwise** | Shared-expense split tracking | `secure.splitwise.com/api/v3.0` — hand-written REST client (`src/splitwise.ts`) |
+| **Yahoo Finance** | Holding price-history backfill (brokerage performance chart) | `query1.finance.yahoo.com/v8/finance/chart/{symbol}` (`src/marketData.ts`) |
+| **data.gov.il** | Israeli vehicle registry — plate → make/model/year for the car asset | `data.gov.il/api/3/action/datastore_search` (`src/vehicle.ts`) |
+| **Bank of Israel** | Prime interest rate — loan tracker | `boi.org.il/PublicApi/GetInterest` (`src/loans.ts`) |
+| **CBS** (Israel Central Bureau of Statistics) | CPI history — for CPI-linked loan tracks | `api.cbs.gov.il/index/data/price?id=120010` (`src/loans.ts`) |
+| **Ollama** *(optional)* | Remote LLM provider — alternative to the on-device model | A host you configure (e.g. `http://localhost:11434`) |
+| **Institution favicons** | Logos in the UI | Each institution's own website — fetched once and cached on disk (`src/logos.ts`) |
+
+The vault holds the credentials and per-connection session cookies, so a sync
+can resume without re-typing or re-prompting whenever the institution still
+accepts the saved session.
 
 ## Project layout
 
@@ -267,6 +333,12 @@ sidecar/        Node engine, TypeScript, run directly via tsx
                 LLM, categorization, budget, insights, subscriptions…
   public/       the web UI (app.html)
   patches/      patch-package patches applied on npm install
+electron/       desktop shell — spawns the sidecar, opens a window
+  main.cjs      lifecycle + window setup
+  builder.yml   electron-builder config (dmg / nsis / AppImage)
+.github/
+  workflows/
+    release.yml CI: build installers on tag push, attach to Release
 ```
 
 ## Sidecar scripts
@@ -279,3 +351,26 @@ Run from `sidecar/`:
 | `npm start`        | Start the engine only                     |
 | `npm run dev`      | Start with auto-reload on file changes    |
 | `npm run typecheck`| Type-check the TypeScript without emitting|
+
+## Build the desktop installers
+
+The downloadable apps are produced from `electron/` using
+[`electron-builder`](https://www.electron.build).
+
+```bash
+# One-time:
+cd sidecar && npm install
+cd ../electron && npm install   # rebuilds native modules against Electron's Node
+
+# Then, from electron/:
+npm start              # run the app locally without packaging
+npm run dist           # build the installer for the current OS into electron/dist/
+npm run dist:mac       # .dmg (Apple Silicon + Intel)
+npm run dist:win       # .exe (NSIS installer, x64)
+npm run dist:linux     # .AppImage (x64)
+```
+
+CI does the same on every tag push (`v*`) — see
+[`.github/workflows/release.yml`](.github/workflows/release.yml). The job
+matrix builds on `macos-latest`, `windows-latest` and `ubuntu-latest` in
+parallel and attaches the three artifacts to the matching GitHub Release.
