@@ -11,6 +11,11 @@ import { makeLog } from './log.js';
 
 const runnerLog = makeLog('runner');
 
+// Companies whose "balance" is the next-bill outstanding, computed by the
+// scraper from the full set of pending + scheduled charges across the cycle.
+// Skipping the incremental-scrape shortcut for them — see chooseStartDate.
+const CARD_COMPANIES = new Set(['max', 'visaCal', 'isracard', 'amex']);
+
 export interface StartArgs {
   connectionId: string;
   companyId: string;
@@ -91,8 +96,15 @@ export class ScrapeRunner {
    * falls back to the requested monthsBack window (the first-ever sync, or a
    * sync after a failure). The DB's UNIQUE(account_id, external_id) makes any
    * overlap a no-op, so the buffer is safe.
+   *
+   * Credit-card companies are excluded from the incremental shortcut: a
+   * card's outstanding balance is computed from the *full* set of pending
+   * and scheduled charges across the billing cycle, so missing the older
+   * end of a cycle would undercount the balance. Cards always re-fetch the
+   * full monthsBack window.
    */
-  private chooseStartDate(connectionId: string, monthsBack: number): Date {
+  private chooseStartDate(connectionId: string, companyId: string, monthsBack: number): Date {
+    if (CARD_COMPANIES.has(companyId)) return startDateMonthsAgo(monthsBack);
     const lastSuccess = this.repo.lastSuccessfulScrapeAt(connectionId);
     if (lastSuccess) {
       const since = new Date(lastSuccess);
@@ -152,7 +164,7 @@ export class ScrapeRunner {
     // as part of its tag — `grep '[scrape:run123]'` shows everything for
     // one attempt across runner, scrapers and bank-loans output combined.
     const log = runnerLog.child(`run:${status.runId.slice(0, 8)}`);
-    const startDate = this.chooseStartDate(args.connectionId, args.monthsBack);
+    const startDate = this.chooseStartDate(args.connectionId, args.companyId, args.monthsBack);
     const lastSuccess = this.repo.lastSuccessfulScrapeAt(args.connectionId);
     log.info('execute', {
       companyId: args.companyId,
