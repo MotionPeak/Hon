@@ -180,6 +180,21 @@
   .card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
   .card-head .spacer { margin-left: auto; }
   .ov-stack { display: flex; flex-direction: column; gap: 18px; }
+  /* Big top-of-overview balance card: expected income minus actual spend.
+   * Green when positive, red when over. The figure is the headline; income
+   * and spent appear smaller below it. */
+  .balance-card { text-align: center; padding: 22px 18px 20px; }
+  .balance-head { font-size: 11px; font-weight: 700; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+  .balance-num { font-size: 42px; font-weight: 800;
+    font-variant-numeric: tabular-nums; letter-spacing: -0.5px; line-height: 1; }
+  .balance-num.good { color: var(--green); }
+  .balance-num.bad { color: var(--red); }
+  .balance-cap { color: var(--muted); font-size: 13px; margin-top: 8px; }
+  .balance-line { color: var(--muted); font-size: 12.5px; margin-top: 12px;
+    display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
+  .balance-line b { color: var(--text); font-weight: 700; }
+  .balance-sep { opacity: 0.5; }
   .ov-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px;
     align-items: start; }
   .ov-grid > section { margin-bottom: 0; }
@@ -2113,9 +2128,40 @@ function emptyState() {
 /* --- Overview ------------------------------------------------------------ */
 
 function overviewView() {
-  return '<div class="ov-stack">' + netWorthCard()
+  return '<div class="ov-stack">' + balanceCard() + netWorthCard()
     + '<div class="ov-grid">' + spendingCard() + budgetSection() + "</div>"
     + splitwiseCard() + "</div>";
+}
+
+// A single big "this month's balance" headline — Expected income minus what
+// you've actually spent so far this cycle. Positive (green) is room to save;
+// negative (red) means you're outspending what's coming in. Sits at the top
+// of the Overview so the bottom-line answer is the first thing you see.
+function balanceCard() {
+  const b = state.budget;
+  if (!b) return "";
+  const v = projectedVariable(b.variable
+    || { income: 0, committed: 0, spent: 0, allowed: 0 });
+  const income = v.income || 0;
+  const spent = b.totalSpent || 0;
+  if (income <= 0 && spent <= 0) return "";
+  const net = income - spent;
+  const positive = net >= 0;
+  const cls = positive ? "good" : "bad";
+  const sign = positive ? "+" : "−";
+  const cap = positive
+    ? "left after this month's spending so far"
+    : "over what's coming in this month so far";
+  return '<section class="card balance-card">'
+    + '<div class="balance-head">This month · ' + esc(cycleLabel(currentCycleKey())) + "</div>"
+    + '<div class="balance-num ' + cls + '">' + sign
+    + money(Math.abs(net), "ILS") + "</div>"
+    + '<div class="balance-cap">' + cap + "</div>"
+    + '<div class="balance-line">'
+    + '<span>Income</span> <b>' + money(income, "ILS") + "</b>"
+    + ' <span class="balance-sep">−</span> '
+    + '<span>Spent</span> <b>' + money(spent, "ILS") + "</b>"
+    + "</div></section>";
 }
 
 // "This month" card — total spend, the month-over-month trend, and a donut
