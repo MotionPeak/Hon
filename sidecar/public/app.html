@@ -5762,17 +5762,18 @@ function budgetModal() {
           : ratio > 0.85 ? "var(--amber)" : "var(--green)";
       });
       totalEl.textContent = money(total, cur);
-      const cap = savingsCap();
+      const cap = Math.floor(savingsCap());
       const wishRaw = savingsInputEl.value.trim();
       const wish = wishRaw === "" ? 0 : Number(wishRaw) || 0;
-      const over = wish > cap;
+      // Hard clamp — a wish above the cap is meaningless, so just snap the
+      // input down to the cap rather than accepting a value that the budget
+      // engine would reduce anyway.
+      if (wish > cap) savingsInputEl.value = String(cap);
       savingsCapEl.textContent =
         "A one-off reserve for this month — not a piggy bank. Up to "
-        + money(cap, cur) + " free to set aside right now"
-        + (over ? " — your " + money(wish, cur) + " will be capped." : ".");
-      savingsCapEl.style.color = over ? "var(--amber)" : "";
-      savingsInputEl.max = String(Math.round(cap));
-      savingsInputEl.placeholder = "max " + Math.round(cap);
+        + money(cap, cur) + " free to set aside right now.";
+      savingsInputEl.max = String(cap);
+      savingsInputEl.placeholder = "max " + cap;
     }
     inputs.forEach((inp) => inp.addEventListener("input", refresh));
     incomeInputEl.addEventListener("input", refresh);
