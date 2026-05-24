@@ -4702,12 +4702,12 @@ function addConnectionModal() {
       + '<span class="pc-count">looked up by plate</span></div>'
       + '<div class="pick-card" data-cat="pension"><span class="pc-emoji">🪺</span>'
       + 'Pension &amp; savings<span class="pc-count">pension, gemel &amp; study fund</span></div>'
-      + '<div class="pick-card" data-cat="asset"><span class="pc-emoji">💎</span>'
-      + 'Other asset<span class="pc-count">cash, property…</span></div>'
       + '<div class="pick-card" data-cat="loan"><span class="pc-emoji">📉</span>'
       + 'Loan<span class="pc-count">mortgage, car loan, prime / CPI-linked</span></div>'
-      + '<div class="pick-card" data-cat="splitwise"><span class="pc-emoji">🤝</span>'
-      + 'Splitwise<span class="pc-count">split &amp; track expenses</span></div>';
+      + '<div class="pick-card" data-cat="asset"><span class="pc-emoji">💎</span>'
+      + 'Other asset<span class="pc-count">cash, property…</span></div>';
+      // Splitwise lives in Settings, not the asset picker — it's a sharing
+      // integration, not an asset, and the toggle is on the Settings page.
       modal.innerHTML = "<h2>Add an asset</h2>"
         + '<p class="hint">What would you like to add to Hon?</p>'
         + '<div class="pick-grid">' + cards + "</div>"
@@ -5142,85 +5142,12 @@ function addConnectionModal() {
       bindCancel();
     };
 
-    // Splitwise setup — a one-time tutorial for getting a personal API key,
-    // since Splitwise issues one per account (it cannot be shared).
-    const renderSplitwiseStep = () => {
-      if (state.splitwise.connected) {
-        modal.innerHTML = "<h2>Splitwise</h2>"
-          + '<button class="back-btn" data-x="back">‹ All options</button>'
-          + '<p class="hint">Already connected'
-          + (state.splitwise.user ? " as " + esc(state.splitwise.user.name) : "")
-          + ". Open any transaction in the Activity tab to split it; you can "
-          + "disconnect in Settings.</p>"
-          + '<div class="modal-actions">'
-          + '<button class="primary" data-x="cancel">Done</button></div>';
-        modal.querySelector('[data-x="back"]')
-          .addEventListener("click", () => { category = ""; render2(); });
-        bindCancel();
-        return;
-      }
-      modal.innerHTML = "<h2>Connect Splitwise</h2>"
-        + '<button class="back-btn" data-x="back">‹ All options</button>'
-        + '<p class="hint">Split transactions onto Splitwise and track who has '
-        + "paid you back. Splitwise issues each person their own free API key, "
-        + "so this is a one-time setup on your own account.</p>"
-        + '<button class="block" data-x="open" style="margin-bottom:12px">'
-        + "Open the Splitwise developer page ↗</button>"
-        + '<ol class="hint">'
-        + "<li>On the page that opens, sign in and click "
-        + "<strong>Register your application</strong>.</li>"
-        + "<li>Name it <strong>Hon</strong>. Homepage and Callback URL are "
-        + "required — <strong>http://localhost</strong> works for both; Hon "
-        + "does not use them.</li>"
-        + "<li>Submit, then on the app's page click "
-        + "<strong>Generate API key</strong> and copy the key.</li>"
-        + "<li>Paste it below and connect.</li></ol>"
-        + '<div class="field"><label>Splitwise API key</label>'
-        + '<input id="sw-key" type="password" autocomplete="off"></div>'
-        + '<div class="modal-err" id="ac-err" hidden></div>'
-        + '<div class="modal-actions"><button data-x="cancel">Cancel</button>'
-        + '<button class="primary" data-x="connect">Connect</button></div>';
-      modal.querySelector('[data-x="back"]')
-        .addEventListener("click", () => { category = ""; render2(); });
-      modal.querySelector('[data-x="open"]').addEventListener("click", () =>
-        window.open("https://secure.splitwise.com/oauth_clients", "_blank"));
-      modal.querySelector('[data-x="connect"]').addEventListener("click", async () => {
-        const err = modal.querySelector("#ac-err");
-        const key = modal.querySelector("#sw-key").value.trim();
-        if (!key) {
-          err.textContent = "Paste your Splitwise API key.";
-          err.hidden = false;
-          return;
-        }
-        const btn = modal.querySelector('[data-x="connect"]');
-        btn.disabled = true;
-        btn.textContent = "Connecting…";
-        try {
-          const r = await api("/splitwise/connect", "POST", { apiKey: key });
-          state.splitwise.connected = true;
-          state.splitwise.user = r.user || null;
-          closeOverlay();
-          toast("Splitwise connected"
-            + (r.user && r.user.name ? " as " + r.user.name : "") + ".");
-          loadSplitwise();
-        } catch (e) {
-          if (e instanceof VaultLocked) { closeOverlay(); return showGate(); }
-          btn.disabled = false;
-          btn.textContent = "Connect";
-          err.textContent = e.message;
-          err.hidden = false;
-        }
-      });
-      bindCancel();
-    };
-
     const render2 = () => {
       if (!category) return renderCategoryStep();
       if (category === "car") return renderCarStep();
       if (category === "asset") return renderAssetStep();
       if (category === "loan") return renderLoanStep();
       if (category === "brokerage") return renderBrokerageStep();
-      if (category === "splitwise") return renderSplitwiseStep();
       if (category === "pension" && !selected) return renderPensionStep();
       if (!selected) return renderInstitutionStep();
       return renderCredentialStep();
