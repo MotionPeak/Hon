@@ -537,7 +537,14 @@ app.patch('/transactions/:id/category', async (req, reply) => {
   if (!repo) return reply.code(503).send({ error: 'database unavailable' });
   const { id } = req.params as { id: string };
   const body = (req.body ?? {}) as { category?: string; applyToMerchant?: boolean };
-  if (!body.category || !(CATEGORIES as readonly string[]).includes(body.category)) {
+  // Accept any category the user has — built-in or one they created in
+  // Settings. Fall back to the static CATEGORIES list only if the table is
+  // unexpectedly empty (e.g. a brand-new DB before its seed migration ran).
+  const liveCats = repo.listCategories().map((c) => c.name);
+  const allowed = liveCats.length > 0
+    ? liveCats
+    : (CATEGORIES as readonly string[]);
+  if (!body.category || !allowed.includes(body.category)) {
     return reply.code(400).send({ error: 'unknown category' });
   }
   const txn = repo.getTransaction(id);
@@ -554,7 +561,11 @@ app.patch('/transactions/:id/category', async (req, reply) => {
 // How often a merchant recurs. 'monthly'/'bimonthly'/'yearly' tag a recurring
 // expense (for monthly-equivalent cost); 'income' tags a recurring income
 // source (a salary) so the budget projection anchors on it.
-const RECURRENCE_FREQUENCIES = ['monthly', 'bimonthly', 'yearly', 'income'];
+// `ignore` flags a fixed-bill merchant the user does NOT want treated as
+// recurring (drops it from Expected fixed and the Fixed-bills view, even
+// if it has charged in two-plus cycles). Stored as a regular row so the
+// flag survives across syncs and devices.
+const RECURRENCE_FREQUENCIES = ['monthly', 'bimonthly', 'yearly', 'income', 'ignore'];
 
 app.get('/merchant-frequencies', async (_req, reply) => {
   if (!repo) return reply.code(503).send({ error: 'database unavailable' });
