@@ -283,6 +283,14 @@
     "SF Pro Rounded", system-ui; color: var(--text);
     font-variant-numeric: tabular-nums; }
   .rec-list { display: flex; flex-direction: column; gap: 2px; }
+  /* A small "Billed / Not yet billed / Off-cycle" tag beside each recurring
+   * fixed-bill merchant in the Fixed bills view. */
+  .rec-tag { display: inline-block; font-size: 10px; font-weight: 700;
+    letter-spacing: .03em; padding: 2px 7px; border-radius: 999px;
+    margin-inline-start: 6px; vertical-align: 2px; white-space: nowrap; }
+  .rec-tag-good { color: var(--green); background: rgba(61,220,132,0.16); }
+  .rec-tag-warn { color: var(--amber); background: rgba(245,181,74,0.16); }
+  .rec-tag-muted { color: var(--muted); background: var(--card-hi); }
   .rec-row { display: flex; align-items: center; gap: 12px;
     padding: 9px 10px; border-radius: 9px; cursor: pointer;
     transition: background-color .12s; }
@@ -318,6 +326,10 @@
     color: var(--text); }
   .rec-amount-full { font-size: 10.5px; font-weight: 600; color: var(--muted);
     text-decoration: line-through; margin-top: 3px; }
+  /* Section-total full-bill subline when a category split is active. */
+  .rec-cat-total-full { display: block; font-size: 10.5px; font-weight: 600;
+    color: var(--muted); text-decoration: line-through; margin-top: 3px;
+    letter-spacing: 0; text-transform: none; text-align: right; }
   /* Split-modal preview line — appears below the people-count input. */
   .sp-preview { font-size: 12.5px; color: var(--muted); padding: 10px 12px;
     background: var(--card-hi); border-radius: 9px; margin: 4px 0 8px;
@@ -1829,7 +1841,8 @@ const state = {
   transactionLinks: [],   // [{ expenseId, refundId, amount }]
   summary: null, budget: null, insights: null, llm: null,
   merchantFreq: {},      // { merchantKey: "monthly"|"bimonthly"|"yearly" }
-  merchantSplits: {},    // { merchantKey: N }  N = "I pay 1/N of each charge"
+  merchantSplits: {},    // { merchantKey: N }  legacy — replaced by categorySplits
+  categorySplits: {},    // { category: N }    N = "I pay 1/N of every charge in this category"
   cancelledSubs: {},     // { merchantKey: cancelledAtIso } — user-marked cancellations
   incomeOverride: null,  // null | number — manual override for Expected income
   monthlySavings: {},    // { "YYYY-MM": { amount, transferred } } — per-cycle savings set-aside
@@ -2004,6 +2017,14 @@ function prevCycleKey(key) {
   while (m < 0) { m += 12; y -= 1; }
   return y + "-" + String(m + 1).padStart(2, "0");
 }
+// Whole cycles between two YYYY-MM keys (toKey − fromKey). Negative if toKey
+// is earlier.
+function cyclesBetween(fromKey, toKey) {
+  if (!fromKey || !toKey) return 0;
+  const [fy, fm] = fromKey.split("-").map(Number);
+  const [ty, tm] = toKey.split("-").map(Number);
+  return (ty - fy) * 12 + (tm - fm);
+}
 function currentCycleKey() {
   return cycleKey(new Date().toISOString().slice(0, 10));
 }
@@ -2153,7 +2174,7 @@ async function loadAll() {
   try {
     const [companies, connections, accounts, transactions, assets, loansResp, categoriesResp,
            summary, insights, llm, merchantFreq, brokerage, cancelledSubs,
-           incomeOverrideResp, savingsResp, linksResp, splitsResp] =
+           incomeOverrideResp, savingsResp, linksResp, splitsResp, catSplitsResp] =
       await Promise.all([
         api("/companies").then((r) => r.companies),
         api("/connections").then((r) => r.connections),
@@ -2172,6 +2193,7 @@ async function loadAll() {
         api("/budget/savings").catch(() => ({ savings: {} })),
         api("/transaction-links").catch(() => ({ links: [] })),
         api("/merchant-splits").catch(() => ({ splits: {} })),
+        api("/category-splits").catch(() => ({ splits: {} })),
       ]);
     Object.assign(state, {
       companies, connections, accounts, transactions, assets,
@@ -2182,6 +2204,7 @@ async function loadAll() {
       monthlySavings: savingsResp.savings || {},
       transactionLinks: linksResp.links || [],
       merchantSplits: splitsResp.splits || {},
+      categorySplits: catSplitsResp.splits || {},
     });
     // The budget is fetched once transactions are in state — its URL carries
     // the recurring projection, which is derived from those transactions.
@@ -5323,6 +5346,29 @@ function ensureSubAliases(activeNames, deadNames) {
 // uses: a fixed-category merchant counts as recurring once it has charged
 // in two or more cycles (or the user has set a frequency on it). Each
 // charge is reduced to a monthly-equivalent so the totals stack honestly.
+// Whether a recurring fixed bill has already charged this cycle, hasn't yet,
+// or — for bimonthly / yearly tracks — simply isn't due this cycle. Drives
+// the little tag next to each merchant in the Fixed bills view.
+function fixedBillStatus(r) {
+  const cur = currentCycleKey();
+  if (r.cycles && r.cycles[cur]) {
+    return { cls: "good", label: "✓ Billed", hint: "Already billed this cycle." };
+  }
+  const lastCycle = r.last ? cycleKey(r.last.date) : null;
+  const gap = lastCycle ? cyclesBetween(lastCycle, cur) : 999;
+  if (r.freq === "bimonthly" && gap === 1) {
+    return { cls: "muted", label: "Off-cycle",
+      hint: "Bimonthly — billed last cycle, not expected this one." };
+  }
+  if (r.freq === "yearly" && gap >= 1 && gap < 12) {
+    const left = 12 - gap;
+    return { cls: "muted", label: "Off-cycle",
+      hint: "Yearly — next charge in " + left + " cycle" + (left === 1 ? "" : "s") + "." };
+  }
+  return { cls: "warn", label: "Not yet billed",
+    hint: "Expected this cycle but no charge has arrived yet." };
+}
+
 function recurringView() {
   const merch = {};
   state.transactions.forEach((t) => {
@@ -5356,7 +5402,9 @@ function recurringView() {
     return freq || Object.keys(r.cycles).length >= 2;
   }).map((r) => {
     const freq = state.merchantFreq[r.key] || "monthly";
-    const split = (state.merchantSplits || {})[r.key] || 1;
+    // Split lives per CATEGORY now (Utilities ÷ 3 for the whole section,
+    // not per merchant) — same divisor applies to every row inside it.
+    const split = (state.categorySplits || {})[r.category] || 1;
     const fullMonthly = monthlyEquivalent(r.charge, freq);
     return Object.assign({}, r, {
       freq,
@@ -5398,19 +5446,7 @@ function recurringView() {
       const lastDate = r.last ? fmtDate(r.last.date) : "—";
       const everyN = r.count === 1 ? "1 charge" : r.count + " charges";
       const txnId = (r.last && r.last.id) || "";
-      // When a split is set, the amount cell shows the user's share, with
-      // the full bill as a small struck-through line. The "÷N" pill is the
-      // edit affordance — click to change or clear the split. data-txn
-      // lives on .rec-main only so the action buttons (✕, ÷N) don't trip
-      // the txn-open handler.
       const isShared = r.split > 1;
-      const splitBtn = '<button type="button" class="rec-split'
-        + (isShared ? " on" : "")
-        + '" data-action="split-merchant" data-arg="' + esc(r.key)
-        + '" title="' + (isShared
-            ? "You pay 1/" + r.split + " of every charge. Click to change."
-            : "Share this bill with roommates / partner")
-        + '">÷' + r.split + "</button>";
       const amountCell = isShared
         ? '<div class="rec-amount">' + money(r.monthly, "ILS")
             + '<span class="rec-unit">/mo</span>'
@@ -5422,13 +5458,16 @@ function recurringView() {
         ? money(r.myCharge, "ILS") + " your share · "
           + money(r.fullCharge, "ILS") + " full"
         : money(r.charge, "ILS") + " per charge";
+      const status = fixedBillStatus(r);
+      const tag = '<span class="rec-tag rec-tag-' + status.cls + '" title="'
+        + esc(status.hint) + '">' + esc(status.label) + "</span>";
       return '<div class="rec-row">'
         + '<div class="rec-main" data-txn="' + esc(txnId) + '">'
-        + '<div class="rec-name">' + esc(r.desc) + "</div>"
+        + '<div class="rec-name">' + esc(r.desc) + " " + tag + "</div>"
         + '<div class="rec-meta">' + esc(FREQ_LABEL[r.freq] || r.freq)
         + " · " + metaCharge + " · last " + esc(lastDate)
         + " · " + esc(everyN) + "</div></div>"
-        + amountCell + splitBtn
+        + amountCell
         + '<button type="button" class="rec-remove" '
         + 'data-action="ignore-recurring" data-arg="' + esc(r.key) + '" '
         + 'title="Remove from Fixed bills — keeps the underlying transactions, '
@@ -5436,13 +5475,34 @@ function recurringView() {
         + 'aria-label="Remove">✕</button>'
         + "</div>";
     }).join("");
+    // Per-category split (e.g. Utilities ÷ 3 when shared with roommates).
+    // Applied to every row in the section; the header pill is the edit
+    // affordance. The total shown is the user's share, with the full bill
+    // as a small struck-through line when a split is active.
+    const catSplit = (state.categorySplits || {})[cat] || 1;
+    const catShared = catSplit > 1;
+    const splitPill = '<button type="button" class="rec-split'
+      + (catShared ? " on" : "") + '" data-action="split-category" '
+      + 'data-arg="' + esc(cat) + '" title="'
+      + (catShared
+          ? "You pay 1/" + catSplit + " of every " + cat
+            + " bill. Click to change."
+          : "Share this category with roommates / partner") + '">÷'
+      + catSplit + "</button>";
+    const groupFull = list.reduce((s, r) => s + r.fullMonthly, 0);
+    const totalCell = catShared
+      ? '<span class="rec-cat-total">' + money(groupTotal, "ILS")
+        + '<span class="rec-unit">/mo</span>'
+        + '<span class="rec-cat-total-full">of '
+        + money(groupFull, "ILS") + "</span></span>"
+      : '<span class="rec-cat-total">' + money(groupTotal, "ILS")
+        + '<span class="rec-unit">/mo</span></span>';
     return '<div class="rec-section">'
       + '<div class="rec-cat-head" style="--cat-color:' + esc(color) + '">'
       + '<span class="rec-cat-icon">' + em + "</span>"
       + '<span class="rec-cat-name">' + esc(cat) + "</span>"
       + '<span class="rec-cat-count">' + list.length + "</span>"
-      + '<span class="rec-cat-total">' + money(groupTotal, "ILS")
-      + '<span class="rec-unit">/mo</span></span></div>'
+      + splitPill + totalCell + "</div>"
       + '<div class="rec-list">' + rowsHtml + "</div></div>";
   }).join("");
 
@@ -6997,10 +7057,10 @@ function removeCategoryByName(name) {
 
 // Removes a merchant from the Fixed-bills view by tagging its frequency as
 // Sum of the roommates' (not-yours) share of every fixed-category charge
-// this cycle. Used to subtract from the server's raw fixedSpent so totals
-// reflect the user's actual pocket cost.
+// this cycle, using the per-CATEGORY split (Utilities ÷ 3 etc.). Subtracted
+// from the server's raw fixedSpent so totals reflect the user's pocket cost.
 function roommateShareThisCycle() {
-  const splits = state.merchantSplits || {};
+  const splits = state.categorySplits || {};
   if (!Object.keys(splits).length) return 0;
   const key = currentCycleKey();
   let share = 0;
@@ -7010,16 +7070,101 @@ function roommateShareThisCycle() {
     if (cycleKey(t.date) !== key) return;
     const amt = t.amount + txnRefundAmount(t);
     if (amt >= 0) return;
-    const n = splits[merchantKey(t.description)] || 1;
+    const n = splits[t.category] || 1;
     if (n <= 1) return;
     share += -amt * (n - 1) / n;
   });
   return share;
 }
 
-// Opens the split-bill modal. Picks how many people share the merchant's
-// charges so the Fixed-bills page shows only the user's slice. "1" or
-// Remove clears the split entirely.
+// Opens the per-category split modal: pick how many people share every
+// charge in that whole category (Utilities ÷ 3 for the user + 2 roommates,
+// rent the same way for Housing). Setting to 1 / Remove clears the split.
+function splitCategoryModal(category) {
+  const current = (state.categorySplits || {})[category] || 1;
+  // Preview math from the existing per-merchant rollup for this category,
+  // reduced to the section's full monthly equivalent.
+  let fullMonthly = 0;
+  const merch = {};
+  state.transactions.forEach((t) => {
+    if (t.currency !== "ILS" || isCardTotal(t) || t.refundForId) return;
+    if (t.category !== category) return;
+    if (catGroup(t.category) !== "fixed") return;
+    const amt = t.amount + txnRefundAmount(t);
+    if (amt >= 0) return;
+    const mk = merchantKey(t.description);
+    const r = merch[mk] || (merch[mk] = { cycles: {}, lastT: 0, charge: 0 });
+    r.cycles[cycleKey(t.date)] = true;
+    const ts = new Date(t.date).getTime();
+    if (ts >= r.lastT) { r.lastT = ts; r.charge = -amt; }
+  });
+  Object.keys(merch).forEach((mk) => {
+    const r = merch[mk];
+    const freq = state.merchantFreq[mk];
+    if (freq === "ignore") return;
+    if (!freq && Object.keys(r.cycles).length < 2) return;
+    fullMonthly += monthlyEquivalent(r.charge, freq || "monthly");
+  });
+  openModal((modal) => {
+    modal.innerHTML = '<h2>Split ' + esc(category) + " with roommates</h2>"
+      + '<p class="hint">Every bill inside <b>' + esc(category)
+      + "</b> will be shown at your share — set how many people split it. "
+      + "Underlying transactions stay untouched so the bank figures still "
+      + "reconcile; only the displayed amounts and the Fixed-bills / "
+      + "Overview totals change.</p>"
+      + '<div class="field"><label>Total people splitting (including you)</label>'
+      + '<input id="sp-count" type="number" min="1" max="50" step="1" value="'
+      + current + '"></div>'
+      + '<div class="sp-preview" id="sp-preview"></div>'
+      + '<div class="modal-actions"><button data-x="cancel">Cancel</button>'
+      + (current > 1
+          ? '<button class="danger" id="sp-clear">Remove split</button>'
+          : "")
+      + '<button class="primary" id="sp-save">Save</button></div>';
+    const input = modal.querySelector("#sp-count");
+    const preview = modal.querySelector("#sp-preview");
+    const refresh = () => {
+      const n = Math.max(1, Math.round(Number(input.value) || 1));
+      if (fullMonthly > 0 && n > 1) {
+        preview.innerHTML = "Full category bill: <b>" + money(fullMonthly, "ILS")
+          + "/mo</b><br>Your share: <b>" + money(fullMonthly / n, "ILS")
+          + "/mo</b> · roommates pay <b>"
+          + money(fullMonthly * (n - 1) / n, "ILS") + "/mo</b>";
+      } else if (fullMonthly > 0) {
+        preview.innerHTML = "No split — full <b>" + money(fullMonthly, "ILS")
+          + "/mo</b> counts as yours.";
+      } else {
+        preview.innerHTML = "No recurring bills in this category yet.";
+      }
+    };
+    input.addEventListener("input", refresh);
+    refresh();
+    const save = async (n) => {
+      try {
+        await api("/category-split", "PUT", { category, splitCount: n });
+        const fresh = await api("/category-splits")
+          .catch(() => ({ splits: state.categorySplits }));
+        state.categorySplits = fresh.splits || state.categorySplits;
+        closeOverlay();
+        render();
+        toast(n > 1
+          ? esc(category) + " split ÷" + n + " saved."
+          : "Split removed from " + esc(category) + ".");
+      } catch (e) {
+        toast((e && e.message) || "Could not save the split.", true);
+      }
+    };
+    modal.querySelector('[data-x="cancel"]').addEventListener("click", closeOverlay);
+    modal.querySelector("#sp-save").addEventListener("click", () => {
+      save(Math.max(1, Math.round(Number(input.value) || 1)));
+    });
+    const clear = modal.querySelector("#sp-clear");
+    if (clear) clear.addEventListener("click", () => save(1));
+  });
+}
+
+// Old per-merchant split modal — kept as a fallback should anything still
+// reference it, but no longer surfaced in the UI (splits are category-level).
 function splitMerchantModal(key) {
   const current = (state.merchantSplits || {})[key] || 1;
   let last = null;
@@ -8028,6 +8173,11 @@ function handleAction(action, btn) {
     case "split-merchant": {
       const arg = btn && btn.dataset.arg;
       if (arg) splitMerchantModal(arg);
+      break;
+    }
+    case "split-category": {
+      const arg = btn && btn.dataset.arg;
+      if (arg) splitCategoryModal(arg);
       break;
     }
     case "new-piggy": piggyModal(null); break;
