@@ -108,3 +108,36 @@ index ab8e48d..5f8a87a 100644
          txns: results[accountNumber]
        };
      });
+diff --git a/node_modules/israeli-bank-scrapers/lib/scrapers/visa-cal.js b/node_modules/israeli-bank-scrapers/lib/scrapers/visa-cal.js
+index 6ffc49e..d9e0de7 100644
+--- a/node_modules/israeli-bank-scrapers/lib/scrapers/visa-cal.js
++++ b/node_modules/israeli-bank-scrapers/lib/scrapers/visa-cal.js
+@@ -308,9 +308,27 @@ class VisaCalScraper extends _baseScraperWithBrowser.BaseScraperWithBrowser {
+       const transactions = convertParsedDataToTransactions(allMonthsData, pendingData, this.options);
+       debug('filter out old transactions');
+       const txns = this.options.outputData?.enableTransactionsFilterByDate ?? true ? (0, _transactions.filterOldTransactions)(transactions, (0, _moment.default)(startDate), this.options.combineInstallments || false) : transactions;
++      // Hon patch: prefer Cal's reported next-bill total when the frames
++      // endpoint returns one for this card; otherwise fall back to summing
++      // the card's own scheduled-but-not-yet-billed and pending charges (the
++      // same data the scraper already pulls), matching Max/Isracard. The
++      // result is negative (debt) and matches Cal's "next bill" figure.
++      let balance;
++      if (frame?.nextTotalDebit != null) {
++        balance = -frame.nextTotalDebit;
++      } else {
++        const today = new Date().toISOString().slice(0, 10);
++        balance = transactions.reduce((sum, txn) => {
++          const day = (txn.processedDate || '').slice(0, 10);
++          const upcoming = day && day >= today;
++          const pending = txn.status === 'pending';
++          if (upcoming || pending) sum += txn.chargedAmount || 0;
++          return sum;
++        }, 0);
++      }
+       return {
+         txns,
+-        balance: frame?.nextTotalDebit != null ? -frame.nextTotalDebit : undefined,
++        balance,
+         accountNumber: card.last4Digits
+       };
+     }));
