@@ -53,12 +53,21 @@ extraResources:
       - "!models"
 
 # --- macOS -----------------------------------------------------------------
-# Signed with the user's Developer ID Application certificate and notarized
-# with Apple so first launch is clean — no Gatekeeper warnings. electron-
-# builder reads the cert from the local Keychain (dev) or from the CSC_LINK /
-# CSC_KEY_PASSWORD env vars (CI). Notarization needs APPLE_ID,
-# APPLE_APP_SPECIFIC_PASSWORD and APPLE_TEAM_ID — see .github/workflows/
-# release.yml for the matching repo-secret names.
+# Currently shipped UNSIGNED — first launch needs a right-click → Open
+# (or "Open Anyway" from System Settings → Privacy & Security), same UX
+# as the unsigned Windows build. To sign + notarize once you have a paid
+# Apple Developer ID Application cert, restore the block below and set
+# CSC_LINK / CSC_KEY_PASSWORD / APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD /
+# APPLE_TEAM_ID as repo secrets in .github/workflows/release.yml:
+#
+#   hardenedRuntime: true
+#   gatekeeperAssess: false
+#   entitlements: build/entitlements.mac.plist
+#   entitlementsInherit: build/entitlements.mac.plist
+#   notarize: true
+#
+# (hardenedRuntime + notarize both require a real signing cert, so leaving
+# them on with empty secrets makes electron-builder fail mid-build.)
 mac:
   category: public.app-category.finance
   target:
@@ -66,11 +75,9 @@ mac:
       arch:
         - arm64
         - x64
-  hardenedRuntime: true
-  gatekeeperAssess: false
-  entitlements: build/entitlements.mac.plist
-  entitlementsInherit: build/entitlements.mac.plist
-  notarize: true
+  # Skip the local keychain — CI runners have none and probing for one
+  # adds nothing useful when we're explicitly shipping unsigned.
+  identity: null
 
 dmg:
   title: ${productName} ${version}
