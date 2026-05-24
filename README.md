@@ -6,11 +6,39 @@ categorizes spending with AI, and builds budgets and insights — entirely on
 your own machine. **No financial data ever leaves your computer.** There is no
 Hon server, no account, no telemetry.
 
-Hon runs on **macOS, Linux, and Windows** as a desktop app.
+Hon is **primarily a local web app** — the engine runs on your own machine
+and serves a UI you open in your browser. A thin desktop wrapper is also
+packaged for **macOS, Linux, and Windows** for people who'd rather launch
+Hon like any other app, but underneath it's the same web UI talking to the
+same local engine; nothing about the data path changes.
 
-## Download
+## Run Hon
 
-Grab the installer for your OS from the
+### Web app (the main way)
+
+Hon is primarily a local web app. Clone the repo and start the engine — it
+serves the UI on `http://127.0.0.1:4000` in your default browser, with a
+fresh authentication token generated for each run. The engine binds to
+loopback only; nothing leaves your machine.
+
+```bash
+git clone https://github.com/shaharsolomons/Hon.git
+cd Hon/sidecar
+npm install        # first run: builds native modules, downloads Chromium
+npm run web        # opens http://127.0.0.1:4000 in your browser
+```
+
+`npm run web` is cross-platform. You can also launch the engine directly:
+
+- **macOS / Linux** — `./web.sh`
+- **Windows** — double-click `web.cmd`, or run `web.cmd` in a terminal
+
+Requires [Node.js](https://nodejs.org) 22.12 or later.
+
+### Desktop app (a wrapper around the same engine)
+
+If you'd rather double-click an icon than open a terminal, grab the installer
+for your OS from the
 [**latest release**](https://github.com/shaharsolomons/Hon/releases/latest):
 
 | OS | File | First-launch trust step |
@@ -19,12 +47,12 @@ Grab the installer for your OS from the
 | **Windows** | `Hon-Setup-x.y.z.exe` | SmartScreen says "Windows protected your PC". Click **More info → Run anyway**. Once. |
 | **Linux** | `Hon-x.y.z.AppImage` | `chmod +x Hon-*.AppImage` and double-click, or run from a terminal. |
 
-The installers are **unsigned** — Hon is one person's local-first project, not
-a commercial app, so a paid developer cert isn't worth it yet. The one-time
-trust steps above only happen on first launch.
+The installers bundle Node and the engine — no separate install. They are
+**unsigned** (Hon is one person's local-first project, not a commercial app
+with a paid developer cert), so each platform's one-time trust step above
+fires on first launch.
 
-Prefer the source path or running Hon on a NAS? Skip to
-[Run from source](#run-from-source-macos-linux-windows) or
+Running Hon on an always-on machine you can reach from anywhere? See
 [NAS or home server](#run-it--nas-or-home-server).
 
 ---
@@ -48,8 +76,6 @@ packaged as a double-clickable app per OS.
 - [Splitwise integration](#splitwise-integration)
 - [AI engine](#ai-engine)
 - [Tech stack & tools](#tech-stack--tools)
-- [Requirements](#requirements)
-- [Run from source](#run-from-source-macos-linux-windows)
 - [Run it — NAS or home server](#run-it--nas-or-home-server)
 - [Setup inside the app](#setup-inside-the-app)
 - [Where data lives](#where-data-lives)
@@ -192,32 +218,6 @@ The Splitwise client and the data.gov.il vehicle lookup are hand-written REST
 clients — no SDK.
 
 ---
-
-## Requirements
-
-For the downloadable apps: nothing — Node is bundled inside.
-
-For running from source or hacking on Hon: [Node.js](https://nodejs.org)
-22.12 or later.
-
-## Run from source (macOS, Linux, Windows)
-
-The sidecar starts and opens the web UI in your default browser — no Electron
-shell, useful for development.
-
-```bash
-cd sidecar
-npm install      # first run is large: builds native modules, downloads Chromium
-npm run web
-```
-
-`npm run web` is cross-platform. You can also launch it directly:
-
-- **macOS / Linux** — `./web.sh`
-- **Windows** — double-click `web.cmd`, or run `web.cmd` in a terminal
-
-This opens `http://127.0.0.1:4000`. The engine binds to loopback only, and the
-web app is authenticated with a fresh token generated on each run.
 
 ## Run it — NAS or home server
 

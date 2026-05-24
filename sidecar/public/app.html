@@ -521,6 +521,30 @@
   .rf-linked { background: var(--card-hi); border-radius: 12px;
     padding: 10px 11px; }
   .rf-linked-row { display: flex; align-items: center; gap: 9px; }
+  /* Amount-allocation input on the linked refund card — one transfer can
+     split across several expenses, so the user dials in exactly how much
+     applies here. */
+  .rf-amount-row { display: flex; align-items: center; gap: 10px;
+    margin-top: 9px; }
+  .rf-amount-lbl { font-size: 11.5px; font-weight: 700; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .4px; }
+  .rf-amount-input { flex: 1; display: flex; align-items: center; gap: 6px;
+    background: var(--card); border: 1px solid var(--hairline-2);
+    border-radius: 9px; padding: 5px 9px;
+    font-variant-numeric: tabular-nums; }
+  .rf-amount-input:focus-within { border-color: var(--accent); }
+  .rf-amount-input span { color: var(--muted); font-weight: 700; }
+  .rf-amount-input input { flex: 1; border: 0; background: transparent;
+    padding: 0; font: inherit; color: var(--text); outline: none;
+    width: 100%; min-width: 0; }
+  .rf-amount-cap { font-size: 11px; color: var(--faint); white-space: nowrap; }
+  /* Per-row tag on the picker rows showing the remaining balance / already-
+     linked amount, so the user picks the right transfer at a glance. */
+  .rf-opt-end { display: flex; flex-direction: column; align-items: flex-end;
+    gap: 3px; flex: 0 0 auto; }
+  .rf-opt-tag { font-size: 10.5px; font-weight: 700; color: var(--faint);
+    letter-spacing: .3px; }
+  .rf-opt-tag.on { color: var(--accent); }
   .rf-eff { margin-top: 8px; padding-top: 8px; font-size: 12.5px;
     font-weight: 700; color: var(--green);
     border-top: 1px solid var(--hairline-2); }
@@ -950,6 +974,17 @@
   .bgt-var-row .k { color: var(--muted); }
   .bgt-var-row .v { font-weight: 700; font-variant-numeric: tabular-nums; }
   .bgt-var-row .v.out { color: var(--faint); }
+  /* "Of which refunded / owed to you" rows — explain the fixed+essentials
+     figure above, so they're indented and tinted green to read as credits
+     applied to that gross. */
+  .bgt-var-row.cred-row { padding: 4px 0 4px 14px;
+    border-top: 1px dashed var(--hairline); }
+  .bgt-var-row.cred-row + .bgt-var-row:not(.cred-row) {
+    border-top: 1px solid var(--hairline); }
+  .bgt-var-row .k.cred-k,
+  .bgt-var-row.cred-row .k { color: var(--faint); font-size: 11.5px;
+    font-style: italic; }
+  .bgt-var-row .v.cred { color: var(--green); font-size: 12.5px; }
   .bgt-var-note { font-size: 11px; color: var(--faint); line-height: 1.45;
     margin-top: 9px; }
   /* --- Budget modal rows ------------------------------------------------- */
@@ -962,6 +997,15 @@
   .bm-name { font-size: 13.5px; font-weight: 600; }
   .bm-spent { font-size: 11.5px; color: var(--faint); margin-top: 1px; }
   .bm-spent.over { color: var(--red); }
+  /* Quick "Max" chip for the savings reserve row — fills the input with
+     whatever's free after this month's fixed bills + essentials + piggies. */
+  .bm-max-btn { padding: 5px 10px; border-radius: 7px;
+    border: 1px solid var(--hairline-2); background: var(--card-hi);
+    color: var(--muted); cursor: pointer; font-size: 11px; font-weight: 700;
+    letter-spacing: 0.04em; text-transform: uppercase; flex: none;
+    transition: border-color .14s, color .14s, background-color .14s; }
+  .bm-max-btn:hover { border-color: var(--indigo); color: var(--text);
+    background: var(--indigo-soft); }
   .bm-input { position: relative; width: 116px; flex: none; }
   .bm-input .bm-cur { position: absolute; left: 10px; top: 50%;
     transform: translateY(-50%); color: var(--faint); font-size: 13px;
@@ -1630,6 +1674,9 @@ const state = {
   companies: [], connections: [], accounts: [], transactions: [], assets: [],
   loans: [], rates: { prime: null, cpiNow: null },
   categories: [],         // user-editable spending categories, from /categories
+  // Every refund→expense allocation. One refund may cover parts of several
+  // expenses, and one expense may receive parts of several refunds.
+  transactionLinks: [],   // [{ expenseId, refundId, amount }]
   summary: null, budget: null, insights: null, llm: null,
   merchantFreq: {},      // { merchantKey: "monthly"|"bimonthly"|"yearly" }
   cancelledSubs: {},     // { merchantKey: cancelledAtIso } — user-marked cancellations
@@ -1870,11 +1917,55 @@ function isCardTotal(t) {
     return p.length > 1 && desc.indexOf(p) >= 0;
   });
 }
-// The amount a linked refund offsets from an expense (0 when not linked).
+// The total refund credit applied to an expense — sum of every allocation
+// linked to it. With N:M linking one expense may receive parts of several
+// refunds; this returns the combined offset (positive, the way refund rows
+// are signed). 0 when nothing is linked.
 function txnRefundAmount(t) {
-  if (!t || !t.refundId) return 0;
-  const r = state.transactions.find((x) => x.id === t.refundId);
-  return r ? r.amount : 0;
+  if (!t) return 0;
+  let sum = 0;
+  for (const l of (state.transactionLinks || [])) {
+    if (l.expenseId === t.id) sum += l.amount;
+  }
+  return sum;
+}
+
+// The portion of a refund transaction that is still unallocated. Used by
+// the link picker to show "₪307 left to allocate" alongside the amount.
+function refundRemaining(refundId) {
+  const r = state.transactions.find((x) => x.id === refundId);
+  if (!r) return 0;
+  let used = 0;
+  for (const l of (state.transactionLinks || [])) {
+    if (l.refundId === refundId) used += l.amount;
+  }
+  return Math.max(0, Math.abs(r.amount) - used);
+}
+
+// The single existing allocation between a given expense and refund, or
+// undefined. The picker uses this so editing an already-linked pair starts
+// the amount input at the current value rather than the unallocated rest.
+function transactionLinkFor(expenseId, refundId) {
+  return (state.transactionLinks || []).find(
+    (l) => l.expenseId === expenseId && l.refundId === refundId,
+  );
+}
+
+// Updates state.move.linkAmount on every keystroke and refreshes the
+// "Effective spend · ..." line *in place*. A full render() would tear down
+// the input and steal focus mid-edit, which is why we don't go through it.
+function onLinkAmount(inputEl) {
+  if (!state.move) return;
+  const v = Number(inputEl.value);
+  state.move.linkAmount = Number.isFinite(v) && v >= 0 ? v : 0;
+  const txn = state.transactions.find((t) => t.id === state.move.txnId);
+  if (!txn) return;
+  const effective = txn.amount + Number(state.move.linkAmount || 0);
+  const effEl = document.querySelector(".rf-eff");
+  if (effEl) {
+    effEl.textContent = "Effective spend · "
+      + money(effective, txn.currency, true);
+  }
 }
 
 // Match a transaction to a bank-scraped loan: same connection, the
@@ -1911,7 +2002,7 @@ async function loadAll() {
   try {
     const [companies, connections, accounts, transactions, assets, loansResp, categoriesResp,
            summary, insights, llm, merchantFreq, brokerage, cancelledSubs,
-           incomeOverrideResp, savingsResp] =
+           incomeOverrideResp, savingsResp, linksResp] =
       await Promise.all([
         api("/companies").then((r) => r.companies),
         api("/connections").then((r) => r.connections),
@@ -1928,6 +2019,7 @@ async function loadAll() {
         api("/subscriptions/cancelled").then((r) => r.cancelled),
         api("/budget/income-override").catch(() => ({ value: null })),
         api("/budget/savings").catch(() => ({ savings: {} })),
+        api("/transaction-links").catch(() => ({ links: [] })),
       ]);
     Object.assign(state, {
       companies, connections, accounts, transactions, assets,
@@ -1936,6 +2028,7 @@ async function loadAll() {
       summary, insights, llm, merchantFreq, brokerage, cancelledSubs,
       incomeOverride: incomeOverrideResp.value ?? null,
       monthlySavings: savingsResp.savings || {},
+      transactionLinks: linksResp.links || [],
     });
     // The budget is fetched once transactions are in state — its URL carries
     // the recurring projection, which is derived from those transactions.
@@ -2619,9 +2712,17 @@ function connectionCard(conn) {
           + esc(a.id) + '">' + (open ? "▾ " : "▸ ") + holds.length + " holding"
           + (holds.length === 1 ? "" : "s") + "</button>"
         : "";
+      // For credit-card accounts, the soonest future processedDate is the
+      // date THIS card bills — two cards on one connection often bill on
+      // different days, so the date sits on the row, not the connection.
+      const billDate = isCard ? accountNextBillDate(a.id) : null;
+      const billSub = billDate
+        ? '<div class="secondary">Bills ' + esc(fmtDate(billDate)) + "</div>"
+        : "";
       return '<div class="row' + (a.excluded ? " nw-off" : "") + '"><div><div class="name">'
         + esc(a.label || "Account " + a.accountNumber) + "</div>"
         + (a.label ? '<div class="secondary">' + esc(a.accountNumber) + "</div>" : "")
+        + billSub
         + toggle
         + '</div><div class="row-end">' + amt(a)
         + nwTick("account", a.id, a.excluded) + "</div></div>"
@@ -2645,16 +2746,9 @@ function connectionCard(conn) {
       + '<span class="conn-spend-amt">' + money(-cycleSpent, "ILS") + "</span></div>";
   }
 
-  // For credit cards, the soonest future processedDate is the next bill day
-  // — the date the card actually charges the bank account. We sum every
-  // transaction billing on that date to show what the bank will see.
-  const nextBillInfo = isCard ? nextBill(conn) : null;
-  if (nextBillInfo) {
-    spendLine += '<div class="conn-spend"><span>Next bill · '
-      + esc(fmtDate(nextBillInfo.date)) + "</span>"
-      + '<span class="conn-spend-amt">' + money(-nextBillInfo.amount, "ILS")
-      + "</span></div>";
-  }
+  // (Per-card bill date is rendered on each account row below — different
+  // cards on the same connection can bill on different days, so a single
+  // connection-level figure would hide that.)
 
   let progressNote = "";
   if (prog) {
@@ -2728,31 +2822,21 @@ function accountCycleSpend(accountId) {
   return total;
 }
 
-// Next bill for a credit-card connection: the soonest future processedDate
-// across its accounts (the date the card actually charges the bank), plus
-// the total of every transaction billing on that date. Returns null when no
-// future-dated transactions are present (bill already settled, or the
-// scraper has not yet pulled the upcoming month).
-function nextBill(conn) {
-  const ids = new Set(state.accounts
-    .filter((a) => a.connectionId === conn.id).map((a) => a.id));
-  if (!ids.size) return null;
+// Next bill date for a single credit-card account: the soonest future
+// processedDate the card will bill on. Different cards on the same
+// connection can bill on different days, so the date lives per-account.
+// Returns null when no future-dated transactions are present (bill already
+// settled, or the scraper hasn't pulled the upcoming month yet).
+function accountNextBillDate(accountId) {
   const todayIso = new Date().toISOString().slice(0, 10);
   let earliest = null;
   state.transactions.forEach((t) => {
-    if (!ids.has(t.accountId) || isCardTotal(t) || t.refundForId) return;
+    if (t.accountId !== accountId || isCardTotal(t) || t.refundForId) return;
     const pd = t.processedDate || t.date;
     if (!pd || pd < todayIso) return;
     if (!earliest || pd < earliest) earliest = pd;
   });
-  if (!earliest) return null;
-  let total = 0;
-  state.transactions.forEach((t) => {
-    if (!ids.has(t.accountId) || isCardTotal(t) || t.refundForId) return;
-    if ((t.processedDate || t.date) !== earliest) return;
-    total += t.amount + txnRefundAmount(t);
-  });
-  return { date: earliest, amount: total };
+  return earliest;
 }
 
 /* --- Assets -------------------------------------------------------------- */
@@ -3244,6 +3328,33 @@ function variableCardHtml(v, currency) {
     b.kind === "lump" && b.thisMonth.status === "funded" && b.thisMonth.amount > 0);
   const lumpThisMonth = lumpFunded.reduce((s, b) => s + (b.thisMonth.amount || 0), 0);
   const lumpNames = lumpFunded.map((b) => '"' + b.name + '"').join(", ");
+
+  // Refund / Splitwise context for this cycle. Both figures are ALREADY
+  // folded into v.committed (the txn_effective view applies them), so the
+  // rows below are purely informational — they explain *why* "Fixed +
+  // essentials" reads lower than the gross of what you spent.
+  const curKey = currentCycleKey();
+  const cycleExpenseIds = new Set(
+    state.transactions
+      .filter((t) => t.amount < 0 && cycleKey(t.date) === curKey)
+      .map((t) => t.id),
+  );
+  let manuallyRefunded = 0;
+  for (const l of (state.transactionLinks || [])) {
+    if (cycleExpenseIds.has(l.expenseId)) manuallyRefunded += l.amount;
+  }
+  let owedToYou = 0;
+  for (const link of ((state.splitwise || {}).links || [])) {
+    if (!cycleExpenseIds.has(link.transactionId)) continue;
+    const unpaid = Math.max(0, (link.owedToMe || 0) - (link.paidAmount || 0));
+    // Don't double-count the part already covered by a manual link to the
+    // same expense — that's the exact shape `txn_effective` uses.
+    let manualForThis = 0;
+    for (const l of (state.transactionLinks || [])) {
+      if (l.expenseId === link.transactionId) manualForThis += l.amount;
+    }
+    owedToYou += Math.max(0, unpaid - manualForThis);
+  }
   let cls = "", fillColor = "var(--green)", cap;
   if (!v.income && !v.committed && !v.spent) {
     cap = "No income or spending recorded this month yet.";
@@ -3273,8 +3384,25 @@ function variableCardHtml(v, currency) {
         + " for " + lumpNames + " this month."
       : "Free to spend on shopping, entertainment, travel and the like.";
   }
-  const row = (k, val, out) => '<div class="bgt-var-row"><span class="k">' + k
-    + '</span><span class="v' + (out ? " out" : "") + '">' + val + "</span></div>";
+  // Row helper. `tone` is "out" (red minus), "cred" (green credit/refund
+  // row), or empty (neutral). The credit rows are informational — already
+  // baked into the totals above, shown so the user sees WHY their effective
+  // spend is below the gross.
+  const row = (k, val, tone) => {
+    const rowCls = tone === "cred" ? " cred-row" : "";
+    return '<div class="bgt-var-row' + rowCls + '"><span class="k">' + k
+      + '</span><span class="v' + (tone ? " " + tone : "") + '">' + val
+      + "</span></div>";
+  };
+  // The credit rows live in a nested "of which …" block under fixed+essentials
+  // so it's clear they explain that figure, not stack on top of it.
+  let creditRows = "";
+  if (manuallyRefunded > 0) {
+    creditRows += row("Of which refunded", "↩ " + money(manuallyRefunded, currency), "cred");
+  }
+  if (owedToYou > 0) {
+    creditRows += row("Of which owed to you", "⏳ " + money(owedToYou, currency), "cred");
+  }
   return '<div class="bgt-group">Variable spending · allowed right now</div>'
     + '<div class="bgt-var ' + cls + '">'
     + '<div class="bgt-var-top"><span class="bgt-var-amt">'
@@ -3286,20 +3414,21 @@ function variableCardHtml(v, currency) {
     + '<div class="bgt-var-rows">'
     + row(v.projected ? "Expected income" : "Money in", money(v.income, currency))
     + row(v.projected ? "Expected fixed + essentials" : "Fixed + essential spend",
-        "− " + money(v.committed, currency), true)
+        "− " + money(v.committed, currency), "out")
+    + creditRows
     + (lumpThisMonth
-        ? row("Set asides (one-time)", "− " + money(lumpThisMonth, currency), true)
+        ? row("Set asides (one-time)", "− " + money(lumpThisMonth, currency), "out")
         : "")
     + (v.savings > 0
         ? row("Savings (this month)"
             + (v.savingsWish && v.savingsWish > v.savings ? " · capped" : ""),
-            "− " + money(v.savings, currency), true)
+            "− " + money(v.savings, currency), "out")
         : "")
     + (v.piggyFunded - lumpThisMonth > 0
         ? row("Piggy banks",
-            "− " + money(v.piggyFunded - lumpThisMonth, currency), true)
+            "− " + money(v.piggyFunded - lumpThisMonth, currency), "out")
         : "")
-    + row("Variable spent", "− " + money(v.spent, currency), true)
+    + row("Variable spent", "− " + money(v.spent, currency), "out")
     + "</div>"
     + (v.projected ? '<div class="bgt-var-note">Projected — fixed bills '
         + "reserved every cycle and income averaged over recent months. "
@@ -3759,27 +3888,44 @@ function movePanel() {
     + fmtDate(txn.date) + "</div></div></div>";
 
   // Refund-picker mode: choose the transaction that reimburses this expense.
+  // One refund may now cover parts of several expenses, so the filter is
+  // "any incoming transaction with unallocated balance" rather than the
+  // old "only refunds linked to nothing else".
   if (state.move.linkMode) {
     const picks = state.transactions
-      .filter((t) => t.id !== txn.id && t.amount > 0
-        && (!t.refundForId || t.id === state.move.refundId))
+      .filter((t) => {
+        if (t.id === txn.id || t.amount <= 0) return false;
+        const existing = transactionLinkFor(txn.id, t.id);
+        return refundRemaining(t.id) > 0 || existing;
+      })
       .slice(0, 80);
     const list = picks.length
       ? picks.map((t) => {
           const [ce, cc] = catStyle(t.category || "Income");
+          const remaining = refundRemaining(t.id);
+          const existing = transactionLinkFor(txn.id, t.id);
+          const total = Math.abs(t.amount);
+          const tag = existing
+            ? '<div class="rf-opt-tag on">' + money(existing.amount, t.currency)
+              + " linked</div>"
+            : (remaining < total
+                ? '<div class="rf-opt-tag">' + money(remaining, t.currency)
+                  + " left of " + money(total, t.currency) + "</div>"
+                : "");
           return '<button class="rf-opt" data-pick-refund="' + esc(t.id) + '">'
             + '<span class="txn-icon sm" style="background:' + cc + '26;color:' + cc
             + '">' + ce + "</span>"
             + '<div class="txn-main"><div class="txn-name">' + esc(t.description)
             + '</div><div class="txn-sub">' + fmtDate(t.date) + "</div></div>"
-            + '<div class="txn-amt pos">' + money(t.amount, t.currency, true)
-            + "</div></button>";
+            + '<div class="rf-opt-end"><div class="txn-amt pos">'
+            + money(t.amount, t.currency, true) + "</div>" + tag + "</div></button>";
         }).join("")
-      : '<div class="empty">No incoming transactions found to link.</div>';
+      : '<div class="empty">No incoming transactions with unallocated balance.</div>';
     return header
       + '<button class="back-btn" data-x="link-back">‹ Back</button>'
-      + '<div class="rf-hint">Pick the transaction that paid you back for this '
-      + "expense — its amount is deducted from your spending.</div>"
+      + '<div class="rf-hint">Pick the transaction that paid you back — Hon '
+      + "deducts whatever portion you allocate from this expense. One transfer "
+      + "can split across several expenses.</div>"
       + '<div class="rf-list">' + list + "</div></div>";
   }
 
@@ -3797,13 +3943,36 @@ function movePanel() {
   const r = state.move.refundId
     && state.transactions.find((t) => t.id === state.move.refundId);
   if (r) {
+    // Default the input to: the existing link's amount, the refund's unused
+    // balance, or whichever is smaller relative to the expense magnitude —
+    // so the common single-refund-single-expense case still works in one
+    // click while partial allocations are now possible.
+    const existing = transactionLinkFor(txn.id, r.id);
+    const expenseMag = Math.abs(txn.amount);
+    const refundMag = Math.abs(r.amount);
+    const otherUsed = refundMag - refundRemaining(r.id) - (existing?.amount || 0);
+    const freeOnRefund = Math.max(0, refundMag - otherUsed);
+    const defaultAmt = state.move.linkAmount != null
+      ? state.move.linkAmount
+      : (existing?.amount ?? Math.min(freeOnRefund, expenseMag));
+    const sym = SYMBOLS[(txn.currency || "ILS").toUpperCase()] || "";
+    const effective = txn.amount + Number(defaultAmt || 0);
     refund = '<div class="rf-linked"><div class="rf-linked-row">'
       + '<div class="txn-main"><div class="txn-name">' + esc(r.description)
       + '</div><div class="txn-sub">' + money(r.amount, r.currency, true) + " · "
       + fmtDate(r.date) + "</div></div>"
       + '<button class="icon-btn mini" data-x="link-remove">✕</button></div>'
+      + '<div class="rf-amount-row">'
+      + '<label class="rf-amount-lbl">Allocate</label>'
+      + '<div class="rf-amount-input"><span>' + sym + "</span>"
+      + '<input type="number" min="0" step="0.01" max="' + freeOnRefund
+      + '" value="' + Number(defaultAmt).toFixed(2)
+      + '" id="rf-amount-input" oninput="onLinkAmount(this)">'
+      + "</div>"
+      + '<span class="rf-amount-cap">of ' + money(freeOnRefund, r.currency)
+      + " free</span></div>"
       + '<div class="rf-eff">Effective spend · '
-      + money(txn.amount + r.amount, txn.currency, true) + "</div></div>";
+      + money(effective, txn.currency, true) + "</div></div>";
   } else {
     refund = '<button class="block rf-add" data-x="link-add">'
       + "+ Link a refund or reimbursement</button>";
@@ -3840,7 +4009,16 @@ function movePanel() {
   }
 
   const refundChanged = (state.move.refundId || null) !== (txn.refundId || null);
-  const canSave = !!state.move.picked || refundChanged;
+  // The Save button also lights up when only the allocation amount changed
+  // on an already-picked refund — that's a re-link, not a new link.
+  const existingLink = state.move.refundId
+    ? transactionLinkFor(state.move.txnId, state.move.refundId)
+    : null;
+  const amountChanged = !!(state.move.refundId
+    && typeof state.move.linkAmount === "number"
+    && existingLink
+    && Math.abs(existingLink.amount - state.move.linkAmount) > 0.005);
+  const canSave = !!state.move.picked || refundChanged || amountChanged;
 
   // Splitwise — split this transaction, or show its linked expense's status.
   let swSection = "";
@@ -5807,6 +5985,8 @@ function budgetModal() {
         + '<div class="bm-info"><div class="bm-name">Set aside for savings</div>'
         + '<div class="bm-spent" id="bm-savings-cap">A one-off reserve for this '
         + "month — not a piggy bank.</div></div>"
+        + '<button type="button" id="bm-savings-max" class="bm-max-btn" '
+        + 'title="Set this month\'s reserve to every shekel left over">Max</button>'
         + '<div class="bm-input"><span class="bm-cur">' + symbol + "</span>"
         + '<input id="bm-savings" type="number" min="0" step="100" placeholder="0" value="'
         + esc(savingsVal) + '"></div></div>'
@@ -5831,7 +6011,9 @@ function budgetModal() {
     const savingsCapEl = modal.querySelector("#bm-savings-cap");
     // The room left for a savings reserve, computed from the values currently
     // in the modal — so editing the income override or an essential budget
-    // updates the cap immediately, no save-and-reopen needed.
+    // updates the cap immediately, no save-and-reopen needed. Subtracts the
+    // variable spent so far this cycle too: that money is already gone, so
+    // it can't also be set aside.
     function savingsCap() {
       const incomeRaw = incomeInputEl.value.trim();
       const income = incomeRaw === "" ? (v.income || 0) : (Number(incomeRaw) || 0);
@@ -5844,7 +6026,8 @@ function budgetModal() {
       });
       const fixed = v.fixedSpent || 0;
       const piggy = v.piggyFunded || 0;
-      return Math.max(0, income - fixed - essential - piggy);
+      const variableSpent = v.spent || 0;
+      return Math.max(0, income - fixed - essential - piggy - variableSpent);
     }
     function refresh() {
       let total = 0;
@@ -5876,6 +6059,13 @@ function budgetModal() {
     inputs.forEach((inp) => inp.addEventListener("input", refresh));
     incomeInputEl.addEventListener("input", refresh);
     savingsInputEl.addEventListener("input", refresh);
+    // "Max" snaps the reserve to whatever's free after this month's fixed
+    // bills, essentials and piggy funding — recomputed live, so toggling
+    // an essential budget and then tapping Max picks up the latest cap.
+    modal.querySelector("#bm-savings-max").addEventListener("click", () => {
+      savingsInputEl.value = String(Math.floor(savingsCap()));
+      refresh();
+    });
     refresh();
 
     modal.querySelector('[data-x="cancel"]').addEventListener("click", closeOverlay);
@@ -6771,12 +6961,28 @@ async function saveMove() {
     if (incomeChanged) {
       await api("/merchant-frequency", "PUT", { key: mKey, frequency: incomeWant });
     }
+    // Refund link save: PUT now carries the per-allocation amount, so a
+    // single transfer can split across multiple expenses with each leg
+    // tracked individually. An omitted amount lets the server default to
+    // "the unallocated balance, capped at the expense's magnitude" — the
+    // common single-refund-single-expense behaviour.
+    const linkAmount = typeof m.linkAmount === "number" && m.linkAmount > 0
+      ? m.linkAmount : undefined;
     if (refundChanged) {
       if (m.refundId) {
         await api("/transactions/" + m.txnId + "/link", "PUT",
-          { refundId: m.refundId });
+          { refundId: m.refundId, amount: linkAmount });
       } else {
         await api("/transactions/" + m.txnId + "/link", "DELETE");
+      }
+    } else if (m.refundId && linkAmount !== undefined) {
+      // The refund pick didn't change but the amount input did — re-issue
+      // the link with the new amount so the allocation reflects what the
+      // user typed.
+      const existing = transactionLinkFor(m.txnId, m.refundId);
+      if (!existing || Math.abs(existing.amount - linkAmount) > 0.005) {
+        await api("/transactions/" + m.txnId + "/link", "PUT",
+          { refundId: m.refundId, amount: linkAmount });
       }
     }
     const movedCat = m.picked && (m.picked !== (txn.category || "") || m.always);
@@ -7365,17 +7571,25 @@ document.getElementById("sidebar").addEventListener("click", (e) => {
   const pick = e.target.closest("[data-pick-refund]");
   if (pick && state.move) {
     state.move.refundId = pick.dataset.pickRefund;
+    state.move.linkAmount = null;  // reset — the linked-card recomputes a default
     state.move.linkMode = false;
     render();
     return;
   }
+  // The amount input on the linked-refund card uses its own oninput
+  // handler (onLinkAmount) so it can update state and the "Effective
+  // spend" line without a render() that would steal input focus.
   const x = e.target.closest("[data-x]");
   if (x && state.move) {
     if (x.dataset.x === "move-cancel") { state.move = null; render(); }
     else if (x.dataset.x === "move-save") saveMove();
     else if (x.dataset.x === "link-add") { state.move.linkMode = true; render(); }
     else if (x.dataset.x === "link-back") { state.move.linkMode = false; render(); }
-    else if (x.dataset.x === "link-remove") { state.move.refundId = null; render(); }
+    else if (x.dataset.x === "link-remove") {
+      state.move.refundId = null;
+      state.move.linkAmount = null;
+      render();
+    }
     else if (x.dataset.x === "sw-split") {
       const t = state.transactions.find((tx) => tx.id === state.move.txnId);
       if (t) splitwiseSheet(t);

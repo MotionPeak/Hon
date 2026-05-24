@@ -587,26 +587,69 @@ app.put('/merchant-frequency', async (req, reply) => {
 app.put('/transactions/:id/link', async (req, reply) => {
   if (!repo) return reply.code(503).send({ error: 'database unavailable' });
   const { id } = req.params as { id: string };
-  const body = (req.body ?? {}) as { refundId?: string };
+  const body = (req.body ?? {}) as { refundId?: string; amount?: number };
   if (!body.refundId) return reply.code(400).send({ error: 'refundId is required' });
   if (body.refundId === id) {
     return reply.code(400).send({ error: 'a transaction cannot refund itself' });
   }
-  if (!repo.getTransaction(id)) {
-    return reply.code(404).send({ error: 'expense not found' });
+  const expense = repo.getTransaction(id);
+  if (!expense) return reply.code(404).send({ error: 'expense not found' });
+  const refund = repo.getTransaction(body.refundId);
+  if (!refund) return reply.code(404).send({ error: 'refund transaction not found' });
+
+  // Validate amount. Omitted → allocate the full unallocated remainder
+  // capped at the expense's outstanding magnitude.
+  const refundMagnitude = Math.abs(refund.amount);
+  const expenseMagnitude = Math.abs(expense.amount);
+  const remaining = repo.refundRemaining(body.refundId)
+    + (repo.listTransactionLinks().find(
+        (l) => l.expenseId === id && l.refundId === body.refundId,
+      )?.amount ?? 0);
+  let amount = typeof body.amount === 'number' ? body.amount : Math.min(remaining, expenseMagnitude);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return reply.code(400).send({ error: 'amount must be a positive number' });
   }
-  if (!repo.getTransaction(body.refundId)) {
-    return reply.code(404).send({ error: 'refund transaction not found' });
+  if (amount > refundMagnitude + 0.005) {
+    return reply.code(400).send({
+      error: `amount exceeds refund magnitude (${refundMagnitude})`,
+    });
   }
-  repo.setTransactionLink(id, body.refundId);
-  return { ok: true };
+  if (amount > remaining + 0.005) {
+    return reply.code(400).send({
+      error: `only ${remaining.toFixed(2)} of this refund is unallocated`,
+    });
+  }
+  repo.setTransactionLink(id, body.refundId, amount);
+  return { ok: true, amount };
 });
 
 app.delete('/transactions/:id/link', async (req, reply) => {
   if (!repo) return reply.code(503).send({ error: 'database unavailable' });
   const { id } = req.params as { id: string };
-  repo.deleteTransactionLink(id);
+  // Optional refundId in the query string targets one allocation; omitted
+  // removes every refund attached to this expense (back-compat).
+  const { refundId } = req.query as { refundId?: string };
+  repo.deleteTransactionLink(id, refundId);
   return { ok: true };
+});
+
+// Returns every refund→expense allocation. The web app needs this to know
+// how much of each refund is still unallocated, since one refund can now
+// cover parts of several expenses.
+app.get('/transaction-links', async (_req, reply) => {
+  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+  return { links: repo.listTransactionLinks() };
+});
+
+// Returns the unallocated portion of a refund transaction so the picker can
+// show "₪307 left to allocate" next to the amount input.
+app.get('/transactions/:id/refund-remaining', async (req, reply) => {
+  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+  const { id } = req.params as { id: string };
+  if (!repo.getTransaction(id)) {
+    return reply.code(404).send({ error: 'transaction not found' });
+  }
+  return { remaining: repo.refundRemaining(id) };
 });
 
 // --- Splitwise --------------------------------------------------------------
@@ -1121,11 +1164,14 @@ app.delete('/categories/:name', async (req, reply) => {
   const { name } = req.params as { name: string };
   const existing = repo.getCategory(name);
   if (!existing) return reply.code(404).send({ error: 'category not found' });
-  if (existing.isBuiltin) {
-    return reply.code(400).send({ error: 'built-in categories cannot be deleted' });
+  if (name === 'Other') {
+    return reply.code(400).send({
+      error: '"Other" is the fallback target for deleted categories and cannot itself be removed',
+    });
   }
+  const affected = repo.countTransactionsInCategory(name);
   repo.deleteCategory(name);
-  return { ok: true };
+  return { ok: true, transactionsMoved: affected };
 });
 
 // Resolves an Israeli licence plate to the car's make/model/year via the

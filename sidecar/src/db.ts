@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-export const SCHEMA_VERSION = 23;
+export const SCHEMA_VERSION = 24;
 
 export interface DbHandle {
   db: Database.Database;
@@ -438,6 +438,83 @@ const MIGRATIONS: { version: number; sql: string }[] = [
       CREATE TABLE monthly_savings (
         month  TEXT PRIMARY KEY,
         amount REAL NOT NULL
+      );
+    `,
+  },
+  {
+    // N:M refund linking with partial amounts. The original 1:1 table forced
+    // one expense to one refund and the whole refund magnitude was applied —
+    // no way to model "one bank inflow covers two bills" or vice versa, and
+    // no way for a Splitwise-owed expense to read as partially-reimbursed
+    // before the cash actually moves. Each row now records HOW MUCH of the
+    // refund is allocated to the expense, and the new view sums per-expense
+    // allocations and folds in a Splitwise virtual-refund leg (owed_to_me
+    // minus already-settled, capped so it can't double-count manual links).
+    version: 24,
+    sql: `
+      DROP VIEW IF EXISTS txn_effective;
+
+      CREATE TABLE transaction_links_new (
+        id          TEXT PRIMARY KEY,
+        expense_id  TEXT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+        refund_id   TEXT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+        amount      REAL NOT NULL,
+        created_at  TEXT NOT NULL,
+        UNIQUE (expense_id, refund_id)
+      );
+
+      -- Backfill: each existing link transfers, with amount = full refund
+      -- magnitude (the prior semantics).
+      INSERT INTO transaction_links_new (id, expense_id, refund_id, amount, created_at)
+      SELECT lower(hex(randomblob(16))), l.expense_id, l.refund_id,
+             ABS(r.amount), l.created_at
+      FROM transaction_links l
+      JOIN transactions r ON r.id = l.refund_id;
+
+      DROP TABLE transaction_links;
+      ALTER TABLE transaction_links_new RENAME TO transaction_links;
+
+      CREATE INDEX idx_txn_links_expense ON transaction_links (expense_id);
+      CREATE INDEX idx_txn_links_refund  ON transaction_links (refund_id);
+
+      -- For each expense:  effective = original_amount + manual refund allocations
+      --                              + Splitwise virtual refund (owed minus settled
+      --                                minus what manual links already cover).
+      -- For each refund:   effective = signed_amount minus already-allocated portion
+      --                                (shows the unallocated remainder; drop the row
+      --                                entirely when fully allocated).
+      CREATE VIEW txn_effective AS
+      WITH refund_allocs AS (
+        SELECT expense_id, SUM(amount) AS refunded
+        FROM transaction_links GROUP BY expense_id
+      ),
+      refund_used AS (
+        SELECT refund_id, SUM(amount) AS used
+        FROM transaction_links GROUP BY refund_id
+      ),
+      splitwise_virtual AS (
+        SELECT s.transaction_id AS expense_id,
+               MAX(0, s.owed_to_me - s.paid_amount - COALESCE(r.refunded, 0))
+                 AS virtual
+        FROM splitwise_links s
+        LEFT JOIN refund_allocs r ON r.expense_id = s.transaction_id
+      )
+      SELECT t.id, t.account_id, t.date,
+             CASE
+               WHEN ru.used IS NOT NULL THEN
+                 CASE WHEN t.amount > 0 THEN t.amount - ru.used
+                      ELSE t.amount + ru.used END
+               ELSE
+                 t.amount + COALESCE(r.refunded, 0) + COALESCE(sv.virtual, 0)
+             END AS amount,
+             t.currency, t.description, t.category
+      FROM transactions t
+      LEFT JOIN refund_allocs r ON r.expense_id = t.id
+      LEFT JOIN refund_used ru ON ru.refund_id = t.id
+      LEFT JOIN splitwise_virtual sv ON sv.expense_id = t.id
+      WHERE NOT EXISTS (
+        SELECT 1 FROM refund_used u
+        WHERE u.refund_id = t.id AND u.used >= ABS(t.amount) - 0.005
       );
     `,
   },

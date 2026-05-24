@@ -5,6 +5,7 @@ export interface PiggyBankStatus {
   id: string;
   name: string;
   emoji: string;
+  kind: 'monthly' | 'lump';
   targetAmount: number;
   monthlyAmount: number;
   currency: string;
@@ -16,8 +17,9 @@ export interface PiggyBankStatus {
   thisMonth: {
     amount: number; // what was actually set aside this month
     // funded · skipped (budget too tight) · complete (target reached) ·
-    // onhold (manually paused by the user)
-    status: 'funded' | 'skipped' | 'complete' | 'onhold';
+    // onhold (manually paused) · reserved (lump-sum already funded, just
+    // held in reserve until the user marks it used)
+    status: 'funded' | 'skipped' | 'complete' | 'onhold' | 'reserved';
   };
   monthsLeft: number | null; // estimated months to reach the target, null if unknowable
 }
@@ -72,8 +74,25 @@ export function settlePiggyBanks(
     const targetRemaining = Math.max(0, b.targetAmount - prior);
 
     let thisAmount = 0;
-    let monthStatus: 'funded' | 'skipped' | 'complete' | 'onhold';
-    if (targetRemaining <= 0) {
+    let monthStatus: PiggyBankStatus['thisMonth']['status'];
+    if (b.kind === 'lump') {
+      // Lump-sum piggy: an explicit "have-to" commitment, not a discretionary
+      // saving goal. Funds the whole target in one shot the first month —
+      // regardless of headroom — and then sits in reserve until the user
+      // marks it used. If reserving it pushes the variable allowance below
+      // zero, the budget UI surfaces that explicitly (it's exactly what the
+      // user opted into by setting it aside).
+      if (prior >= b.targetAmount) {
+        monthStatus = 'reserved';
+      } else if (b.onHold) {
+        monthStatus = 'onhold';
+      } else {
+        thisAmount = targetRemaining;
+        headroom -= targetRemaining; // may go negative — that's reported
+        fundedTotal += targetRemaining;
+        monthStatus = 'funded';
+      }
+    } else if (targetRemaining <= 0) {
       monthStatus = 'complete';
     } else if (b.onHold) {
       // Manually paused — no set-aside, and it does not draw on the headroom.
@@ -93,11 +112,15 @@ export function settlePiggyBanks(
 
     const saved = prior + thisAmount;
     const remaining = Math.max(0, b.targetAmount - saved);
-    const complete = remaining <= 0;
+    // Monthly piggies auto-complete when fully funded; lump piggies stay
+    // open in "reserved" state until the user marks them used, so they
+    // never report `complete` from here.
+    const complete = b.kind === 'lump' ? false : remaining <= 0;
     statuses.push({
       id: b.id,
       name: b.name,
       emoji: b.emoji,
+      kind: b.kind,
       targetAmount: b.targetAmount,
       monthlyAmount: b.monthlyAmount,
       currency: b.currency,
@@ -108,10 +131,8 @@ export function settlePiggyBanks(
       onHold: b.onHold,
       thisMonth: { amount: thisAmount, status: monthStatus },
       monthsLeft:
-        complete || b.onHold
-          ? complete
-            ? 0
-            : null
+        b.kind === 'lump' || complete || b.onHold
+          ? complete ? 0 : null
           : b.monthlyAmount > 0
             ? Math.ceil(remaining / b.monthlyAmount)
             : null,

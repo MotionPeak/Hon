@@ -237,11 +237,6 @@ const SYSTEM_PROMPT =
   'single best-fitting spending category from the allowed list. Use "Other" only ' +
   'when nothing else fits.';
 
-const GRAMMAR_SCHEMA = {
-  type: 'object',
-  properties: { category: { enum: CATEGORIES } },
-} as const;
-
 /**
  * Categorizes uncategorized transactions: a cache lookup, then the rule map,
  * then the on-device LLM (if a model is loaded). Runs as a background job.
@@ -278,7 +273,14 @@ export class Categorizer {
         return;
       }
 
-      const classifier = await this.createLlmClassifier();
+      // The live category set comes from the DB so user-added categories
+      // count for both the whitelist and the LLM enum. Falls back to the
+      // hardcoded seed list if the table somehow comes back empty.
+      const liveNames = this.repo.listCategories().map((c) => c.name);
+      const allowedNames = liveNames.length > 0 ? liveNames : [...CATEGORIES];
+      const allowedSet = new Set<string>(allowedNames);
+
+      const classifier = await this.createLlmClassifier(allowedNames, allowedSet);
       // User-set merchant rules take priority over everything else.
       const userRules = new Map(
         this.repo.listMerchantRules().map((r) => [r.description, r.category]),
@@ -290,26 +292,26 @@ export class Categorizer {
       try {
         for (const description of descriptions) {
           const key = normalizeKey(description);
-          let category: Category | null = null;
+          let category: string | null = null;
           let source = 'rule';
 
           const userRule = userRules.get(description);
-          if (userRule && CATEGORY_SET.has(userRule)) {
-            category = userRule as Category;
+          if (userRule && allowedSet.has(userRule)) {
+            category = userRule;
             source = 'user';
             byRule += 1;
           }
           if (!category) {
             const cached = this.repo.getCachedCategory(key);
-            if (cached && CATEGORY_SET.has(cached.category)) {
-              category = cached.category as Category;
+            if (cached && allowedSet.has(cached.category)) {
+              category = cached.category;
               source = cached.source;
               byCache += 1;
             }
           }
           if (!category) {
             const ruled = categorizeByRule(description);
-            if (ruled) {
+            if (ruled && allowedSet.has(ruled)) {
               category = ruled;
               source = 'rule';
               byRule += 1;
@@ -348,9 +350,14 @@ export class Categorizer {
     }
   }
 
-  /** Builds an LLM classifier if a provider is ready; otherwise null (rules only). */
-  private async createLlmClassifier(): Promise<{
-    classify: (description: string) => Promise<Category>;
+  /** Builds an LLM classifier if a provider is ready; otherwise null (rules only).
+   *  Takes the live category names so the JSON-schema enum reflects the
+   *  user's actual category set — including any they have added. */
+  private async createLlmClassifier(
+    allowedNames: string[],
+    allowedSet: Set<string>,
+  ): Promise<{
+    classify: (description: string) => Promise<string>;
     dispose: () => void;
   } | null> {
     if (!this.llm.isReady()) return null;
@@ -360,14 +367,19 @@ export class Categorizer {
       contextSize: 2048,
     });
 
-    const classify = async (description: string): Promise<Category> => {
+    const schema = {
+      type: 'object',
+      properties: { category: { enum: allowedNames } },
+    };
+
+    const classify = async (description: string): Promise<string> => {
       try {
         const response = await session.prompt(`Transaction: "${description}"`, {
-          jsonSchema: GRAMMAR_SCHEMA,
+          jsonSchema: schema,
         });
         const parsed = JSON.parse(response) as { category?: string };
-        return parsed.category && CATEGORY_SET.has(parsed.category)
-          ? (parsed.category as Category)
+        return parsed.category && allowedSet.has(parsed.category)
+          ? parsed.category
           : 'Other';
       } catch {
         return 'Other';

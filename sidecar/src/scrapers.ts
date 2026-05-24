@@ -124,6 +124,18 @@ const UNSUPPORTED = new Set<string>([
   'beyahadBishvilha',
 ]);
 
+// Banks the in-browser OTP watcher knows how to drive. The watcher's hints
+// and selectors are FIBI-group specific (Beinleumi, Otsar, Massad, Pagi all
+// share Beinleumi's portal). For any other institution the underlying
+// israeli-bank-scrapers library handles its own 2FA — running our watcher
+// risks misfiring on coincidental Hebrew phrases.
+const HON_OTP_WATCHER_COMPANIES = new Set<string>([
+  'beinleumi',
+  'otsarHahayal',
+  'massad',
+  'pagi',
+]);
+
 // israeli-bank-scrapers does not tag institutions by kind, so Hon classifies
 // them. Anything not listed here is treated as a bank (a safe default for the
 // banks that make up most of the catalog).
@@ -319,10 +331,18 @@ export async function runInteractiveScrape(
       .scrape(credentials as unknown as ScraperCredentials)
       .finally(() => controller.abort());
 
-    // Watch for (and complete) the 2FA page concurrently with the scrape.
-    void pagePromise
-      .then((page) => watchForOtp(page, onOtpNeeded, controller.signal))
-      .catch(() => {});
+    // The OTP watcher is Beinleumi-specific: it looks for Hebrew phrases like
+    // "סיסמה חד פעמית" and drives the FIBI-group SMS form (#sendSms / "שלח").
+    // Running it for Max / Isracard / Cal / Amex risks misfiring on any page
+    // that happens to contain those phrases — the user gets an OTP prompt
+    // for a code their card provider never actually sent. So scope it to
+    // the banks it was built for; everyone else relies on the underlying
+    // scraper library's own login flow.
+    if (HON_OTP_WATCHER_COMPANIES.has(companyId)) {
+      void pagePromise
+        .then((page) => watchForOtp(page, onOtpNeeded, controller.signal))
+        .catch(() => {});
+    }
 
     const result = await scrapePromise;
     if (!result.success) {
@@ -435,11 +455,25 @@ function normalizeTransaction(txn: RawTransaction): NormalizedTransaction {
     String(id).length > 0 &&
     !(typeof id === 'number' && Number.isNaN(id));
   const base = hasIdentifier ? String(id) : fingerprint(txn);
+  // Prefer chargedAmount, but fall back to originalAmount when the charge
+  // hasn't been billed yet (Max's pending rows ship with chargedAmount = 0
+  // until the bank finalises the figure). Only safe when both fields are in
+  // the same currency — for foreign purchases originalAmount is in the
+  // merchant's currency and would need FX conversion before becoming a
+  // chargedAmount equivalent, so we leave those at 0 and let the next sync
+  // update the row once the conversion lands.
+  const sameCurrency = txn.chargedCurrency === txn.originalCurrency
+    || !txn.chargedCurrency || !txn.originalCurrency;
+  const amount = (typeof txn.chargedAmount === 'number' && txn.chargedAmount !== 0)
+    ? txn.chargedAmount
+    : (sameCurrency && typeof txn.originalAmount === 'number' && txn.originalAmount !== 0
+        ? txn.originalAmount
+        : txn.chargedAmount);
   return {
     externalId: `${base}:${date}`,
     date,
     processedDate: txn.processedDate ? israelDate(txn.processedDate) : undefined,
-    amount: txn.chargedAmount,
+    amount,
     currency: txn.chargedCurrency ?? txn.originalCurrency ?? 'ILS',
     description: txn.description,
     memo: txn.memo,

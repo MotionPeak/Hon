@@ -126,6 +126,12 @@ export class ScrapeRunner {
       // A per-connection browser session, reused across syncs to skip the
       // sign-in. Encrypted in the vault; a no-op when the vault is locked.
       const session = openSession(this.vault, args.connectionId);
+      // Bank scrapers no longer reuse a saved session (see below), so the
+      // "reconnecting / reopening" wording is always off. Pension scrapers
+      // surface their own message strings directly and bypass humanizeProgress.
+      const onProgress = (progress: string) => {
+        status.message = humanizeProgress(progress, false);
+      };
       if (isSnapTrade(args.companyId)) {
         outcome = await runSnapTradeSync(args.credentials, this.vault, (message) => {
           status.message = message;
@@ -144,27 +150,29 @@ export class ScrapeRunner {
           session,
         );
       } else if (args.interactive) {
+        // No session for bank scrapers: israeli-bank-scrapers re-runs its full
+        // login every sync, and pre-restoring cookies has confused some banks
+        // into landing on the post-login dashboard while the library waited
+        // for a login form — hanging the scrape with no timeout. Sessions
+        // stay where they actually pay off: the pension flow below, which
+        // Hon drives itself.
         outcome = await runInteractiveScrape(
           args.companyId,
           args.credentials,
           this.chooseStartDate(args.connectionId, args.monthsBack),
-          (progress) => {
-            status.message = humanizeProgress(progress);
-          },
+          onProgress,
           this.prepareScreenshotPath(args.companyId),
           () => this.requestOtp(status),
-          session,
+          undefined,
         );
       } else {
         outcome = await runScrape(
           args.companyId,
           args.credentials,
           this.chooseStartDate(args.connectionId, args.monthsBack),
-          (progress) => {
-            status.message = humanizeProgress(progress);
-          },
+          onProgress,
           this.prepareScreenshotPath(args.companyId),
-          session,
+          undefined,
         );
       }
 
@@ -297,16 +305,26 @@ function describeError(outcome: { errorType?: string; errorMessage?: string }): 
   return hints[type] ?? outcome.errorMessage ?? 'The scrape failed.';
 }
 
-function humanizeProgress(progressType: string): string {
+function humanizeProgress(progressType: string, reusingSession = false): string {
   switch (progressType) {
     case 'INITIALIZING':
-      return 'Starting the browser…';
+      return reusingSession
+        ? 'Reopening your saved session…'
+        : 'Starting the browser…';
     case 'START_SCRAPING':
       return 'Connecting to the institution…';
     case 'LOGGING_IN':
-      return 'Logging in…';
+      // The scraper library always runs its login() step — even when
+      // saved cookies have already authenticated the device. Naming it
+      // "Reconnecting" sets the expectation that this is a handshake,
+      // not a from-scratch sign-in (which would risk a 2FA prompt).
+      return reusingSession
+        ? 'Reconnecting with your saved session…'
+        : 'Logging in…';
     case 'LOGIN_SUCCESS':
-      return 'Logged in — fetching transactions…';
+      return reusingSession
+        ? 'Session reused — fetching transactions…'
+        : 'Logged in — fetching transactions…';
     case 'LOGIN_FAILED':
       return 'Login failed.';
     case 'CHANGE_PASSWORD':

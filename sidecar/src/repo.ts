@@ -433,13 +433,20 @@ export class Repo {
   }
 
   listTransactions(opts: { accountId?: string; limit?: number }): TxnRow[] {
+    // refundId/refundForId hint that a transaction participates in *some*
+    // refund link, for UI decoration; the full per-allocation detail comes
+    // from `listTransactionLinks()`. With N:M linking, an expense or refund
+    // can have multiple peers — these subqueries pick one (the largest
+    // allocation) so the column stays scalar.
     return this.db
       .prepare(
         `SELECT ${TXN_COLS},
                 (SELECT refund_id FROM transaction_links
-                   WHERE expense_id = transactions.id) AS refundId,
+                   WHERE expense_id = transactions.id
+                   ORDER BY amount DESC LIMIT 1) AS refundId,
                 (SELECT expense_id FROM transaction_links
-                   WHERE refund_id = transactions.id) AS refundForId
+                   WHERE refund_id = transactions.id
+                   ORDER BY amount DESC LIMIT 1) AS refundForId
          FROM transactions
          WHERE (@accountId IS NULL OR account_id = @accountId)
          ORDER BY date DESC, created_at DESC
@@ -464,28 +471,53 @@ export class Repo {
 
   // --- Refund / reimbursement links ----------------------------------------
 
-  listTransactionLinks(): { expenseId: string; refundId: string }[] {
+  listTransactionLinks(): { expenseId: string; refundId: string; amount: number }[] {
     return this.db
-      .prepare('SELECT expense_id AS expenseId, refund_id AS refundId FROM transaction_links')
-      .all() as { expenseId: string; refundId: string }[];
+      .prepare(
+        `SELECT expense_id AS expenseId, refund_id AS refundId, amount
+         FROM transaction_links`,
+      )
+      .all() as { expenseId: string; refundId: string; amount: number }[];
   }
 
-  /** Links an expense to its offsetting refund; a refund can offset only one. */
-  setTransactionLink(expenseId: string, refundId: string): void {
-    this.db.transaction(() => {
-      this.db.prepare('DELETE FROM transaction_links WHERE refund_id = ?').run(refundId);
+  /**
+   * Adds (or updates) one allocation: links `amount` of a refund/inflow
+   * transaction to an expense. Multiple expenses can share one refund — the
+   * sum of allocations is capped at the refund's magnitude by validation in
+   * the API layer; this method is unchecked and idempotent on (expense,
+   * refund), updating the amount when called again.
+   */
+  setTransactionLink(expenseId: string, refundId: string, amount: number): void {
+    this.db
+      .prepare(
+        `INSERT INTO transaction_links (id, expense_id, refund_id, amount, created_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (expense_id, refund_id) DO UPDATE SET amount = excluded.amount`,
+      )
+      .run(randomUUID(), expenseId, refundId, amount, new Date().toISOString());
+  }
+
+  /** Removes one specific (expense, refund) allocation. */
+  deleteTransactionLink(expenseId: string, refundId?: string): void {
+    if (refundId) {
       this.db
-        .prepare(
-          `INSERT INTO transaction_links (expense_id, refund_id, created_at)
-           VALUES (?, ?, ?)
-           ON CONFLICT (expense_id) DO UPDATE SET refund_id = excluded.refund_id`,
-        )
-        .run(expenseId, refundId, new Date().toISOString());
-    })();
+        .prepare('DELETE FROM transaction_links WHERE expense_id = ? AND refund_id = ?')
+        .run(expenseId, refundId);
+    } else {
+      this.db.prepare('DELETE FROM transaction_links WHERE expense_id = ?').run(expenseId);
+    }
   }
 
-  deleteTransactionLink(expenseId: string): void {
-    this.db.prepare('DELETE FROM transaction_links WHERE expense_id = ?').run(expenseId);
+  /** Returns the unallocated portion of a refund — `ABS(amount) − Σ allocations`. */
+  refundRemaining(refundId: string): number {
+    const refund = this.db
+      .prepare('SELECT amount FROM transactions WHERE id = ?')
+      .get(refundId) as { amount: number } | undefined;
+    if (!refund) return 0;
+    const used = (this.db
+      .prepare('SELECT COALESCE(SUM(amount), 0) AS used FROM transaction_links WHERE refund_id = ?')
+      .get(refundId) as { used: number }).used;
+    return Math.max(0, Math.abs(refund.amount) - used);
   }
 
   getTransaction(id: string): TxnRow | undefined {
@@ -743,6 +775,28 @@ export class Repo {
             createdAt: now,
           });
           txnCount += 1;
+        }
+
+        // Cancellation sweep: a pending row that was here before but isn't in
+        // this scrape was cancelled at the bank (Max drops them when the
+        // merchant voids a hold, for example). Scoped to the last 90 days so
+        // we never delete an old pending row that simply fell outside the
+        // current scrape window. Completed rows are never auto-deleted —
+        // those represent actual recorded history.
+        const scrapedExternalIds = new Set(
+          account.transactions.map((t) => t.externalId),
+        );
+        const stalePending = this.db
+          .prepare(
+            `SELECT id, external_id FROM transactions
+             WHERE account_id = ? AND status = 'pending'
+               AND date >= date('now', '-90 days')`,
+          )
+          .all(row.id) as { id: string; external_id: string }[];
+        for (const sp of stalePending) {
+          if (!scrapedExternalIds.has(sp.external_id)) {
+            this.db.prepare('DELETE FROM transactions WHERE id = ?').run(sp.id);
+          }
         }
       }
     })();
@@ -1635,13 +1689,16 @@ export class Repo {
   }
 
   /**
-   * Deletes a custom category. Reassigns its transactions and budgets to
-   * 'Other' so nothing dangles. Built-in categories cannot be deleted —
-   * callers should check `isBuiltin` and refuse first.
+   * Deletes a category. Reassigns every transaction, cache entry and merchant
+   * rule tagged with it to 'Other' so nothing dangles. 'Other' itself is the
+   * fallback target and cannot be removed — callers should guard. Built-ins
+   * are deletable too (the user owns their category set); the deletion is a
+   * regular drop without re-seeding.
    */
   deleteCategory(name: string): void {
+    if (name === 'Other') return;
     const row = this.getCategory(name);
-    if (!row || row.isBuiltin) return;
+    if (!row) return;
     this.db.transaction(() => {
       this.db
         .prepare(`UPDATE transactions SET category = 'Other' WHERE category = ?`)
@@ -1655,6 +1712,15 @@ export class Repo {
       this.db.prepare(`DELETE FROM budgets WHERE category = ?`).run(name);
       this.db.prepare(`DELETE FROM categories WHERE name = ?`).run(name);
     })();
+  }
+
+  /** How many transactions currently carry this category. Used by the UI to
+   *  show the impact of a delete before the user confirms. */
+  countTransactionsInCategory(name: string): number {
+    const row = this.db
+      .prepare('SELECT COUNT(*) AS n FROM transactions WHERE category = ?')
+      .get(name) as { n: number };
+    return row.n;
   }
 }
 

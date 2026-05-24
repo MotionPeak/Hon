@@ -38,13 +38,12 @@ export interface BudgetReport {
 }
 
 // Day-to-day "essential" categories each keep an individual monthly budget.
-// The discretionary categories below pool into the computed variable
-// allowance; every other category is a recurring "fixed" bill — tracked, but
-// never budgeted.
-const ESSENTIAL_CATEGORIES = ['Groceries', 'Dining', 'Transport', 'Fuel', 'Health'];
-export const VARIABLE_CATEGORIES = [
-  'Shopping', 'Entertainment', 'Travel', 'Other', 'Transfers', 'Income',
-];
+// The "variable" categories pool into the computed variable allowance; every
+// "fixed" category is a recurring bill — tracked, but never budgeted. Both
+// lists come from the user-editable `categories` table at runtime.
+function categoriesByGroup(repo: Repo, group: 'essential' | 'fixed' | 'variable'): string[] {
+  return repo.listCategories().filter((c) => c.catGroup === group).map((c) => c.name);
+}
 
 const pad = (n: number): string => String(n).padStart(2, '0');
 
@@ -105,18 +104,24 @@ export function buildBudgetReport(
     repo.monthlySpending(start, end, cardProviders).map((s) => [s.category, s.total]),
   );
 
+  // The live group lists from the user-editable categories table.
+  const essentialCategories = categoriesByGroup(repo, 'essential');
+  const variableCategories = categoriesByGroup(repo, 'variable');
+  const essentialSet = new Set(essentialCategories);
+  const variableSet = new Set(variableCategories);
+
   // Split this month's expenses into the three umbrellas.
   let essentialSpent = 0;
   let variableSpent = 0;
   let fixedSpent = 0;
   for (const [category, total] of spending) {
-    if (ESSENTIAL_CATEGORIES.includes(category)) essentialSpent += total;
-    else if (VARIABLE_CATEGORIES.includes(category)) variableSpent += total;
+    if (essentialSet.has(category)) essentialSpent += total;
+    else if (variableSet.has(category)) variableSpent += total;
     else fixedSpent += total;
   }
 
   // Essentials: one budgeted line per category with a limit or any spend.
-  const essentials: BudgetLine[] = ESSENTIAL_CATEGORIES.filter(
+  const essentials: BudgetLine[] = essentialCategories.filter(
     (c) => budgets.has(c) || (spending.get(c) ?? 0) > 0,
   )
     .map((category) => ({
