@@ -22,7 +22,7 @@ fresh authentication token generated for each run. The engine binds to
 loopback only; nothing leaves your machine.
 
 ```bash
-git clone https://github.com/shaharsolomons/Hon.git
+git clone https://github.com/MotionPeak/Hon.git
 cd Hon/sidecar
 npm install        # first run: builds native modules, downloads Chromium
 npm run web        # opens http://127.0.0.1:4000 in your browser
@@ -39,7 +39,7 @@ Requires [Node.js](https://nodejs.org) 22.12 or later.
 
 If you'd rather double-click an icon than open a terminal, grab the installer
 for your OS from the
-[**latest release**](https://github.com/shaharsolomons/Hon/releases/latest):
+[**latest release**](https://github.com/MotionPeak/Hon/releases/latest):
 
 | OS | File | First-launch trust step |
 | --- | --- | --- |
