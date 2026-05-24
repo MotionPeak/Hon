@@ -33,24 +33,27 @@ index 4e821fa..f3cd2a4 100644
        processedDate: convertedDate,
        originalAmount: convertedAmount,
 diff --git a/node_modules/israeli-bank-scrapers/lib/scrapers/base-isracard-amex.js b/node_modules/israeli-bank-scrapers/lib/scrapers/base-isracard-amex.js
-index 0cd2096..0350347 100644
+index 0cd2096..59877b6 100644
 --- a/node_modules/israeli-bank-scrapers/lib/scrapers/base-isracard-amex.js
 +++ b/node_modules/israeli-bank-scrapers/lib/scrapers/base-isracard-amex.js
-@@ -219,9 +219,22 @@ async function fetchAllTransactions(page, options, companyServiceOptions, startM
+@@ -219,9 +219,25 @@ async function fetchAllTransactions(page, options, companyServiceOptions, startM
        combinedTxns[accountNumber].push(...toBeAddedTxns);
      });
    });
 +  // Hon patch: Isracard/Amex expose no per-card balance, so each card's
 +  // outstanding is computed from its own scheduled-but-not-yet-billed
-+  // transactions — the same data the scraper already pulls. Sums every
-+  // transaction whose processedDate (the billing date) is today or later;
-+  // the result is negative (debt) and is the amount Isracard/Amex will
-+  // still charge that card.
++  // transactions — the same data the scraper already pulls. Counts every
++  // charge that is either scheduled for today or later (processedDate is
++  // the billing date) OR still pending — pending charges have no bill date
++  // assigned yet but are real debt that will be billed next cycle. The
++  // result is negative (debt) and matches the issuer's "next bill" figure.
 +  const today = new Date().toISOString().slice(0, 10);
    const accounts = Object.keys(combinedTxns).map(accountNumber => {
 +    const balance = combinedTxns[accountNumber].reduce((sum, txn) => {
 +      const day = (txn.processedDate || '').slice(0, 10);
-+      if (day && day >= today) sum += txn.chargedAmount || 0;
++      const upcoming = day && day >= today;
++      const pending = txn.status === 'pending';
++      if (upcoming || pending) sum += txn.chargedAmount || 0;
 +      return sum;
 +    }, 0);
      return {
@@ -76,23 +79,27 @@ index 630d930..b2e041f 100644
    urls[_baseScraperWithBrowser.LoginResults.ChangePassword] = [`${BASE_URL}/apollo/core/templates/lobby/masterPage.html#/PWD_RENEW`];
    return urls;
 diff --git a/node_modules/israeli-bank-scrapers/lib/scrapers/max.js b/node_modules/israeli-bank-scrapers/lib/scrapers/max.js
-index ab8e48d..074885c 100644
+index ab8e48d..5f8a87a 100644
 --- a/node_modules/israeli-bank-scrapers/lib/scrapers/max.js
 +++ b/node_modules/israeli-bank-scrapers/lib/scrapers/max.js
-@@ -289,9 +289,21 @@ class MaxScraper extends _baseScraperWithBrowser.BaseScraperWithBrowser {
+@@ -289,9 +289,25 @@ class MaxScraper extends _baseScraperWithBrowser.BaseScraperWithBrowser {
    }
    async fetchData() {
      const results = await fetchTransactions(this.page, this.options);
 +    // Hon patch: Max exposes no per-card balance, so each card's outstanding
 +    // is computed from its own scheduled-but-not-yet-billed transactions —
-+    // the same data the scraper already pulls. Sums every transaction whose
-+    // paymentDate (mapped to `processedDate`) is today or later; the result
-+    // is negative (debt) and is the amount Max will still charge that card.
++    // the same data the scraper already pulls. Counts every charge that is
++    // either scheduled for today or later (paymentDate, mapped here to
++    // `processedDate`) OR still pending — pending charges have no bill date
++    // assigned yet but are real debt that will be billed next cycle. The
++    // result is negative (debt) and matches Max's "next bill" figure.
 +    const today = new Date().toISOString().slice(0, 10);
      const accounts = Object.keys(results).map(accountNumber => {
 +      const balance = results[accountNumber].reduce((sum, txn) => {
 +        const day = (txn.processedDate || '').slice(0, 10);
-+        if (day && day >= today) sum += txn.chargedAmount || 0;
++        const upcoming = day && day >= today;
++        const pending = txn.status === 'pending';
++        if (upcoming || pending) sum += txn.chargedAmount || 0;
 +        return sum;
 +      }, 0);
        return {
