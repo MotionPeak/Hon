@@ -66,6 +66,26 @@ export class ScrapeRunner {
     return this.runs.get(runId);
   }
 
+  /**
+   * Picks the start date for a scrape. With a successful previous run on
+   * record, fetches from 14 days before its finish — the buffer catches
+   * transactions that post late or whose processed-date drifts. Otherwise
+   * falls back to the requested monthsBack window (the first-ever sync, or a
+   * sync after a failure). The DB's UNIQUE(account_id, external_id) makes any
+   * overlap a no-op, so the buffer is safe.
+   */
+  private chooseStartDate(connectionId: string, monthsBack: number): Date {
+    const lastSuccess = this.repo.lastSuccessfulScrapeAt(connectionId);
+    if (lastSuccess) {
+      const since = new Date(lastSuccess);
+      if (!Number.isNaN(since.getTime())) {
+        since.setDate(since.getDate() - 14);
+        return since;
+      }
+    }
+    return startDateMonthsAgo(monthsBack);
+  }
+
   /** Clears any stale failure screenshot and returns the path for a new one. */
   private prepareScreenshotPath(companyId: string): string | undefined {
     try {
@@ -127,7 +147,7 @@ export class ScrapeRunner {
         outcome = await runInteractiveScrape(
           args.companyId,
           args.credentials,
-          startDateMonthsAgo(args.monthsBack),
+          this.chooseStartDate(args.connectionId, args.monthsBack),
           (progress) => {
             status.message = humanizeProgress(progress);
           },
@@ -139,7 +159,7 @@ export class ScrapeRunner {
         outcome = await runScrape(
           args.companyId,
           args.credentials,
-          startDateMonthsAgo(args.monthsBack),
+          this.chooseStartDate(args.connectionId, args.monthsBack),
           (progress) => {
             status.message = humanizeProgress(progress);
           },

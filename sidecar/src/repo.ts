@@ -147,11 +147,18 @@ function toManualAsset(row: ManualAssetRow): ManualAsset {
   return { ...row, details, excluded: row.excluded !== 0 };
 }
 
-/** A savings goal — a thing the user is setting money aside for each month. */
+/** A savings goal. `kind` decides how the budget engine funds it:
+ *   - `monthly`: a fixed `monthlyAmount` set aside each month until the
+ *     target is reached (the original behaviour).
+ *   - `lump`: the full target is reserved in one shot the first month its
+ *     amount fits the budget, then held until the user marks it used. */
+export type PiggyKind = 'monthly' | 'lump';
+
 export interface PiggyBank {
   id: string;
   name: string;
   emoji: string;
+  kind: PiggyKind;
   targetAmount: number;
   monthlyAmount: number;
   currency: string;
@@ -162,10 +169,17 @@ export interface PiggyBank {
 }
 
 // SQLite has no boolean type, so `onHold` arrives as 0 | 1.
-type PiggyBankRow = Omit<PiggyBank, 'onHold'> & { onHold: number };
+type PiggyBankRow = Omit<PiggyBank, 'onHold' | 'kind'> & {
+  onHold: number;
+  kind: string;
+};
 
 function toPiggyBank(row: PiggyBankRow): PiggyBank {
-  return { ...row, onHold: row.onHold !== 0 };
+  return {
+    ...row,
+    onHold: row.onHold !== 0,
+    kind: row.kind === 'lump' ? 'lump' : 'monthly',
+  };
 }
 
 /** A single month's set-aside for one piggy bank. */
@@ -829,9 +843,9 @@ export class Repo {
   // --- Piggy banks ----------------------------------------------------------
 
   private static readonly PIGGY_COLS =
-    'id, name, emoji, target_amount AS targetAmount, monthly_amount AS monthlyAmount, ' +
-    'currency, sort_order AS sortOrder, on_hold AS onHold, ' +
-    'created_at AS createdAt, updated_at AS updatedAt';
+    'id, name, emoji, kind, target_amount AS targetAmount, ' +
+    'monthly_amount AS monthlyAmount, currency, sort_order AS sortOrder, ' +
+    'on_hold AS onHold, created_at AS createdAt, updated_at AS updatedAt';
 
   listPiggyBanks(): PiggyBank[] {
     const rows = this.db
@@ -850,6 +864,7 @@ export class Repo {
   createPiggyBank(input: {
     name: string;
     emoji: string;
+    kind?: PiggyKind;
     targetAmount: number;
     monthlyAmount: number;
     currency: string;
@@ -863,16 +878,20 @@ export class Repo {
     this.db
       .prepare(
         `INSERT INTO piggy_banks
-           (id, name, emoji, target_amount, monthly_amount, currency, sort_order,
-            created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (id, name, emoji, kind, target_amount, monthly_amount, currency,
+            sort_order, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
         input.name,
         input.emoji,
+        input.kind === 'lump' ? 'lump' : 'monthly',
         input.targetAmount,
-        input.monthlyAmount,
+        // Lump-sum piggies don't recur, so the column gets the full target
+        // — handy if anything ever reads monthlyAmount expecting "what this
+        // piggy charges in a fund-able month".
+        input.kind === 'lump' ? input.targetAmount : input.monthlyAmount,
         input.currency,
         nextOrder,
         now,
@@ -886,6 +905,7 @@ export class Repo {
     fields: Partial<{
       name: string;
       emoji: string;
+      kind: PiggyKind;
       targetAmount: number;
       monthlyAmount: number;
       onHold: boolean;
@@ -900,6 +920,10 @@ export class Repo {
     if (fields.emoji !== undefined) {
       sets.push('emoji = ?');
       values.push(fields.emoji);
+    }
+    if (fields.kind !== undefined) {
+      sets.push('kind = ?');
+      values.push(fields.kind === 'lump' ? 'lump' : 'monthly');
     }
     if (fields.targetAmount !== undefined) {
       sets.push('target_amount = ?');
@@ -1266,6 +1290,22 @@ export class Repo {
       .get(id) as ScrapeRunRow | undefined;
   }
 
+  /**
+   * `finished_at` of the most recent successful scrape for a connection, used
+   * to compute an incremental start date for the next sync. Returns undefined
+   * when the connection has no successful scrape yet (first-ever sync).
+   */
+  lastSuccessfulScrapeAt(connectionId: string): string | undefined {
+    const row = this.db
+      .prepare(
+        `SELECT finished_at AS finishedAt FROM scrape_runs
+         WHERE connection_id = ? AND status = 'success' AND finished_at IS NOT NULL
+         ORDER BY finished_at DESC LIMIT 1`,
+      )
+      .get(connectionId) as { finishedAt: string } | undefined;
+    return row?.finishedAt;
+  }
+
   updateRun(
     id: string,
     fields: Partial<{
@@ -1491,6 +1531,120 @@ export class Repo {
       )
       .run(series, period, value, new Date().toISOString());
   }
+
+  // --- Categories ----------------------------------------------------------
+  // Replaces what used to be a static list in categorize.ts. The categorizer
+  // (LLM + rules), the budget engine and the frontend all read this table so
+  // a user-added category is first-class everywhere.
+
+  private static readonly CATEGORY_COLS =
+    'name, emoji, color, cat_group AS catGroup, sort_order AS sortOrder, ' +
+    'is_builtin AS isBuiltin, created_at AS createdAt';
+
+  listCategories(): Category[] {
+    const rows = this.db
+      .prepare(
+        `SELECT ${Repo.CATEGORY_COLS} FROM categories
+         ORDER BY sort_order, name`,
+      )
+      .all() as CategoryRow[];
+    return rows.map(toCategory);
+  }
+
+  getCategory(name: string): Category | undefined {
+    const row = this.db
+      .prepare(`SELECT ${Repo.CATEGORY_COLS} FROM categories WHERE name = ?`)
+      .get(name) as CategoryRow | undefined;
+    return row ? toCategory(row) : undefined;
+  }
+
+  createCategory(input: Omit<Category, 'isBuiltin' | 'createdAt'>): Category {
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO categories
+           (name, emoji, color, cat_group, sort_order, is_builtin, created_at)
+         VALUES (?, ?, ?, ?, ?, 0, ?)`,
+      )
+      .run(
+        input.name,
+        input.emoji,
+        input.color,
+        input.catGroup,
+        input.sortOrder,
+        now,
+      );
+    return this.getCategory(input.name)!;
+  }
+
+  updateCategory(
+    name: string,
+    fields: Partial<Omit<Category, 'name' | 'isBuiltin' | 'createdAt'>>,
+  ): void {
+    const sets: string[] = [];
+    const values: unknown[] = [];
+    if (fields.emoji !== undefined) { sets.push('emoji = ?'); values.push(fields.emoji); }
+    if (fields.color !== undefined) { sets.push('color = ?'); values.push(fields.color); }
+    if (fields.catGroup !== undefined) { sets.push('cat_group = ?'); values.push(fields.catGroup); }
+    if (fields.sortOrder !== undefined) { sets.push('sort_order = ?'); values.push(fields.sortOrder); }
+    if (sets.length === 0) return;
+    values.push(name);
+    this.db
+      .prepare(`UPDATE categories SET ${sets.join(', ')} WHERE name = ?`)
+      .run(...values);
+  }
+
+  /**
+   * Deletes a custom category. Reassigns its transactions and budgets to
+   * 'Other' so nothing dangles. Built-in categories cannot be deleted —
+   * callers should check `isBuiltin` and refuse first.
+   */
+  deleteCategory(name: string): void {
+    const row = this.getCategory(name);
+    if (!row || row.isBuiltin) return;
+    this.db.transaction(() => {
+      this.db
+        .prepare(`UPDATE transactions SET category = 'Other' WHERE category = ?`)
+        .run(name);
+      this.db
+        .prepare(`UPDATE category_cache SET category = 'Other' WHERE category = ?`)
+        .run(name);
+      this.db
+        .prepare(`UPDATE merchant_rules SET category = 'Other' WHERE category = ?`)
+        .run(name);
+      this.db.prepare(`DELETE FROM budgets WHERE category = ?`).run(name);
+      this.db.prepare(`DELETE FROM categories WHERE name = ?`).run(name);
+    })();
+  }
+}
+
+export interface Category {
+  name: string;
+  emoji: string;
+  /** Accent colour as a hex string, e.g. "#5CC773". */
+  color: string;
+  /** Spending umbrella the budget and group breakdowns use. */
+  catGroup: 'essential' | 'fixed' | 'variable';
+  sortOrder: number;
+  /** True for the seeded categories — they cannot be deleted, only edited. */
+  isBuiltin: boolean;
+  createdAt: string;
+}
+
+interface CategoryRow {
+  name: string;
+  emoji: string;
+  color: string;
+  catGroup: string;
+  sortOrder: number;
+  isBuiltin: number;
+  createdAt: string;
+}
+
+function toCategory(row: CategoryRow): Category {
+  const group: Category['catGroup'] =
+    row.catGroup === 'essential' || row.catGroup === 'fixed' ? row.catGroup : 'variable';
+  return { ...row, catGroup: group, isBuiltin: row.isBuiltin !== 0 };
 }
 
 // SQLite stores the loan booleans as 0|1.
