@@ -515,6 +515,19 @@
   .act-hidden { color: var(--faint); font-size: 11px; font-weight: 600; }
   .act-cat { color: var(--amber); font-size: 11px; font-weight: 700; }
   .act-cat .spin { display: inline-block; animation: spin 1s linear infinite; }
+  /* Activity search box — a pill that lives in the act-bar; typing in it
+   * switches the tab to a cross-month flat list of matches. */
+  .act-search { display: flex; align-items: center; gap: 6px;
+    background: var(--card-hi); border-radius: 999px; padding: 5px 12px;
+    flex: 0 1 240px; min-width: 0; }
+  .act-search-ico { color: var(--muted); font-size: 14px; line-height: 1; }
+  .act-search input { width: 100%; background: transparent; border: 0;
+    color: var(--text); font-size: 12.5px; outline: none; padding: 0; }
+  .act-search input::placeholder { color: var(--muted); }
+  .act-search input::-webkit-search-cancel-button { display: none; }
+  .act-search-clear { background: transparent; border: 0; color: var(--muted);
+    cursor: pointer; padding: 0; font-size: 16px; line-height: 1; }
+  .act-search-clear:hover { color: var(--text); }
   /* Per-type section on the Assets page. Sections sit side-by-side in a grid
      so each kind (Banks, Credit cards, ...) takes its own column instead of
      stacking down the page. The grid wraps to one column on narrow screens. */
@@ -1863,6 +1876,7 @@ const state = {
   scrapes: {}, categorize: null, tab: "overview",
   move: null,            // { txnId, picked, always } while moving a transaction
   activityMonth: null,   // "YYYY-MM" currently shown in the Activity tab
+  activitySearch: "",    // when non-empty, Activity becomes a cross-month search
   selectMode: false,     // batch-select mode in the Activity tab
   batch: {},             // { txnId: true } selected for a batch move
   batchCat: "",          // target category chosen in the batch bar
@@ -2103,6 +2117,42 @@ function isCardTotal(t) {
     return p.length > 1 && desc.indexOf(p) >= 0;
   });
 }
+// Whether a transaction matches the Activity tab's search query. Matches
+// description, category, account label / institution name, ISO date, and a
+// near-exact amount when the query parses as a number — so "rami" finds a
+// merchant, "groceries" finds a category, "2026-05-23" finds a day, and a
+// raw "176.40" finds the ₪176.40 charge. Hebrew works as-is (no case).
+function txnMatchesSearch(t, q) {
+  if (!q) return true;
+  if ((t.description || "").toLowerCase().includes(q)) return true;
+  if ((t.category || "").toLowerCase().includes(q)) return true;
+  if (t.date && t.date.includes(q)) return true;
+  const acct = state.accounts.find((a) => a.id === t.accountId);
+  if (acct) {
+    if ((acct.label || "").toLowerCase().includes(q)) return true;
+    if ((acct.connectionName || "").toLowerCase().includes(q)) return true;
+  }
+  const num = parseFloat(q.replace(/[^0-9.\-]/g, ""));
+  if (Number.isFinite(num) && num !== 0) {
+    if (Math.abs(Math.abs(t.amount) - Math.abs(num)) < 0.5) return true;
+  }
+  return false;
+}
+
+// Updates the Activity search query, re-renders, and restores focus +
+// cursor to the search input — otherwise typing would lose focus on every
+// keystroke since the whole tab re-renders.
+function setActivitySearch(value) {
+  state.activitySearch = value;
+  render();
+  const el = document.getElementById("act-search");
+  if (el) {
+    el.focus();
+    const v = el.value || "";
+    el.setSelectionRange(v.length, v.length);
+  }
+}
+
 // The total refund credit applied to an expense — sum of every allocation
 // linked to it. With N:M linking one expense may receive parts of several
 // refunds; this returns the combined offset (positive, the way refund rows
@@ -3380,13 +3430,24 @@ function activityView() {
   const allCollapsed = cats.length && cats.every((c) => state.collapsed[c]);
   const catRunning = state.categorize && state.categorize.state === "running";
 
+  const searchQ = (state.activitySearch || "").trim().toLowerCase();
+  const searchVal = state.activitySearch || "";
+  const searchBox = '<div class="act-search"><span class="act-search-ico">⌕</span>'
+    + '<input id="act-search" type="search" placeholder="Search transactions…" '
+    + 'value="' + esc(searchVal) + '" '
+    + 'oninput="setActivitySearch(this.value)" '
+    + 'onkeydown="if(event.key===\'Escape\')setActivitySearch(\'\')">'
+    + (searchVal ? '<button type="button" class="act-search-clear" '
+        + 'onclick="setActivitySearch(\'\')" aria-label="Clear">×</button>' : "")
+    + "</div>";
+
   const header = '<div class="card act-bar">'
-    + '<div class="month-pick">'
-    + '<button class="icon-btn" data-action="month-prev"'
-    + (mi >= months.length - 1 ? " disabled" : "") + ">‹</button>"
-    + '<span class="month-label">' + esc(cycleLabel(state.activityMonth)) + "</span>"
-    + '<button class="icon-btn" data-action="month-next"'
-    + (mi <= 0 ? " disabled" : "") + ">›</button></div>"
+    + (searchQ ? "" : '<div class="month-pick">'
+        + '<button class="icon-btn" data-action="month-prev"'
+        + (mi >= months.length - 1 ? " disabled" : "") + ">‹</button>"
+        + '<span class="month-label">' + esc(cycleLabel(state.activityMonth)) + "</span>"
+        + '<button class="icon-btn" data-action="month-next"'
+        + (mi <= 0 ? " disabled" : "") + ">›</button></div>")
     + '<div class="act-meta"><span class="act-count">' + monthTxns.length
     + (monthTxns.length === 1 ? " transaction" : " transactions") + "</span>"
     + (catRunning
@@ -3397,15 +3458,15 @@ function activityView() {
             + (hidden === 1 ? "" : "s") + " hidden</span>" : "")
     + (folded ? '<span class="act-hidden">' + folded + " reimbursement"
         + (folded === 1 ? "" : "s") + " applied</span>" : "")
-    + "</div><span class=\"spacer\"></span>"
-    + (cats.length > 1
+    + "</div>" + searchBox + "<span class=\"spacer\"></span>"
+    + (!searchQ && cats.length > 1
         ? '<button class="mini" data-action="collapse-all">'
           + (allCollapsed ? "Expand all" : "Collapse all") + "</button>" : "")
     + '<button class="mini' + (state.selectMode ? " primary" : "")
     + '" data-action="toggle-select">'
     + (state.selectMode ? "Done" : "Select") + "</button></div>";
 
-  if (!monthTxns.length) {
+  if (!searchQ && !monthTxns.length) {
     return header + '<div class="card empty">No transactions in '
       + esc(cycleLabel(state.activityMonth)) + ".</div>";
   }
@@ -3445,6 +3506,24 @@ function activityView() {
       + "</div></div>"
       + amtCell + "</div>";
   };
+  // Search mode: a flat, cross-month list of matching transactions, newest
+  // first — no category grouping. Card-totals and refunds are still folded
+  // out, same as the month view.
+  if (searchQ) {
+    const matches = state.transactions
+      .filter((t) => !isCardTotal(t) && !t.refundForId && txnMatchesSearch(t, searchQ))
+      .sort((a, b) => new Date(b.date) - new Date(a.date));
+    const list = matches.length
+      ? '<div class="cat-list">' + matches.map(txnRow).join("") + "</div>"
+      : '<div class="empty">No matching transactions.</div>';
+    return header
+      + '<div class="card cat-card">'
+      + '<div class="cat-head" style="cursor:default">'
+      + '<span class="cat-name">Search results</span>'
+      + '<span class="cat-count">' + matches.length + "</span></div>"
+      + list + "</div>";
+  }
+
   const buildCard = (cat) => {
     const [, color] = catStyle(cat === "Uncategorized" ? "Other" : cat);
     const list = groups[cat].slice().sort((a, b) => new Date(b.date) - new Date(a.date));
