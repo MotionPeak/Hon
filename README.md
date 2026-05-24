@@ -43,9 +43,10 @@ for your OS from the
 
 | OS | File | First-launch trust step |
 | --- | --- | --- |
-| **macOS** | `Hon-x.y.z.dmg` (Apple Silicon + Intel) | Right-click `Hon.app` → **Open** → **Open** in the prompt. Once. |
-| **Windows** | `Hon-Setup-x.y.z.exe` | SmartScreen says "Windows protected your PC". Click **More info → Run anyway**. Once. |
-| **Linux** | `Hon-x.y.z.AppImage` | `chmod +x Hon-*.AppImage` and double-click, or run from a terminal. |
+| **macOS — Apple Silicon (M-series)** | `Hon-macOS-arm64-x.y.z.dmg` | Right-click `Hon.app` → **Open** → **Open** in the prompt. Once. |
+| **macOS — Intel** | `Hon-macOS-x64-x.y.z.dmg` | Right-click `Hon.app` → **Open** → **Open** in the prompt. Once. |
+| **Windows** | `Hon-Windows-x.y.z-Setup.exe` | SmartScreen says "Windows protected your PC". Click **More info → Run anyway**. Once. |
+| **Linux** | `Hon-Linux-x.y.z.AppImage` | `chmod +x Hon-*.AppImage` and double-click, or run from a terminal. |
 
 The installers bundle Node and the engine — no separate install. They are
 **unsigned** (Hon is one person's local-first project, not a commercial app

@@ -78,6 +78,10 @@ mac:
   # Skip the local keychain — CI runners have none and probing for one
   # adds nothing useful when we're explicitly shipping unsigned.
   identity: null
+  # File name says the OS up front so the GitHub Releases page reads
+  # without anyone needing to know that .dmg == macOS. Apple Silicon
+  # gets `arm64`, Intel gets `x64`.
+  artifactName: ${productName}-macOS-${arch}-${version}.${ext}
 
 dmg:
   title: ${productName} ${version}
@@ -88,6 +92,7 @@ win:
     - target: nsis
       arch:
         - x64
+  artifactName: ${productName}-Windows-${version}-Setup.${ext}
   # Unsigned — SmartScreen shows "Windows protected your PC" on first run,
   # user clicks "More info → Run anyway". Authenticode signing is a paid
   # follow-up.
@@ -107,5 +112,6 @@ linux:
     - target: AppImage
       arch:
         - x64
+  artifactName: ${productName}-Linux-${version}.${ext}
   # AppImages just need `chmod +x` on first run — most file managers handle
   # this automatically. No installer or trust ceremony.
