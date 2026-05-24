@@ -24,6 +24,9 @@ import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import type { CompanyInfo, NormalizedAccount, ScrapeOutcome } from './scrapers.js';
 import type { OtpCallback } from './otp.js';
 import { persistSession, restoreSession, type SessionHandle } from './session.js';
+import { makeLog } from './log.js';
+
+const pensionLog = makeLog('pension');
 
 // Wrap the project's puppeteer with the stealth plugin — it masks the most
 // obvious automation tells, which helps every portal load normally.
@@ -202,9 +205,23 @@ function fail(errorType: string, errorMessage: string): ScrapeOutcome {
   return { success: false, accounts: [], errorType, errorMessage };
 }
 
-/** Logs a pension-connector diagnostic line to the sidecar console (stderr). */
+/** Logs a pension-connector diagnostic line. Routes through the structured
+ *  logger so output gets a timestamp, level marker and consistent prefix
+ *  with the rest of the engine — but keeps the variadic-args signature so
+ *  the dozens of existing call sites compile unchanged. */
 function plog(...parts: unknown[]): void {
-  console.error('[pension]', ...parts);
+  // Stringify each part the way console.error would, then collapse into a
+  // single human-readable message. (Structured fields aren't a fit here —
+  // the call sites are free-form prose, not key/value pairs.)
+  const message = parts
+    .map((p) => {
+      if (p == null) return String(p);
+      if (typeof p === 'string') return p;
+      if (p instanceof Error) return p.stack ?? p.message;
+      try { return JSON.stringify(p); } catch { return String(p); }
+    })
+    .join(' ');
+  pensionLog.info(message);
 }
 
 /** Derives a debug-file path next to the run's failure screenshot. */

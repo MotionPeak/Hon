@@ -7,6 +7,9 @@ import { fetchYahooHistory } from './marketData.js';
 import { isPensionCompany, runPensionScrape } from './pension.js';
 import { runInteractiveScrape, runScrape, type ScrapeOutcome } from './scrapers.js';
 import { openSession } from './session.js';
+import { makeLog } from './log.js';
+
+const runnerLog = makeLog('runner');
 
 export interface StartArgs {
   connectionId: string;
@@ -58,6 +61,21 @@ export class ScrapeRunner {
     };
     this.runs.set(run.id, status);
     this.repo.setConnectionStatus(args.connectionId, 'running');
+    // One log line per scrape kick-off so the lifecycle for a connection
+    // is greppable end-to-end. Credentials are logged by field NAME only —
+    // never values — so the log never carries usernames/passwords/tokens.
+    runnerLog.info('scrape.queued', {
+      runId: run.id,
+      connectionId: args.connectionId,
+      companyId: args.companyId,
+      mode: isSnapTrade(args.companyId)
+        ? 'snaptrade'
+        : isPensionCompany(args.companyId)
+          ? 'pension'
+          : args.interactive ? 'interactive' : 'headless',
+      monthsBack: args.monthsBack,
+      credentialFields: Object.keys(args.credentials),
+    });
     void this.execute(status, args);
     return run.id;
   }
@@ -100,12 +118,18 @@ export class ScrapeRunner {
 
   /** Called by the scraper when it needs a 2FA code; resolves when one arrives. */
   private requestOtp(status: RunStatus): Promise<string> {
+    runnerLog.info('otp.requested', { runId: status.runId, connectionId: status.connectionId });
     return new Promise<string>((resolve) => {
       status.status = 'needs-otp';
       status.message = 'Waiting for the verification code…';
       this.otpResolvers.set(status.runId, (code) => {
         status.status = 'running';
         status.message = 'Submitting the verification code…';
+        runnerLog.info('otp.submitted', {
+          runId: status.runId,
+          connectionId: status.connectionId,
+          codeLength: code.length,
+        });
         resolve(code);
       });
     });
@@ -114,13 +138,31 @@ export class ScrapeRunner {
   /** Supplies a 2FA code for a run that is waiting on one. */
   submitOtp(runId: string, code: string): boolean {
     const resolver = this.otpResolvers.get(runId);
-    if (!resolver) return false;
+    if (!resolver) {
+      runnerLog.warn('otp.submit.no-resolver', { runId });
+      return false;
+    }
     this.otpResolvers.delete(runId);
     resolver(code);
     return true;
   }
 
   private async execute(status: RunStatus, args: StartArgs): Promise<void> {
+    // Per-run logger so every line carries runId + connectionId + companyId
+    // as part of its tag — `grep '[scrape:run123]'` shows everything for
+    // one attempt across runner, scrapers and bank-loans output combined.
+    const log = runnerLog.child(`run:${status.runId.slice(0, 8)}`);
+    const startDate = this.chooseStartDate(args.connectionId, args.monthsBack);
+    const lastSuccess = this.repo.lastSuccessfulScrapeAt(args.connectionId);
+    log.info('execute', {
+      companyId: args.companyId,
+      connectionId: args.connectionId,
+      monthsBack: args.monthsBack,
+      startDate: startDate.toISOString().slice(0, 10),
+      lastSuccess: lastSuccess ?? null,
+      interactive: args.interactive,
+    });
+    const overallDone = log.timer('scrape', { companyId: args.companyId });
     try {
       let outcome: ScrapeOutcome;
       // A per-connection browser session, reused across syncs to skip the
@@ -130,20 +172,26 @@ export class ScrapeRunner {
       // "reconnecting / reopening" wording is always off. Pension scrapers
       // surface their own message strings directly and bypass humanizeProgress.
       const onProgress = (progress: string) => {
-        status.message = humanizeProgress(progress, false);
+        const humanized = humanizeProgress(progress, false);
+        status.message = humanized;
+        log.info('library.progress', { type: progress, message: humanized });
       };
       if (isSnapTrade(args.companyId)) {
+        log.info('dispatch', { runner: 'snaptrade' });
         outcome = await runSnapTradeSync(args.credentials, this.vault, (message) => {
           status.message = message;
+          log.info('snaptrade.progress', { message });
         });
       } else if (isPensionCompany(args.companyId)) {
         // Pension funds have no scraper library, so a custom Puppeteer routine
         // drives the portal login (and any SMS one-time code) itself.
+        log.info('dispatch', { runner: 'pension', companyId: args.companyId });
         outcome = await runPensionScrape(
           args.companyId,
           args.credentials,
           (message) => {
             status.message = message;
+            log.info('pension.progress', { message });
           },
           this.prepareScreenshotPath(args.companyId),
           () => this.requestOtp(status),
@@ -156,20 +204,22 @@ export class ScrapeRunner {
         // for a login form — hanging the scrape with no timeout. Sessions
         // stay where they actually pay off: the pension flow below, which
         // Hon drives itself.
+        log.info('dispatch', { runner: 'bank.interactive', companyId: args.companyId });
         outcome = await runInteractiveScrape(
           args.companyId,
           args.credentials,
-          this.chooseStartDate(args.connectionId, args.monthsBack),
+          startDate,
           onProgress,
           this.prepareScreenshotPath(args.companyId),
           () => this.requestOtp(status),
           undefined,
         );
       } else {
+        log.info('dispatch', { runner: 'bank.headless', companyId: args.companyId });
         outcome = await runScrape(
           args.companyId,
           args.credentials,
-          this.chooseStartDate(args.connectionId, args.monthsBack),
+          startDate,
           onProgress,
           this.prepareScreenshotPath(args.companyId),
           undefined,
@@ -177,13 +227,36 @@ export class ScrapeRunner {
       }
 
       if (!outcome.success) {
+        log.error('outcome.error', {
+          errorType: outcome.errorType,
+          errorMessage: outcome.errorMessage,
+        });
+        overallDone({ result: 'error', errorType: outcome.errorType });
         this.finish(status, args.connectionId, 'error', describeError(outcome));
         return;
       }
 
+      // Per-account txn counts before persistence so a low-fetch issue surfaces
+      // separately from a low-persist issue (uniqueness/upsert collapsing dups).
+      log.info('outcome.summary', {
+        accounts: outcome.accounts.length,
+        txnsFetched: outcome.accounts.reduce((s, a) => s + a.transactions.length, 0),
+        loans: outcome.scrapedLoans?.length ?? 0,
+        perAccount: outcome.accounts.map((a) => ({
+          account: a.accountNumber,
+          txns: a.transactions.length,
+          balance: a.balance ?? null,
+          currency: a.currency,
+          holdings: a.holdings?.length ?? 0,
+        })),
+      });
+
+      const persistDone = log.timer('persist', { accounts: outcome.accounts.length });
       const saved = this.repo.saveScrapeResult(args.connectionId, outcome.accounts);
+      persistDone({ accountsSaved: saved.accounts, transactionsSaved: saved.transactions });
       if (outcome.brokeragePerformance) {
         this.repo.saveBrokeragePerformance(args.connectionId, outcome.brokeragePerformance);
+        log.info('brokerage.performance.saved');
       }
       // Loans the scraper pulled from the bank's loans page are upserted
       // against the same connection so a re-sync updates the existing row
@@ -203,6 +276,7 @@ export class ScrapeRunner {
             currency: loan.currency,
           });
         }
+        log.info('loans.upserted', { count: outcome.scrapedLoans.length });
       }
       status.accountsCount = saved.accounts;
       status.transactionsCount = saved.transactions;
@@ -211,11 +285,18 @@ export class ScrapeRunner {
       // that doesn't yet have months of snapshots — runs in the background so
       // it never blocks the sync's "done" status.
       if (isSnapTrade(args.companyId)) {
-        void this.backfillBrokerageHistory(status).catch((err) =>
-          process.stdout.write(
-            `yahoo backfill failed: ${(err as Error).message}\n`,
-          ));
+        void this.backfillBrokerageHistory(status).catch((err) => {
+          log.warn('yahoo.backfill.failed', {
+            message: (err as Error).message,
+          });
+        });
       }
+      overallDone({
+        result: 'success',
+        accounts: saved.accounts,
+        transactions: saved.transactions,
+        loans: outcome.scrapedLoans?.length ?? 0,
+      });
       this.finish(
         status,
         args.connectionId,
@@ -223,6 +304,11 @@ export class ScrapeRunner {
         `Imported ${saved.accounts} account(s) and ${saved.transactions} transaction(s).`,
       );
     } catch (err) {
+      log.error('execute.threw', {
+        message: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined,
+      });
+      overallDone({ result: 'exception' });
       this.finish(
         status,
         args.connectionId,
@@ -260,9 +346,9 @@ export class ScrapeRunner {
       if (inserted > 0) touched += 1;
     }
     if (touched > 0) {
-      process.stdout.write(
-        `yahoo backfill: populated history for ${touched} position(s)\n`,
-      );
+      runnerLog.info('yahoo.backfill.done', { positions: touched });
+    } else {
+      runnerLog.debug('yahoo.backfill.skipped', { reason: 'no-positions-needed-backfill' });
     }
   }
 
@@ -284,6 +370,14 @@ export class ScrapeRunner {
       transactionsCount: status.transactionsCount,
     });
     this.repo.setConnectionStatus(connectionId, result, status.finishedAt);
+    runnerLog.info(`finish.${result}`, {
+      runId: status.runId,
+      connectionId,
+      accounts: status.accountsCount,
+      transactions: status.transactionsCount,
+      // Truncated so very long error messages don't sprawl across lines.
+      message: message.length > 200 ? message.slice(0, 197) + '…' : message,
+    });
   }
 }
 

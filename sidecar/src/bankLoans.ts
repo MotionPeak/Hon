@@ -6,12 +6,15 @@
 // be lifted into israeli-bank-scrapers upstream as a per-scraper add-on.
 
 import type { Browser, Frame, Page } from 'puppeteer';
+import { makeLog } from './log.js';
 
 // The `document` global is only available inside the puppeteer evaluate
 // callbacks (which run in the page). Declared here as `any` so tsc does not
 // flag those references — the rest of pension.ts gets this for free via its
 // puppeteer-extra value import, which this file does not pull in.
 declare const document: any;
+
+const log = makeLog('loans:fibi');
 
 /** One loan exactly as the bank shows it on its loans page. */
 export interface ScrapedLoan {
@@ -58,62 +61,84 @@ export async function scrapeFibiLoans(
   browser: Browser,
   debugDumpPath?: string,
 ): Promise<ScrapedLoan[]> {
-  const log = (...parts: unknown[]): void => console.error('[bank-loans]', ...parts);
-  log('starting FIBI loans scrape');
+  const done = log.timer('scrape', { url: FIBI_LOANS_URL });
   const page = await browser.newPage();
   try {
     // The new shell is a single-spa Angular host; navigating to the hash URL
     // drives the router rather than a full reload. Wait for the document and
     // then for any element that says "שם ההלוואה" to appear before parsing.
-    log('navigating to', FIBI_LOANS_URL);
+    log.info('navigate', { url: FIBI_LOANS_URL, timeoutMs: 60_000 });
     try {
       await page.goto(FIBI_LOANS_URL, { waitUntil: 'domcontentloaded', timeout: 60_000 });
     } catch (err) {
-      log('goto threw:', err instanceof Error ? err.message : String(err));
+      log.warn('goto.failed', { message: err instanceof Error ? err.message : String(err) });
     }
-    log('post-goto url:', page.url());
+    log.info('navigate.done', { landedUrl: page.url() });
 
+    const waitDone = log.timer('anchor.wait', { needle: FIBI_LOAN_HEADER_HE, timeoutMs: 45_000 });
     const target = await waitForLoansAnchor(page, 45_000);
     if (!target) {
-      log('anchor not found within 45s; current url:', page.url());
-      log('frames at timeout:', page.frames().map((f) => f.url()));
+      waitDone({ found: false });
+      log.error('anchor.missing', {
+        landedUrl: page.url(),
+        frameCount: page.frames().length,
+        frameUrls: page.frames().map((f) => f.url()),
+      });
       // Dump the page HTML so the next pass has the material to tighten the
       // parser or pick a different navigation route.
-      await dumpDebug(page, debugDumpPath, log);
+      await dumpDebug(page, debugDumpPath);
+      done({ result: 'anchor-missing', loans: 0 });
       return [];
     }
-    log(
-      'anchor found in',
-      'url' in target ? `frame ${target.url()}` : 'main page',
-    );
+    waitDone({
+      found: true,
+      // Frames carry .url(); the top-level Page does not.
+      where: 'url' in target ? `frame:${target.url()}` : 'main-page',
+    });
 
     if (debugDumpPath) {
       try {
         const html = await target.content();
         const { writeFileSync } = await import('node:fs');
         writeFileSync(debugDumpPath, html, 'utf8');
-        log('wrote debug HTML to', debugDumpPath);
+        log.info('debug.dump', { path: debugDumpPath, bytes: html.length });
       } catch (err) {
-        log('debug dump failed:', err instanceof Error ? err.message : String(err));
+        log.warn('debug.dump.failed', {
+          message: err instanceof Error ? err.message : String(err),
+        });
       }
     }
 
     const rawRows = await extractRows(target);
-    log('extracted', rawRows.length, 'raw row(s)');
+    log.info('rows.extracted', { count: rawRows.length });
     const loans: ScrapedLoan[] = [];
+    let skipped = 0;
     for (const row of rawRows) {
       const parsed = parseRow(row);
       if (parsed) {
-        log('parsed loan:', parsed.externalId, parsed.name, parsed.principal);
+        log.info('row.parsed', {
+          externalId: parsed.externalId,
+          name: parsed.name,
+          principal: parsed.principal,
+          rate: parsed.rateValue,
+          isPrime: parsed.isPrime,
+          isCpiLinked: parsed.isCpiLinked,
+          termMonths: parsed.termMonths,
+        });
         loans.push(parsed);
       } else {
-        log('skipped unparseable row:', row.cells.slice(0, 4));
+        skipped += 1;
+        log.warn('row.skipped', { firstCells: row.cells.slice(0, 4) });
       }
     }
-    log('returning', loans.length, 'loan(s)');
+    done({ result: 'ok', loans: loans.length, skipped });
     return loans;
   } catch (err) {
-    log('scrape threw:', err instanceof Error ? err.stack : String(err));
+    log.error('scrape.threw', {
+      message: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack : undefined,
+    });
+    done({ result: 'exception', loans: 0 });
     return [];
   } finally {
     await page.close().catch(() => {});
@@ -126,16 +151,17 @@ export async function scrapeFibiLoans(
 async function dumpDebug(
   page: Page,
   debugPath: string | undefined,
-  log: (...p: unknown[]) => void,
 ): Promise<void> {
   if (!debugPath) return;
   try {
     const html = await page.content();
     const { writeFileSync } = await import('node:fs');
     writeFileSync(debugPath, html, 'utf8');
-    log('dumped page HTML to', debugPath);
+    log.info('debug.dump', { path: debugPath, bytes: html.length });
   } catch (err) {
-    log('debug dump failed:', err instanceof Error ? err.message : String(err));
+    log.warn('debug.dump.failed', {
+      message: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 

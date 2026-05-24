@@ -1,5 +1,8 @@
 import type { Browser, Cookie } from 'puppeteer';
 import type { Vault } from './vault.js';
+import { makeLog } from './log.js';
+
+const log = makeLog('session');
 
 // A saved browser session goes stale once the institution expires it. Past
 // this age the bundle is dropped unused: replaying long-dead cookies only
@@ -29,31 +32,64 @@ export interface SessionHandle {
 export function openSession(vault: Vault, connectionId: string): SessionHandle {
   const key = `session:${connectionId}`;
   let cookies: Cookie[] | undefined;
-  if (vault.unlocked) {
+  if (!vault.unlocked) {
+    log.debug('open.vault-locked', { connectionId });
+  } else {
     try {
       const blob = vault.loadSecret(key);
       if (blob) {
         const bundle = JSON.parse(blob) as SessionBundle;
+        const ageMs = Date.now() - bundle.savedAt;
         if (
           Array.isArray(bundle.cookies) &&
           bundle.cookies.length > 0 &&
-          Date.now() - bundle.savedAt < SESSION_MAX_AGE_MS
+          ageMs < SESSION_MAX_AGE_MS
         ) {
           cookies = bundle.cookies;
+          log.info('open.hit', {
+            connectionId,
+            cookieCount: cookies.length,
+            ageHours: Math.round(ageMs / 3_600_000),
+          });
+        } else {
+          log.info('open.stale', {
+            connectionId,
+            cookieCount: bundle.cookies?.length ?? 0,
+            ageHours: Math.round(ageMs / 3_600_000),
+            maxAgeHours: SESSION_MAX_AGE_MS / 3_600_000,
+          });
         }
+      } else {
+        log.debug('open.miss', { connectionId });
       }
-    } catch {
+    } catch (err) {
+      log.warn('open.corrupt', {
+        connectionId,
+        message: err instanceof Error ? err.message : String(err),
+      });
       cookies = undefined; // a corrupt or unreadable bundle just means "no session"
     }
   }
   return {
     cookies,
     save(next: Cookie[]): void {
-      if (!vault.unlocked || next.length === 0) return;
+      if (!vault.unlocked) {
+        log.debug('save.vault-locked', { connectionId });
+        return;
+      }
+      if (next.length === 0) {
+        log.debug('save.empty', { connectionId });
+        return;
+      }
       try {
         const bundle: SessionBundle = { savedAt: Date.now(), cookies: next };
         vault.saveSecret(key, JSON.stringify(bundle));
-      } catch {
+        log.info('save.ok', { connectionId, cookieCount: next.length });
+      } catch (err) {
+        log.warn('save.failed', {
+          connectionId,
+          message: err instanceof Error ? err.message : String(err),
+        });
         /* best effort — a failed save just means the next sync signs in fresh */
       }
     },
@@ -70,11 +106,19 @@ export async function restoreSession(
   session?: SessionHandle,
 ): Promise<boolean> {
   const cookies = session?.cookies;
-  if (!cookies || cookies.length === 0) return false;
+  if (!cookies || cookies.length === 0) {
+    log.debug('restore.skip', { reason: !session ? 'no-handle' : 'no-cookies' });
+    return false;
+  }
   try {
     await browser.setCookie(...cookies);
+    log.info('restore.ok', { cookieCount: cookies.length });
     return true;
-  } catch {
+  } catch (err) {
+    log.warn('restore.failed', {
+      cookieCount: cookies.length,
+      message: err instanceof Error ? err.message : String(err),
+    });
     return false; // an unusable cookie set just falls back to a fresh sign-in
   }
 }
@@ -87,10 +131,16 @@ export async function persistSession(
   browser: Browser,
   session?: SessionHandle,
 ): Promise<void> {
-  if (!session) return;
+  if (!session) {
+    log.debug('persist.skip', { reason: 'no-handle' });
+    return;
+  }
   try {
     session.save(await browser.cookies());
-  } catch {
+  } catch (err) {
+    log.warn('persist.failed', {
+      message: err instanceof Error ? err.message : String(err),
+    });
     /* best effort */
   }
 }

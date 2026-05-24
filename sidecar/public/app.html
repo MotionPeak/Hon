@@ -2381,40 +2381,45 @@ function bankProjectionBlock(v) {
 
   const cur = currentCycleKey();
 
-  // Expected recurring income — sourced from the Income tab so the two
-  // views agree. The total monthly is whatever sum of merchant averages
-  // is currently surfaced in /income (post-✕). Subtract what's already
-  // landed THIS CYCLE from those same merchants to get what's left to
-  // arrive — random inflows (transfers, refunds) the user dismissed from
-  // the income tab never enter the math, by design.
+  // Expected income — same figure the headline uses, so the projection
+  // tracks the user's manual override when one is set. Falls back to the
+  // scraper-detected recurring-merchant average when there's no override.
+  // Subtract what's already landed THIS CYCLE from recurring merchants to
+  // get the still-to-arrive portion — random inflows (transfers, refunds)
+  // the user dismissed from the income tab never enter the math, by design.
   const recurringMonthly = recurringIncomeMerchants()
     .reduce((s, r) => s + (r.avg || 0), 0);
+  const expectedIncomeTotal = (v.income != null && v.income > 0)
+    ? v.income
+    : recurringMonthly;
   const incomeReceived = recurringIncomeReceived(cur);
 
-  // What's still expected to happen for the rest of the cycle. A savings
-  // set-aside is deducted only when the user marked it a real transfer out
-  // of the checking account; an earmark stays in the account untouched.
-  // Uses `expectedFixedThisCycle` (full charges of bills predicted to bill
-  // in this cycle), not the smoothed monthly-equivalent — so a bimonthly
-  // bill not due this month reserves ₪0 here, matching the headline above
-  // and the "Due this cycle" total on the Fixed bills page.
+  // Full-cycle commitments — NOT "remaining" amounts. For credit-card-heavy
+  // Israeli use, most of the cycle's card spending hasn't actually been
+  // debited from bankNow yet (cards bill once a month); the spending was
+  // recorded as transactions on the date the card was swiped, but the cash
+  // doesn't leave checking until billing day. Deducting the FULL expected
+  // outflows here gives a projection close to "what your bank lands at
+  // after income arrives and the cards bill" — which is the user's actual
+  // mental model. (A pure direct-debit user would end up slightly under-
+  // projected by the amount already debited, but that's the rarer case.)
   const p = budgetProjection();
   const expectedFixed = (p && p.expectedFixedThisCycle != null
     ? p.expectedFixedThisCycle
     : (p && p.expectedFixed) || (v.fixedSpent || 0));
   const essentialBudget = (b.essentials || []).reduce((s, l) => s + (l.budget || 0), 0);
-  const remainingIncome = Math.max(0, recurringMonthly - incomeReceived);
-  const remainingFixed = Math.max(0, expectedFixed - (v.fixedSpent || 0));
-  const remainingEssentials = Math.max(0, essentialBudget - (v.essentialSpent || 0));
-  const savingsOut = v.savingsTransferred ? (v.savings || 0) : 0;
-  // Reserve the headline's remaining variable allowance too — without it the
-  // projection ignores the discretionary spend the user will keep doing for
-  // the rest of the cycle and reads sunnier than reality. With it, the end
-  // balance honestly reflects "what's left in checking after income arrives
-  // AND everything the headline above commits to gets paid for."
-  const remainingVariable = Math.max(0, v.allowed || 0);
-  const change = remainingIncome - remainingFixed - remainingEssentials
-    - savingsOut - remainingVariable;
+  const cycleEssentials = essentialBudget > 0 ? essentialBudget : (v.essentialSpent || 0);
+  const cycleVariable = v.spent || 0; // what's been spent so far on variable
+  const cyclePiggy = Math.max(0, v.piggyFunded || 0);
+  // Savings is shown as a separate informational row but NOT deducted from
+  // the projection. Rationale: a "savings transfer" earmarks money for the
+  // long term but doesn't actually leave your spending pool — when planned
+  // and not yet transferred, the cash is still sitting in checking. (When
+  // it IS transferred it's already left bankNow, so no need to re-deduct.)
+  // Either way, it doesn't belong as a deduction in the bank-end projection.
+  const cycleSavings = v.savings || 0;
+  const change = expectedIncomeTotal - expectedFixed - cycleEssentials
+    - cycleVariable - cyclePiggy;
   const endBalance = bankNow + change;
   const up = change >= 0;
   const sign = up ? "+" : "−";
@@ -2437,16 +2442,28 @@ function bankProjectionBlock(v) {
     + '<div class="balance-sub-delta ' + dcls + '">' + sign
     + money(Math.abs(change), "ILS") + "</div></div>"
     + '<div class="balance-details">'
-    // Income and fixed bills are shown as separate rows now — netting them
-    // into one "+₪X" hid the fact that the bulk of the positive number is
-    // the same salary already counted in the headline above, which made the
-    // projection look like a phantom gain. Showing them apart makes
-    // "income arriving" and "bills still due" individually legible.
-    + detail("Income still to arrive", remainingIncome, "good")
-    + detail("Fixed bills still due", remainingFixed, "bad")
-    + detail("Essentials still budgeted", remainingEssentials, "bad")
-    + detail("Variable spend reserved", remainingVariable, "bad")
-    + detail("Savings transferred out", savingsOut, "bad")
+    // Full cycle figures (not "remaining") so credit-card spending — which
+    // hasn't yet hit the bank — is properly reserved against the projection.
+    // "Bank now" is rendered as a static baseline row (no +/− sign, neutral
+    // styling) so the math reads top-down: bank-now + income − all the
+    // cycle's commitments = projected end balance. It's the starting point,
+    // not a component of `change`.
+    + '<div class="balance-detail" style="border-bottom:1px solid var(--card-border);padding-bottom:6px;margin-bottom:4px">'
+    + '<span>Bank balance now</span>'
+    + '<span class="balance-detail-amt ' + (bankNow >= 0 ? "good" : "bad") + '">'
+    + money(bankNow, "ILS") + "</span></div>"
+    + detail("Income expected this cycle", expectedIncomeTotal, "good")
+    + detail("Fixed bills this cycle", expectedFixed, "bad")
+    + detail("Essentials this cycle", cycleEssentials, "bad")
+    + detail("Variable spent so far", cycleVariable, "bad")
+    + detail("Set asides (piggies)", cyclePiggy, "bad")
+    // Savings is shown as a contextual footnote — it's an earmark, not an
+    // outflow, so it doesn't affect the projection. Rendered as a static
+    // line (no +/− tone, no styling colour) so it reads as info, not math.
+    + '<div class="balance-detail" style="opacity:.55;font-size:11.5px">'
+    + '<span>Savings earmarked (stays in checking)</span>'
+    + '<span class="balance-detail-amt">' + money(cycleSavings, "ILS")
+    + "</span></div>"
     + "</div></div>";
 }
 

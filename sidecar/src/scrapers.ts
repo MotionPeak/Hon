@@ -7,6 +7,16 @@ import { PENSION_COMPANIES, isPensionCompany } from './pension.js';
 import { watchForOtp, type OtpCallback } from './otp.js';
 import { persistSession, restoreSession, type SessionHandle } from './session.js';
 import { scrapeFibiLoans, supportsBankLoans, type ScrapedLoan } from './bankLoans.js';
+import { scrapeDiscountKerenKaspit } from './discountSavings.js';
+import { makeLog } from './log.js';
+
+// One logger per scrape mode so the tag identifies whether the line came
+// from the headless library path, the interactive-with-2FA path, or post-
+// scrape normalization. `child(companyId)` adds the bank/card name to the
+// tag at call time (`[scrape:headless:hapoalim]`, etc).
+const scrapeLog = makeLog('scrape:headless');
+const interactiveLog = makeLog('scrape:interactive');
+const normalizeLog = makeLog('scrape:normalize');
 
 // Extra Chromium flags for the scraper browser. Inside a container Chromium
 // runs as root with no user namespace, so its sandbox cannot start — the Docker
@@ -208,9 +218,20 @@ export async function runScrape(
   screenshotPath?: string,
   session?: SessionHandle,
 ): Promise<ScrapeOutcome> {
+  const log = scrapeLog.child(companyId);
+  const overall = log.timer('run', {
+    startDate: startDate.toISOString().slice(0, 10),
+    hasSession: !!session,
+    screenshotPath: screenshotPath ?? null,
+  });
   let browser: Browser | undefined;
   try {
+    const launchDone = log.timer('browser.launch', {
+      headless: true,
+      sandbox: process.env.HON_BROWSER_NO_SANDBOX !== '1',
+    });
     browser = await puppeteer.launch({ headless: true, args: BROWSER_ARGS });
+    launchDone();
     await restoreSession(browser, session);
 
     const scraper = createScraper({
@@ -225,14 +246,26 @@ export async function runScrape(
       storeFailureScreenShotPath: screenshotPath,
     });
 
-    if (onProgress) {
-      scraper.onProgress((_company, payload) => onProgress(payload.type));
-    }
+    // Always wire onProgress, even when the caller didn't supply one, so the
+    // engine logs library lifecycle events — INITIALIZING, LOGGING_IN,
+    // LOGIN_SUCCESS, etc. Each one is invaluable when a scrape hangs and you
+    // need to know WHERE in the flow it stopped.
+    scraper.onProgress((_company, payload) => {
+      log.info('library.progress', { type: payload.type });
+      onProgress?.(payload.type);
+    });
 
     let result: ScraperScrapingResult;
     try {
+      const scrapeDone = log.timer('library.scrape');
       result = await scraper.scrape(credentials as unknown as ScraperCredentials);
+      scrapeDone({ success: result.success, errorType: result.errorType });
     } catch (err) {
+      log.error('library.scrape.threw', {
+        message: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined,
+      });
+      overall({ result: 'exception' });
       return {
         success: false,
         accounts: [],
@@ -242,6 +275,11 @@ export async function runScrape(
     }
 
     if (!result.success) {
+      log.error('library.unsuccessful', {
+        errorType: result.errorType,
+        errorMessage: result.errorMessage,
+      });
+      overall({ result: 'error', errorType: result.errorType });
       return {
         success: false,
         accounts: [],
@@ -266,18 +304,33 @@ export async function runScrape(
       try {
         scrapedLoans = await scrapeFibiLoans(browser, loansDebugPath);
       } catch (err) {
-        console.error('[bank-loans] runScrape post-hook threw:', err);
+        log.error('loans.post-hook.threw', {
+          message: err instanceof Error ? err.message : String(err),
+          stack: err instanceof Error ? err.stack : undefined,
+        });
         scrapedLoans = undefined;
       }
     }
 
-    return {
-      success: true,
-      accounts: (result.accounts ?? []).map((account) =>
-        normalizeAccount(account as unknown as RawAccount),
-      ),
-      scrapedLoans,
-    };
+    const accounts = (result.accounts ?? []).map((account) =>
+      normalizeAccount(account as unknown as RawAccount, log),
+    );
+
+    // Discount specifically: pull the קרן-כספית balance from the still-open
+    // session and surface it as a synthetic account on the same connection.
+    // The stable accountNumber `keren-kaspit-<id>` keeps a re-sync upserting
+    // the same row rather than creating a new one each time.
+    if (companyId === 'discount') {
+      await appendDiscountKerenKaspit(browser, accounts, log);
+    }
+
+    overall({
+      result: 'success',
+      accounts: accounts.length,
+      transactions: accounts.reduce((s, a) => s + a.transactions.length, 0),
+      loans: scrapedLoans?.length ?? 0,
+    });
+    return { success: true, accounts, scrapedLoans };
   } finally {
     if (browser) await browser.close().catch(() => {});
   }
@@ -296,9 +349,18 @@ export async function runInteractiveScrape(
   onOtpNeeded: OtpCallback,
   session?: SessionHandle,
 ): Promise<ScrapeOutcome> {
+  const log = interactiveLog.child(companyId);
+  const overall = log.timer('run', {
+    startDate: startDate.toISOString().slice(0, 10),
+    hasSession: !!session,
+    screenshotPath: screenshotPath ?? null,
+    otpWatcher: HON_OTP_WATCHER_COMPANIES.has(companyId),
+  });
   let browser: Browser | undefined;
   try {
+    const launchDone = log.timer('browser.launch');
     browser = await puppeteer.launch({ headless: true, args: BROWSER_ARGS });
+    launchDone();
     const launched = browser;
     // Replay a saved session before the scrape: the bank may then trust this
     // device and skip the SMS step.
@@ -322,11 +384,15 @@ export async function runInteractiveScrape(
       defaultTimeout: 240_000,
       storeFailureScreenShotPath: screenshotPath,
     });
-    if (onProgress) {
-      scraper.onProgress((_company, payload) => onProgress(payload.type));
-    }
+    // Always wire onProgress for logging, even when the caller didn't supply
+    // one — every library lifecycle event needs to be visible in the logs.
+    scraper.onProgress((_company, payload) => {
+      log.info('library.progress', { type: payload.type });
+      onProgress?.(payload.type);
+    });
 
     const controller = new AbortController();
+    const scrapeDone = log.timer('library.scrape');
     const scrapePromise = scraper
       .scrape(credentials as unknown as ScraperCredentials)
       .finally(() => controller.abort());
@@ -339,13 +405,22 @@ export async function runInteractiveScrape(
     // the banks it was built for; everyone else relies on the underlying
     // scraper library's own login flow.
     if (HON_OTP_WATCHER_COMPANIES.has(companyId)) {
+      log.info('otp.watcher.armed');
       void pagePromise
         .then((page) => watchForOtp(page, onOtpNeeded, controller.signal))
-        .catch(() => {});
+        .catch((err) => log.warn('otp.watcher.threw', {
+          message: err instanceof Error ? err.message : String(err),
+        }));
     }
 
     const result = await scrapePromise;
+    scrapeDone({ success: result.success, errorType: result.errorType });
     if (!result.success) {
+      log.error('library.unsuccessful', {
+        errorType: result.errorType,
+        errorMessage: result.errorMessage,
+      });
+      overall({ result: 'error', errorType: result.errorType });
       return {
         success: false,
         accounts: [],
@@ -368,19 +443,37 @@ export async function runInteractiveScrape(
       try {
         scrapedLoans = await scrapeFibiLoans(launched, loansDebugPath);
       } catch (err) {
-        console.error('[bank-loans] runInteractiveScrape post-hook threw:', err);
+        log.error('loans.post-hook.threw', {
+          message: err instanceof Error ? err.message : String(err),
+          stack: err instanceof Error ? err.stack : undefined,
+        });
         scrapedLoans = undefined;
       }
     }
 
-    return {
-      success: true,
-      accounts: (result.accounts ?? []).map((account) =>
-        normalizeAccount(account as unknown as RawAccount),
-      ),
-      scrapedLoans,
-    };
+    const accounts = (result.accounts ?? []).map((account) =>
+      normalizeAccount(account as unknown as RawAccount, log),
+    );
+
+    // Discount: pull the קרן-כספית balance through the same authenticated
+    // session and append it as a synthetic account on the connection.
+    if (companyId === 'discount') {
+      await appendDiscountKerenKaspit(launched, accounts, log);
+    }
+
+    overall({
+      result: 'success',
+      accounts: accounts.length,
+      transactions: accounts.reduce((s, a) => s + a.transactions.length, 0),
+      loans: scrapedLoans?.length ?? 0,
+    });
+    return { success: true, accounts, scrapedLoans };
   } catch (err) {
+    log.error('run.threw', {
+      message: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack : undefined,
+    });
+    overall({ result: 'exception' });
     return {
       success: false,
       accounts: [],
@@ -411,24 +504,79 @@ interface RawTransaction {
   status?: string;
 }
 
+/**
+ * Hits Discount's gateway API for the user's קרן-כספית balance and pushes
+ * it onto `accounts` as a synthetic row. The accountNumber is derived from
+ * the user's primary account so a re-sync upserts the same row rather than
+ * stacking duplicates. Best-effort — a failure is logged and the run still
+ * succeeds with whatever accounts the underlying scraper found.
+ */
+async function appendDiscountKerenKaspit(
+  browser: Browser,
+  accounts: NormalizedAccount[],
+  log: ReturnType<typeof makeLog>,
+): Promise<void> {
+  try {
+    const pages = await browser.pages();
+    const page = pages[0];
+    if (!page) {
+      log.warn('discount.keren.no-page');
+      return;
+    }
+    const hit = await scrapeDiscountKerenKaspit(page);
+    if (!hit || !hit.balance) return;
+    // Anchor the synthetic row to the primary account so the row stays
+    // stable across syncs even if the keren account number changes.
+    const primary = accounts[0]?.accountNumber ?? 'discount';
+    accounts.push({
+      accountNumber: `keren-kaspit-${primary}`,
+      label: hit.label || 'קרן כספית',
+      balance: hit.balance,
+      currency: hit.currency,
+      transactions: [],
+    });
+    log.info('discount.keren.attached', { balance: hit.balance });
+  } catch (err) {
+    log.warn('discount.keren.failed', {
+      message: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
 interface RawAccount {
   accountNumber: string;
   balance?: number;
   txns: RawTransaction[];
 }
 
-function normalizeAccount(account: RawAccount): NormalizedAccount {
+function normalizeAccount(
+  account: RawAccount,
+  log = normalizeLog,
+): NormalizedAccount {
   // A scraper that fails to parse a balance yields NaN; store null instead so
   // it reads as "unknown" rather than corrupting the column.
   const balance =
     typeof account.balance === 'number' && Number.isFinite(account.balance)
       ? account.balance
       : undefined;
+  const transactions = (account.txns ?? []).map(normalizeTransaction);
+  // One summary line per account so a "wrong balance" or "missing txns"
+  // problem is visible at a glance. Date range is included because a
+  // narrow window often points to monthsBack being too small for the bank.
+  const dates = transactions.map((t) => t.date).filter(Boolean).sort();
+  log.info('account', {
+    account: account.accountNumber,
+    balance: balance ?? null,
+    txns: transactions.length,
+    firstTxn: dates[0] ?? null,
+    lastTxn: dates[dates.length - 1] ?? null,
+    balanceParsed: typeof account.balance === 'number' && Number.isFinite(account.balance),
+  });
   return {
     accountNumber: account.accountNumber,
     balance,
     currency: 'ILS',
-    transactions: (account.txns ?? []).map(normalizeTransaction),
+    transactions,
   };
 }
 
