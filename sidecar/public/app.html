@@ -285,6 +285,13 @@
   .loan-stat b { display: block; font-size: 14px; font-weight: 700;
     margin-top: 3px; }
   .loan-stat .muted { color: var(--muted); font-weight: 500; font-size: 12px; }
+  /* A subtle "over the full term" summary under the stats grid — lifetime
+   * cost and interest, computed from the current monthly payment, so they
+   * follow CPI/prime as the rate moves. */
+  .loan-life { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 10px;
+    padding-top: 10px; border-top: 1px solid var(--hairline);
+    font-size: 12px; color: var(--muted); }
+  .loan-life b { color: var(--text); font-weight: 700; }
   .loan-pill { display: inline-block; font-size: 11px; font-weight: 700;
     padding: 2px 9px; border-radius: 999px; vertical-align: middle; }
   .loan-pill.fixed { color: var(--text); background: var(--card-hi); }
@@ -423,6 +430,11 @@
   .txn-amt { font: 800 14.5px/1 ui-rounded, "SF Pro Rounded", system-ui;
     white-space: nowrap; }
   .txn-amt.pos { color: var(--green); }
+  /* Pending charges: the bank hasn't finalised the amount yet, so a "Pending"
+     pill stands in for the figure. Subtle so it doesn't shout. */
+  .txn-pending { font-size: 11px; font-weight: 700; padding: 4px 9px;
+    border-radius: 999px; color: var(--amber);
+    background: rgba(245,181,74,0.14); white-space: nowrap; }
   .txn-check { flex: 0 0 21px; width: 21px; height: 21px; border-radius: 7px;
     border: 1.6px solid var(--hairline-2); display: flex; align-items: center;
     justify-content: center; font-size: 12px; font-weight: 800; color: #fff;
@@ -1865,6 +1877,34 @@ function txnRefundAmount(t) {
   return r ? r.amount : 0;
 }
 
+// Match a transaction to a bank-scraped loan: same connection, the
+// description contains the loan's number (the digit-prefix of its
+// externalId, e.g. "108" from "108-416"). Returns null when no loan fits.
+function loanForTransaction(t) {
+  if (!t || !state.loans || !state.loans.length) return null;
+  const acct = state.accounts.find((a) => a.id === t.accountId);
+  if (!acct) return null;
+  const desc = t.description || "";
+  for (const loan of state.loans) {
+    if (loan.connectionId !== acct.connectionId) continue;
+    if (!loan.externalId) continue;
+    const parts = String(loan.externalId).split(/[^0-9]/).filter((s) => s.length >= 3);
+    if (parts.some((p) => desc.indexOf(p) >= 0)) return loan;
+  }
+  return null;
+}
+
+// Sub-line note appended to a transaction when it's a payment toward a
+// recognised loan: how many monthly payments remain on it.
+function loanNote(t) {
+  const loan = loanForTransaction(t);
+  if (!loan) return "";
+  const left = Math.max(0, Math.round((loan.state && loan.state.monthsRemaining) || 0));
+  if (left <= 0) return "";
+  return '<span class="txn-refund"> · ' + left + " payment"
+    + (left === 1 ? "" : "s") + " left</span>";
+}
+
 // --- Data loading ----------------------------------------------------------
 
 async function loadAll() {
@@ -2605,6 +2645,17 @@ function connectionCard(conn) {
       + '<span class="conn-spend-amt">' + money(-cycleSpent, "ILS") + "</span></div>";
   }
 
+  // For credit cards, the soonest future processedDate is the next bill day
+  // — the date the card actually charges the bank account. We sum every
+  // transaction billing on that date to show what the bank will see.
+  const nextBillInfo = isCard ? nextBill(conn) : null;
+  if (nextBillInfo) {
+    spendLine += '<div class="conn-spend"><span>Next bill · '
+      + esc(fmtDate(nextBillInfo.date)) + "</span>"
+      + '<span class="conn-spend-amt">' + money(-nextBillInfo.amount, "ILS")
+      + "</span></div>";
+  }
+
   let progressNote = "";
   if (prog) {
     const cls = prog.phase === "done" ? "ok" : prog.phase === "failed" ? "err" : "run";
@@ -2675,6 +2726,33 @@ function accountCycleSpend(accountId) {
     if (a < 0) total += a;
   });
   return total;
+}
+
+// Next bill for a credit-card connection: the soonest future processedDate
+// across its accounts (the date the card actually charges the bank), plus
+// the total of every transaction billing on that date. Returns null when no
+// future-dated transactions are present (bill already settled, or the
+// scraper has not yet pulled the upcoming month).
+function nextBill(conn) {
+  const ids = new Set(state.accounts
+    .filter((a) => a.connectionId === conn.id).map((a) => a.id));
+  if (!ids.size) return null;
+  const todayIso = new Date().toISOString().slice(0, 10);
+  let earliest = null;
+  state.transactions.forEach((t) => {
+    if (!ids.has(t.accountId) || isCardTotal(t) || t.refundForId) return;
+    const pd = t.processedDate || t.date;
+    if (!pd || pd < todayIso) return;
+    if (!earliest || pd < earliest) earliest = pd;
+  });
+  if (!earliest) return null;
+  let total = 0;
+  state.transactions.forEach((t) => {
+    if (!ids.has(t.accountId) || isCardTotal(t) || t.refundForId) return;
+    if ((t.processedDate || t.date) !== earliest) return;
+    total += t.amount + txnRefundAmount(t);
+  });
+  return { date: earliest, amount: total };
 }
 
 /* --- Assets -------------------------------------------------------------- */
@@ -2768,6 +2846,19 @@ function loanCard(loan) {
     + '<b>' + money(s.totalPaid || 0, loan.currency) + "</b>"
     + '<span class="muted">of ' + money(loan.principal * (s.cpiRatio || 1), loan.currency) + "</span></div>"
     + "</div>"
+    // Lifetime total + interest at the current monthly payment. CPI- and
+    // prime-linked tracks will move with the rate, so this is a snapshot
+    // valid at today's rate, not a guaranteed figure.
+    + (function () {
+        const total = (s.monthlyPayment || 0) * (loan.termMonths || 0);
+        const principalNow = loan.principal * (s.cpiRatio || 1);
+        const interest = Math.max(0, total - principalNow);
+        if (total <= 0) return "";
+        return '<div class="loan-life"><span>Over '
+          + loan.termMonths + " months</span> · <b>"
+          + money(total, loan.currency) + "</b> total · <b>"
+          + money(interest, loan.currency) + "</b> interest</div>";
+      })()
     + '<div class="conn-foot actions">'
     + nwTick("loan", loan.id, loan.excluded)
     + '<button class="mini" data-action="edit-loan" data-id="' + esc(loan.id) + '">Edit</button>'
@@ -2901,6 +2992,14 @@ function activityView() {
         + " reimbursed</span>" : "";
     const swNote = splitwiseNote(t);
     const shown = t.amount + refund;
+    // Pending zero-amount charges (e.g. Max purchases the bank hasn't yet
+    // finalized) show a Pending pill instead of "₪0.00" — the figure isn't
+    // available yet, and showing 0 read as a free purchase.
+    const isPendingZero = t.status === "pending" && !shown;
+    const amtCell = isPendingZero
+      ? '<span class="txn-pending">Pending</span>'
+      : '<div class="txn-amt' + (shown > 0 ? " pos" : "") + '">'
+        + money(shown, t.currency, true) + "</div>";
     return '<div class="txn' + sel + (picked ? " picked" : "")
       + '" data-txn="' + esc(t.id)
       + '" style="animation-delay:' + Math.min(i, 16) * 20 + 'ms">'
@@ -2908,10 +3007,9 @@ function activityView() {
       + '<span class="txn-icon" style="background:' + color + '26;color:' + color
       + '">' + em + "</span>"
       + '<div class="txn-main"><div class="txn-name">' + esc(t.description) + "</div>"
-      + '<div class="txn-sub">' + fmtDate(t.date) + place + note + swNote
+      + '<div class="txn-sub">' + fmtDate(t.date) + place + note + loanNote(t) + swNote
       + "</div></div>"
-      + '<div class="txn-amt' + (shown > 0 ? " pos" : "") + '">'
-      + money(shown, t.currency, true) + "</div></div>";
+      + amtCell + "</div>";
   };
   const buildCard = (cat) => {
     const [, color] = catStyle(cat === "Uncategorized" ? "Other" : cat);
