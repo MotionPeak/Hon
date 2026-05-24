@@ -735,17 +735,80 @@
   .delta.bad { color: var(--red); background: rgba(244,104,90,0.15); }
   .lg-tr.good, .ins-big.good { color: var(--green); }
   .lg-tr.bad, .ins-big.bad { color: var(--amber); }
-  .pie-wrap { display: flex; justify-content: center; margin: 12px 0 14px; }
-  .pie { width: 186px; height: 186px; border-radius: 50%; position: relative; }
-  .pie-hole { position: absolute; inset: 27%; border-radius: 50%;
-    background: var(--card); display: flex; flex-direction: column;
-    align-items: center; justify-content: center; }
-  .pie-c-amt { font: 800 18px/1 ui-rounded, "SF Pro Rounded", system-ui; }
-  .pie-c-lbl { font-size: 9.5px; color: var(--faint); letter-spacing: 1.3px;
-    text-transform: uppercase; margin-top: 4px; }
+  .pie-wrap { display: flex; justify-content: center; margin: 14px 0 16px; }
+  /* SVG donut: each slice animates in with a long, gentle stagger; hovering
+     pushes the slice outward along its own mid-angle (Apple-Charts style)
+     while siblings softly dim. Click drills in. */
+  .pie-svg { width: 240px; height: 240px; overflow: visible;
+    filter: drop-shadow(0 14px 32px rgba(0,0,0,.42)); }
+  /* Slices stroke with the card background so the colours don't bleed into
+     each other — a thin gap reads as "separated", not "stitched". */
+  .pie-slice {
+    cursor: pointer;
+    stroke: var(--card); stroke-width: 2.25; stroke-linejoin: round;
+    transform: translate(0,0);
+    transition: transform .42s cubic-bezier(.22,1,.36,1),
+                filter .25s ease, opacity .25s ease;
+    animation: pie-slice-in .85s cubic-bezier(.16,1,.3,1) both;
+  }
+  @keyframes pie-slice-in {
+    0%   { opacity: 0; transform: scale(.86); }
+    60%  { opacity: 1; }
+    100% { opacity: 1; transform: scale(1); }
+  }
+  /* Soft dim on the rest of the ring; the hovered slice keeps full saturation
+     and pushes outward by ~9px along its own mid-angle (var(--mx,--my)). */
+  .pie-slices:hover .pie-slice { opacity: .58; filter: saturate(.78); }
+  .pie-slices:hover .pie-slice:hover {
+    opacity: 1; filter: brightness(1.06) saturate(1.08);
+    transform: translate(var(--mx,0), var(--my,0));
+  }
+  .pie-c-amt { font: 800 28px/1 ui-rounded, "SF Pro Rounded", system-ui;
+    fill: var(--text); transition: fill .2s ease;
+    font-variant-numeric: tabular-nums; }
+  .pie-c-lbl { font-size: 10.5px; fill: var(--faint); letter-spacing: 1.6px;
+    text-transform: uppercase; font-weight: 700;
+    transition: fill .2s ease, letter-spacing .2s ease, text-transform .2s ease; }
+  .pie-c-amt.hov { fill: var(--text); }
+  .pie-c-lbl.hov { fill: var(--text); letter-spacing: .5px;
+    text-transform: none; font-size: 11px; }
+
+  /* Category drill-in modal — slim transaction list under a coloured chip. */
+  .drill-head { display: flex; align-items: center; gap: 12px;
+    margin: -2px 0 14px; }
+  .drill-em { width: 38px; height: 38px; flex: 0 0 38px; border-radius: 11px;
+    display: flex; align-items: center; justify-content: center; font-size: 19px;
+    box-shadow: inset 0 0 0 1px var(--hairline); }
+  .drill-h-main { flex: 1; min-width: 0; }
+  .drill-h-cat { font: 800 17px/1.1 ui-rounded, "SF Pro Rounded", system-ui;
+    margin-bottom: 2px; }
+  .drill-h-sub { font-size: 11.5px; color: var(--faint); }
+  .drill-h-total { font: 800 18px/1 ui-rounded, "SF Pro Rounded", system-ui;
+    font-variant-numeric: tabular-nums; }
+  .drill-list { max-height: 56vh; overflow-y: auto; margin: 0 -4px;
+    border-top: 1px solid var(--hairline); padding-top: 4px; }
+  .drill-row { display: flex; align-items: center; gap: 10px; padding: 9px 4px;
+    border-bottom: 1px solid var(--hairline);
+    animation: drill-row-in .35s cubic-bezier(.2,.8,.2,1) both; }
+  .drill-row:last-child { border-bottom: 0; }
+  .drill-main { flex: 1; min-width: 0; }
+  .drill-name { font-size: 13.5px; font-weight: 600;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .drill-sub { font-size: 11px; color: var(--faint); margin-top: 2px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .drill-amt { font: 700 14px/1 ui-rounded, "SF Pro Rounded", system-ui;
+    font-variant-numeric: tabular-nums; }
+  @keyframes drill-row-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: none; }
+  }
   .legend { display: flex; flex-direction: column; }
-  .lg-row { display: flex; align-items: center; gap: 9px; padding: 7px 2px;
-    border-top: 1px solid var(--hairline); font-size: 12.5px; }
+  .lg-row { display: flex; align-items: center; gap: 9px; padding: 7px 6px;
+    border-top: 1px solid var(--hairline); font-size: 12.5px;
+    border-radius: 8px; cursor: pointer;
+    transition: background .15s ease, transform .15s ease; }
+  .lg-row:hover { background: var(--card-hi); transform: translateX(2px); }
+  .lg-row:active { transform: translateX(2px) scale(.99); }
   .lg-row:first-child { border-top: 0; }
   .lg-dot { width: 11px; height: 11px; border-radius: 4px; flex: 0 0 auto; }
   .lg-name { font-weight: 600; }
@@ -2545,16 +2608,47 @@ function spendingCard() {
     + spendPie(cats) + "</section>";
 }
 
+// SVG donut for this month's spending. Each slice is a clickable path that
+// opens a drill-down modal of every transaction in the category. Slices
+// stagger-fade in on render, lift on hover, and the centre text swaps from
+// the total to the hovered slice's category + amount.
 function spendPie(cats) {
   const total = cats.reduce((s, c) => s + c.amount, 0);
   if (total <= 0) return '<div class="empty">No spending recorded this month.</div>';
-  let acc = 0;
-  const stops = cats.map((c) => {
-    const a0 = (acc / total) * 100;
-    acc += c.amount;
-    return catStyle(c.category)[1] + " " + a0.toFixed(2) + "% "
-      + ((acc / total) * 100).toFixed(2) + "%";
-  }).join(", ");
+
+  const size = 240, cx = size / 2, cy = size / 2;
+  const rOuter = 104, rInner = 68;
+  // How far a hovered slice pushes outward along its own mid-angle.
+  const pushPx = 9;
+
+  // A single category is degenerate (start == end) for the arc formula; draw
+  // the full ring as two half-arcs so it still renders.
+  let slicesHtml;
+  if (cats.length === 1) {
+    const color = catStyle(cats[0].category)[1];
+    const d = donutFullPath(cx, cy, rOuter, rInner);
+    slicesHtml = '<path class="pie-slice" data-action="open-cat-drill" data-arg="'
+      + esc(cats[0].category) + '" d="' + d + '" fill="' + color
+      + '" style="--mx:0px;--my:0px;animation-delay:0ms"></path>';
+  } else {
+    let acc = 0;
+    slicesHtml = cats.map((c, i) => {
+      const a0 = (acc / total) * Math.PI * 2 - Math.PI / 2;
+      acc += c.amount;
+      const a1 = (acc / total) * Math.PI * 2 - Math.PI / 2;
+      const mid = (a0 + a1) / 2;
+      const mx = (Math.cos(mid) * pushPx).toFixed(2);
+      const my = (Math.sin(mid) * pushPx).toFixed(2);
+      const color = catStyle(c.category)[1];
+      const d = donutArcPath(cx, cy, rOuter, rInner, a0, a1);
+      return '<path class="pie-slice" data-action="open-cat-drill" data-arg="'
+        + esc(c.category) + '" data-amt="' + c.amount.toFixed(2)
+        + '" d="' + d + '" fill="' + color
+        + '" style="--mx:' + mx + 'px;--my:' + my
+        + 'px;animation-delay:' + Math.min(i, 14) * 70 + 'ms"></path>';
+    }).join("");
+  }
+
   const legend = cats.map((c) => {
     const color = catStyle(c.category)[1];
     let tr = "";
@@ -2563,16 +2657,107 @@ function spendPie(cats) {
       tr = '<span class="lg-tr ' + (down ? "good" : "bad") + '">'
         + (down ? "↓" : "↑") + Math.abs(c.changePct).toFixed(0) + "%</span>";
     }
-    return '<div class="lg-row"><span class="lg-dot" style="background:' + color
-      + '"></span><span class="lg-name">' + esc(c.category) + "</span>" + tr
+    return '<div class="lg-row" data-action="open-cat-drill" data-arg="'
+      + esc(c.category) + '">'
+      + '<span class="lg-dot" style="background:' + color + '"></span>'
+      + '<span class="lg-name">' + esc(c.category) + "</span>" + tr
       + '<span class="lg-amt">' + money(c.amount, "ILS") + "</span>"
       + '<span class="lg-pct">' + Math.round((c.amount / total) * 100) + "%</span></div>";
   }).join("");
-  return '<div class="pie-wrap"><div class="pie" style="background:conic-gradient('
-    + stops + ')"><div class="pie-hole"><div class="pie-c-amt">'
-    + moneyShort(total, "ILS") + '</div><div class="pie-c-lbl">spent</div>'
-    + "</div></div></div>"
+
+  return '<div class="pie-wrap"><svg class="pie pie-svg" viewBox="0 0 ' + size + ' ' + size
+    + '" data-pie-total="' + moneyShort(total, "ILS") + '">'
+    + '<g class="pie-slices">' + slicesHtml + '</g>'
+    + '<text class="pie-c-amt" x="' + cx + '" y="' + (cy - 4)
+    + '" text-anchor="middle" dominant-baseline="middle">'
+    + esc(moneyShort(total, "ILS")) + '</text>'
+    + '<text class="pie-c-lbl" x="' + cx + '" y="' + (cy + 18)
+    + '" text-anchor="middle" dominant-baseline="middle">spent</text>'
+    + '</svg></div>'
     + '<div class="legend">' + legend + "</div>";
+}
+
+// Builds the SVG path for one donut slice between two angles (radians).
+function donutArcPath(cx, cy, rO, rI, a0, a1) {
+  const x0o = cx + Math.cos(a0) * rO, y0o = cy + Math.sin(a0) * rO;
+  const x1o = cx + Math.cos(a1) * rO, y1o = cy + Math.sin(a1) * rO;
+  const x0i = cx + Math.cos(a1) * rI, y0i = cy + Math.sin(a1) * rI;
+  const x1i = cx + Math.cos(a0) * rI, y1i = cy + Math.sin(a0) * rI;
+  const large = a1 - a0 > Math.PI ? 1 : 0;
+  return 'M ' + x0o + ' ' + y0o
+    + ' A ' + rO + ' ' + rO + ' 0 ' + large + ' 1 ' + x1o + ' ' + y1o
+    + ' L ' + x0i + ' ' + y0i
+    + ' A ' + rI + ' ' + rI + ' 0 ' + large + ' 0 ' + x1i + ' ' + y1i
+    + ' Z';
+}
+// Single-category special: a full ring drawn as two opposed half-arcs.
+function donutFullPath(cx, cy, rO, rI) {
+  return 'M ' + (cx - rO) + ' ' + cy
+    + ' A ' + rO + ' ' + rO + ' 0 1 0 ' + (cx + rO) + ' ' + cy
+    + ' A ' + rO + ' ' + rO + ' 0 1 0 ' + (cx - rO) + ' ' + cy + ' Z'
+    + ' M ' + (cx - rI) + ' ' + cy
+    + ' A ' + rI + ' ' + rI + ' 0 1 1 ' + (cx + rI) + ' ' + cy
+    + ' A ' + rI + ' ' + rI + ' 0 1 1 ' + (cx - rI) + ' ' + cy + ' Z';
+}
+
+// Glanceable drill-in for one spending category — opens when the user clicks
+// a slice or its legend row. Lists every transaction in that category within
+// the current billing cycle, newest first, with a running total at the top.
+function categoryDrillModal(category) {
+  openModal((modal) => {
+    const cycle = currentCycleKey();
+    const [em, color] = catStyle(category || "Other");
+    const acctById = {};
+    state.accounts.forEach((a) => { acctById[a.id] = a; });
+
+    // Same filter cycleSpending uses — card-bill totals out, refunds folded in,
+    // ILS only, expenses only — so totals reconcile with the pie.
+    const rows = state.transactions
+      .filter((t) => t.currency === "ILS" && !isCardTotal(t) && !t.refundForId)
+      .filter((t) => cycleKey(t.date) === cycle)
+      .filter((t) => (t.category || "Uncategorized") === category)
+      .map((t) => ({ t, eff: t.amount + txnRefundAmount(t) }))
+      .filter((r) => r.eff < 0)
+      .sort((a, b) => new Date(b.t.date) - new Date(a.t.date));
+
+    const total = rows.reduce((s, r) => s + -r.eff, 0);
+
+    const list = rows.length
+      ? rows.map((r) => {
+          const t = r.t;
+          const acct = acctById[t.accountId];
+          const place = acct ? " · " + esc(acct.label || acct.connectionName || "") : "";
+          const refund = txnRefundAmount(t);
+          const note = refund
+            ? '<span class="txn-refund"> · ' + money(refund, t.currency)
+              + " reimbursed</span>" : "";
+          return '<div class="drill-row">'
+            + '<div class="drill-main"><div class="drill-name">'
+            + esc(t.description || "—") + "</div>"
+            + '<div class="drill-sub">' + esc(fmtDate(t.date)) + place + note + "</div></div>"
+            + '<div class="drill-amt">' + money(r.eff, t.currency, true) + "</div>"
+            + "</div>";
+        }).join("")
+      : '<div class="empty">No transactions in this category this cycle.</div>';
+
+    modal.innerHTML = ''
+      + '<div class="drill-head">'
+        + '<span class="drill-em" style="background:' + color + '22;color:' + color
+        + '">' + em + '</span>'
+        + '<div class="drill-h-main">'
+          + '<div class="drill-h-cat">' + esc(category) + '</div>'
+          + '<div class="drill-h-sub">' + esc(cycleLabel(cycle))
+          + ' · ' + rows.length + (rows.length === 1 ? ' transaction' : ' transactions')
+          + '</div>'
+        + '</div>'
+        + '<div class="drill-h-total">' + money(total, "ILS") + '</div>'
+      + '</div>'
+      + '<div class="drill-list">' + list + '</div>'
+      + '<div class="modal-actions">'
+        + '<button class="primary" data-drill-close>Done</button>'
+      + '</div>';
+    modal.querySelector('[data-drill-close]').addEventListener('click', closeOverlay);
+  });
 }
 
 // Net-worth subtitle: how many accounts and manual assets back the figure.
@@ -3027,7 +3212,14 @@ function holdingsFor(accountId) {
 // for others, with no flag — using it directly understated the figure by a
 // factor of `units`.
 function holdingStats(h) {
-  const value = h.price != null ? h.units * h.price : null;
+  // Prefer the bank-reported market value when the scraper supplied it
+  // (Discount's Tmura field); fall back to units × price for SnapTrade
+  // brokerages whose price is already in the same currency as the value.
+  // Israeli funds quote price in agorot but hold value in NIS — a 100×
+  // mismatch the naive multiplication would print as a too-big total.
+  const value = h.value != null
+    ? h.value
+    : (h.price != null ? h.units * h.price : null);
   const cost = h.costBasis != null ? h.units * h.costBasis : null;
   let gain = value != null && cost != null
     ? value - cost
@@ -3104,7 +3296,9 @@ function connectionCard(conn) {
       }
     });
     rows = '<div class="list conn-accounts">' + accounts.map((a) => {
-      const holds = isSnap ? holdingsFor(a.id) : [];
+      // Any account with holdings gets the expand affordance — SnapTrade
+      // brokerages and the synthetic Discount קרן-כספית row both qualify.
+      const holds = holdingsFor(a.id);
       const open = !!state.expandedHoldings[a.id];
       const toggle = holds.length
         ? '<button class="holds-toggle" data-action="toggle-holdings" data-id="'
@@ -3940,7 +4134,7 @@ function budgetSection() {
     + money(b.totalSpent || 0, b.currency) + "</span></div>";
 
   return '<section class="card"><div class="card-head"><h3>Budget · '
-    + esc(b.month) + '</h3><span class="spacer"></span>'
+    + esc(cycleLabel(b.month)) + '</h3><span class="spacer"></span>'
     + '<button class="mini" data-action="edit-budgets">Edit</button></div>'
     + body + "</section>";
 }
@@ -4605,7 +4799,15 @@ function deltaChip(current, baseline, label) {
 }
 
 function insightsView() {
-  const hasBrokerage = (state.brokerage.holdings || []).length > 0
+  // The Brokerage sub-tab is for SnapTrade-linked accounts only. Discount's
+  // קרן-כספית holdings are surfaced on the connection tile but excluded
+  // from the brokerage view (its currency + performance machinery doesn't
+  // model Israeli securities). Scope both gates to SnapTrade accounts to
+  // avoid an empty Brokerage tab when only keren kaspit is present.
+  const snapAcctIds = new Set(state.accounts
+    .filter((a) => a.companyId === SNAPTRADE_ID).map((a) => a.id));
+  const hasBrokerage = (state.brokerage.holdings || [])
+      .some((h) => snapAcctIds.has(h.accountId))
     || (state.brokerage.snapshots || []).length > 0;
   const tab = state.insightsTab === "brokerage" ? "brokerage" : "spending";
 
@@ -4644,12 +4846,21 @@ function insightsView() {
 // The brokerage stats view: portfolio value with its trend, total unrealized
 // gain, a value-over-time chart, and the consolidated holdings allocation.
 function brokerageView() {
-  const allHoldings = state.brokerage.holdings || [];
-  const snaps = state.brokerage.snapshots || [];
-  const holdSnaps = state.brokerage.holdingSnapshots || [];
+  // The Insights brokerage view is scoped to SnapTrade-linked accounts.
+  // Discount's קרן-כספית synthetic row still shows holdings on its tile
+  // (via holdingsFor + holdingsList) but does not feed this view — the
+  // currency / performance-series machinery here is built around the
+  // SnapTrade reporting schema, which Israeli securities don't supply.
+  const brkAccts = state.accounts.filter((a) => a.companyId === SNAPTRADE_ID);
+  const brkAcctIds = new Set(brkAccts.map((a) => a.id));
+  const allHoldings = (state.brokerage.holdings || [])
+    .filter((h) => brkAcctIds.has(h.accountId));
+  const snaps = (state.brokerage.snapshots || [])
+    .filter((s) => brkAcctIds.has(s.accountId));
+  const holdSnaps = (state.brokerage.holdingSnapshots || [])
+    .filter((s) => brkAcctIds.has(s.accountId));
   const performance = state.brokerage.performance || [];
   const ilsRates = state.brokerage.ilsRates || null;
-  const brkAccts = state.accounts.filter((a) => a.companyId === SNAPTRADE_ID);
 
   // Account filter (the user can narrow chart + holdings to one account).
   const acctFilter = state.brkAccount && state.brkAccount !== "all"
@@ -8528,6 +8739,9 @@ function handleAction(action, btn) {
       break;
     }
     case "edit-budgets": budgetModal(); break;
+    case "open-cat-drill":
+      if (btn && btn.dataset.arg) categoryDrillModal(btn.dataset.arg);
+      break;
     case "generate-insights": generateInsights(); break;
     case "toggle-holdings":
       if (id) {
@@ -8593,6 +8807,50 @@ async function toggleNetWorth(kind, id, counted) {
     render(); // re-render to restore the checkbox to the stored state
   }
 }
+
+// Hover over a pie slice or its legend row → centre text swaps from the
+// month's total to that category's name + amount. Pure presentation, so
+// it sits outside the click dispatcher.
+document.getElementById("content").addEventListener("mouseover", (e) => {
+  const t = e.target.closest("[data-action='open-cat-drill']");
+  if (!t) return;
+  const svg = t.closest(".pie-wrap")
+    ? t.closest(".pie-wrap").querySelector("svg.pie-svg")
+    : (t.closest(".card") || document).querySelector("svg.pie-svg");
+  if (!svg) return;
+  const cat = t.dataset.arg;
+  // Pull the row's amount from the legend (more accurate than the slice's
+  // data-amt because we always render it as money there).
+  const lg = svg.closest(".card")
+    ? svg.closest(".card").querySelector(".lg-row[data-arg='"
+        + (cat || "").replace(/'/g, "\\'") + "']")
+    : null;
+  const amt = lg ? lg.querySelector(".lg-amt").textContent
+    : (t.dataset.amt ? "₪" + Number(t.dataset.amt).toLocaleString("en-US",
+        { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : "");
+  const aEl = svg.querySelector(".pie-c-amt");
+  const lEl = svg.querySelector(".pie-c-lbl");
+  if (aEl && lEl && cat) {
+    aEl.textContent = amt || aEl.textContent;
+    lEl.textContent = cat;
+    aEl.classList.add("hov"); lEl.classList.add("hov");
+  }
+});
+document.getElementById("content").addEventListener("mouseout", (e) => {
+  const t = e.target.closest("[data-action='open-cat-drill']");
+  if (!t) return;
+  const card = t.closest(".card");
+  if (!card) return;
+  const svg = card.querySelector("svg.pie-svg");
+  if (!svg) return;
+  const aEl = svg.querySelector(".pie-c-amt");
+  const lEl = svg.querySelector(".pie-c-lbl");
+  if (aEl && lEl) {
+    aEl.textContent = svg.dataset.pieTotal || aEl.textContent;
+    lEl.textContent = "spent";
+    aEl.classList.remove("hov"); lEl.classList.remove("hov");
+  }
+});
 
 document.getElementById("content").addEventListener("click", (e) => {
   const balEl = e.target.closest("[data-edit-balance]");

@@ -65,6 +65,11 @@ export interface NormalizedHolding {
   costBasis?: number;
   /** Unrealized profit/loss on the position, as reported by the brokerage. */
   openPnl?: number;
+  /** Bank-reported current market value in `currency`. Pass-through when
+   *  the broker hands it through (Discount's Tmura field); when absent the
+   *  UI falls back to `units × price`. Needed because Israeli securities
+   *  quote prices in agorot but value in NIS — a 100× gap. */
+  value?: number;
 }
 
 export interface NormalizedAccount {
@@ -516,30 +521,52 @@ async function appendDiscountKerenKaspit(
   accounts: NormalizedAccount[],
   log: ReturnType<typeof makeLog>,
 ): Promise<void> {
+  let page: Page | undefined;
   try {
-    const pages = await browser.pages();
-    const page = pages[0];
-    if (!page) {
-      log.warn('discount.keren.no-page');
-      return;
-    }
-    const hit = await scrapeDiscountKerenKaspit(page);
-    if (!hit || !hit.balance) return;
-    // Anchor the synthetic row to the primary account so the row stays
-    // stable across syncs even if the keren account number changes.
+    // Open a fresh page on the browser — the library closes its working
+    // page after the scrape but the session cookies stay on the browser
+    // context, so a new page is already logged in.
+    page = await browser.newPage();
+    // The retail3 portfolio endpoints require the customer's account number
+    // in the AccountNumber header — the SPA passes it on every securities
+    // call. Use the primary account from the underlying scrape; the
+    // gateway scopes the response to that customer either way.
     const primary = accounts[0]?.accountNumber ?? 'discount';
+    const holdings = await scrapeDiscountKerenKaspit(page, primary);
+    if (!holdings.length) return;
+    const totalValue = holdings.reduce((s, h) => s + h.marketValue, 0);
+    // One synthetic account carries every money-market position as a
+    // holding row — that way the Discount tile shows a single "קרן כספית"
+    // line with the total, the per-holding rows are visible when the user
+    // expands it, and the Insights brokerage view picks up each position
+    // independently (via the holdings table).
     accounts.push({
       accountNumber: `keren-kaspit-${primary}`,
-      label: hit.label || 'קרן כספית',
-      balance: hit.balance,
-      currency: hit.currency,
+      label: 'קרן כספית',
+      balance: totalValue,
+      currency: 'ILS',
       transactions: [],
+      holdings: holdings.map((h) => ({
+        symbol: h.symbol,
+        description: h.paperName,
+        units: h.units,
+        price: h.price,
+        currency: 'ILS',
+        // Discount quotes price in agorot (e.g. 101.75) but the holding
+        // value comes through in NIS (Tmura). Pass it explicitly so the
+        // UI doesn't try to compute units × agorot-price.
+        value: h.marketValue,
+      })),
     });
-    log.info('discount.keren.attached', { balance: hit.balance });
+    log.info('discount.keren.attached', {
+      total: totalValue, positions: holdings.length,
+    });
   } catch (err) {
     log.warn('discount.keren.failed', {
       message: err instanceof Error ? err.message : String(err),
     });
+  } finally {
+    if (page) await page.close().catch(() => {});
   }
 }
 

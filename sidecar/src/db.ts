@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-export const SCHEMA_VERSION = 28;
+export const SCHEMA_VERSION = 29;
 
 export interface DbHandle {
   db: Database.Database;
@@ -567,6 +567,19 @@ const MIGRATIONS: { version: number; sql: string }[] = [
     sql: `
       UPDATE categories SET cat_group = 'income'
         WHERE name IN ('Income', 'Transfers');
+    `,
+  },
+  {
+    // Carry the bank-reported market value alongside units and price. For
+    // SnapTrade brokerages units × price is a faithful number (USD/share ×
+    // shares = USD), but Israeli securities quote price in agorot while
+    // the actual holding value is in NIS — a 100× gap that breaks the
+    // "value" column when computed naively. Storing the value lets each
+    // scraper hand the real figure through; consumers fall back to
+    // units × price when value is null.
+    version: 29,
+    sql: `
+      ALTER TABLE holdings ADD COLUMN value REAL;
     `,
   },
 ];

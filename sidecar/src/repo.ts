@@ -55,6 +55,8 @@ export interface HoldingRow {
   currency: string;
   costBasis: number | null;
   openPnl: number | null;
+  /** Bank-reported market value, when the scraper passes one through. */
+  value: number | null;
   updatedAt: string;
 }
 
@@ -311,7 +313,7 @@ export class Repo {
       .prepare(
         `SELECT account_id AS accountId, symbol, description, units, price,
                 currency, cost_basis AS costBasis, open_pnl AS openPnl,
-                updated_at AS updatedAt
+                value, updated_at AS updatedAt
          FROM holdings
          ORDER BY symbol`,
       )
@@ -679,10 +681,10 @@ export class Repo {
     const insertHolding = this.db.prepare(
       `INSERT INTO holdings
          (id, account_id, symbol, description, units, price, currency,
-          cost_basis, open_pnl, updated_at)
+          cost_basis, open_pnl, value, updated_at)
        VALUES
          (@id, @accountId, @symbol, @description, @units, @price, @currency,
-          @costBasis, @openPnl, @updatedAt)`,
+          @costBasis, @openPnl, @value, @updatedAt)`,
     );
     const upsertSnapshot = this.db.prepare(
       `INSERT INTO account_value_snapshots (account_id, date, value, currency)
@@ -730,6 +732,7 @@ export class Repo {
               currency: h.currency,
               costBasis: h.costBasis ?? null,
               openPnl: h.openPnl ?? null,
+              value: h.value ?? null,
               updatedAt: now,
             });
           }
@@ -743,8 +746,11 @@ export class Repo {
           }
           // Per-holding daily snapshot — feeds each position's own sparkline
           // when the user expands a holding in the Insights brokerage view.
+          // Prefer the bank-reported value; only fall back to units × price
+          // when the scraper didn't supply one (legacy SnapTrade path).
           for (const h of account.holdings) {
-            const value = h.price != null ? h.units * h.price : null;
+            const value = h.value != null ? h.value
+              : (h.price != null ? h.units * h.price : null);
             if (value == null) continue;
             upsertHoldSnapshot.run({
               accountId: row.id,
