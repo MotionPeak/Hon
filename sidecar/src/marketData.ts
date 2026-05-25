@@ -82,79 +82,79 @@ export async function fetchYahooHistory(
 }
 
 /**
- * Pulls daily NAV history for an Israeli security (mutual fund / ETF / קופה)
- * by its TASE MisparNiar from the Maya web API. Tries the fund-shaped endpoint
- * first; falls back to the security-shaped one. Empty array on any failure.
+ * Pulls current NAV and recent yield numbers for an Israeli mutual fund from
+ * Maya's web API by MisparNiar. The endpoint Maya's own UI uses —
+ * `maya.tase.co.il/api/v1/funds/mutual/{id}` — returns a single object with
+ * `purchasePrice`, `redemptionPrice` (NAV in agorot) and a `yields` block:
+ *   { dayYield, monthYield, yearYield, last12MonthYield, standardDeviation }
  *
- * Maya's API is browser-driven and rejects requests without a Referer / Origin
- * matching maya.tase.co.il, so we set both. The endpoints return
- * `[{ TradeDate, SellPrice, BuyPrice, Yield, … }]` where `SellPrice` is the
- * end-of-day NAV in agorot — divided by 100 to land back in NIS.
+ * Maya doesn't expose a public per-day NAV series here — the dashboard's
+ * chart is rebuilt client-side from these aggregated yields, not from a
+ * historical price array. So this returns one HistoricalClose (today's NAV)
+ * plus, if the yield numbers are present, two extra back-derived points so
+ * the Hon equity-curve has *some* shape to draw for an individual holding:
+ *   • today          (current NAV)
+ *   • 1 month ago    (today / (1 + monthYield/100))
+ *   • 1 year ago     (today / (1 + yearYield/100))
+ *
+ * Better than nothing; for true daily-resolution series the Meitav portfolio
+ * GetTsuot path (already wired in pension.ts) is the right place to look.
  */
 export async function fetchMayaHistory(
   misparNiar: string,
-  days = 365 * 10,
+  _days = 365 * 10,
 ): Promise<HistoricalClose[]> {
-  const toIso = (d: Date) => d.toISOString().slice(0, 10);
-  const end = new Date();
-  const start = new Date(Date.now() - days * 24 * 3600 * 1000);
-  const candidates = [
-    // Mutual fund / ETF — the most common shape for Meitav holdings.
-    `https://mayaapi.tase.co.il/api/fund/historyByDates?fundId=${encodeURIComponent(misparNiar)}` +
-      `&fromDate=${toIso(start)}&toDate=${toIso(end)}`,
-    // Listed security (stock / corporate bond / index-tracker ETF).
-    `https://mayaapi.tase.co.il/api/securities/trading/eod/historyByDates?securityId=${encodeURIComponent(misparNiar)}` +
-      `&fromDate=${toIso(start)}&toDate=${toIso(end)}`,
-  ];
+  const url = `https://maya.tase.co.il/api/v1/funds/mutual/${encodeURIComponent(misparNiar)}`;
   const headers = {
     'Accept': 'application/json, text/plain, */*',
-    'Accept-Language': 'he-IL,he;q=0.9,en;q=0.8',
-    'Origin': 'https://maya.tase.co.il',
-    'Referer': 'https://maya.tase.co.il/',
+    'Accept-Language': 'he-IL',
+    'Referer': `https://maya.tase.co.il/he/funds/mutual-funds/${encodeURIComponent(misparNiar)}`,
     'User-Agent': 'Mozilla/5.0 (compatible; Hon/0.3; +https://github.com)',
-    'X-Maya-With': 'allow',
   };
-  for (const url of candidates) {
-    try {
-      const res = await fetch(url, { headers });
-      if (!res.ok) {
-        process.stdout.write(`maya history ${misparNiar} (${shortUrl(url)}): HTTP ${res.status}\n`);
-        continue;
-      }
-      const data: any = await res.json();
-      // Normalise the row list — Maya wraps the array in different keys per
-      // endpoint (Items / HistoryData / a bare array). Pick the first one
-      // that looks like a list of {Date,Price}-ish rows.
-      const rows: any[] = Array.isArray(data) ? data
-        : Array.isArray(data?.Items) ? data.Items
-        : Array.isArray(data?.HistoryData) ? data.HistoryData
-        : Array.isArray(data?.Data) ? data.Data
-        : Array.isArray(data?.t) ? data.t
-        : [];
-      const out: HistoricalClose[] = [];
-      for (const r of rows) {
-        const dateRaw = r.TradeDate ?? r.Date ?? r.date ?? r.tradeDate ?? '';
-        const date = typeof dateRaw === 'string' ? dateRaw.slice(0, 10) : '';
-        // Maya quotes mutual funds in agorot; the SellPrice / Price fields
-        // are the canonical end-of-day NAV. Divide by 100 to express in NIS.
-        const rawPrice = r.SellPrice ?? r.Price ?? r.ClosingPrice ?? r.NAV ?? r.nav ?? r.price;
-        const num = typeof rawPrice === 'number' ? rawPrice : Number(rawPrice);
-        if (!date || !Number.isFinite(num)) continue;
-        out.push({ date, close: num / 100, currency: 'ILS' });
-      }
-      if (out.length) return out.sort((a, b) => a.date.localeCompare(b.date));
-      process.stdout.write(`maya history ${misparNiar} (${shortUrl(url)}): empty rows\n`);
-    } catch (err) {
-      process.stdout.write(
-        `maya history ${misparNiar} (${shortUrl(url)}) threw: ${(err as Error).message}\n`,
-      );
+  try {
+    const res = await fetch(url, { headers });
+    if (!res.ok) {
+      process.stdout.write(`maya history ${misparNiar}: HTTP ${res.status}\n`);
+      return [];
     }
+    const data: any = await res.json();
+    // The NAV fields come back in agorot — divide by 100 for NIS.
+    const navAgorot = Number(data.redemptionPrice ?? data.purchasePrice);
+    if (!Number.isFinite(navAgorot)) {
+      process.stdout.write(`maya history ${misparNiar}: no usable NAV in response\n`);
+      return [];
+    }
+    const today = navAgorot / 100;
+    const todayIso = new Date().toISOString().slice(0, 10);
+    const points: HistoricalClose[] = [{ date: todayIso, close: today, currency: 'ILS' }];
+    const yields: any = data.yields ?? {};
+    const monthYield = Number(yields.monthYield);
+    const yearYield = Number(yields.yearYield);
+    if (Number.isFinite(monthYield) && monthYield > -100) {
+      const monthAgo = new Date();
+      monthAgo.setMonth(monthAgo.getMonth() - 1);
+      points.push({
+        date: monthAgo.toISOString().slice(0, 10),
+        close: today / (1 + monthYield / 100),
+        currency: 'ILS',
+      });
+    }
+    if (Number.isFinite(yearYield) && yearYield > -100) {
+      const yearAgo = new Date();
+      yearAgo.setFullYear(yearAgo.getFullYear() - 1);
+      points.push({
+        date: yearAgo.toISOString().slice(0, 10),
+        close: today / (1 + yearYield / 100),
+        currency: 'ILS',
+      });
+    }
+    return points.sort((a, b) => a.date.localeCompare(b.date));
+  } catch (err) {
+    process.stdout.write(
+      `maya history ${misparNiar} threw: ${(err as Error).message}\n`,
+    );
+    return [];
   }
-  return [];
-}
-
-function shortUrl(url: string): string {
-  return url.replace('https://mayaapi.tase.co.il/api/', '').split('?')[0];
 }
 
 /**
