@@ -4850,8 +4850,8 @@ const VOUCHER_SOURCES = [
     emoji: "🎁",
     label: "BuyMe",
     sub: "Digital gift cards from BuyMe",
-    available: false,
-    note: "Coming soon — open BuyMe and check your wallet.",
+    available: true,
+    start: () => buymeSyncModal(),
   },
   {
     id: "hitechzone",
@@ -5093,6 +5093,172 @@ function shufersalSyncModal() {
     };
 
     showPhoneStep();
+  });
+}
+
+// Mirrors shufersalSyncModal but for BuyMe — email-based OTP flow. State
+// machine: enter email → "Signing in…" (polling backend) → enter 6-digit
+// code from inbox → "Verifying…" → success/error. Phone vault is replaced
+// with an email vault under `buyme:email`.
+function buymeSyncModal() {
+  openModal(async (modal) => {
+    let syncId = null;
+    let pollTimer = null;
+    const stopPolling = () => { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } };
+    const cleanup = () => { stopPolling(); };
+
+    let savedEmail = "";
+    try {
+      const r = await api("/vouchers/sync/buyme/saved-email");
+      savedEmail = r && r.email || "";
+    } catch (e) { /* fine */ }
+
+    const showEmailStep = () => {
+      modal.innerHTML = "<h2>Sync from BuyMe</h2>"
+        + '<p class="hint">Hon will sign in to <b>buyme.co.il</b> and pull your '
+        + "active gift cards. BuyMe will email you a 6-digit code to verify.</p>"
+        + '<div class="field"><label>Email address</label>'
+        + '<input id="bm-email" type="email" inputmode="email" '
+        + 'placeholder="you@example.com" '
+        + 'value="' + esc(savedEmail) + '"></div>'
+        + '<div class="field"><label class="inline">'
+        + '<input id="bm-remember" type="checkbox"'
+        + (savedEmail ? ' checked' : '') + ' /> '
+        + "Remember this email for next sync</label></div>"
+        + '<div class="modal-actions"><button data-x="cancel">Cancel</button>'
+        + '<button class="primary" id="bm-send">Send code</button></div>';
+      const emailInput = modal.querySelector("#bm-email");
+      emailInput.focus();
+      modal.querySelector('[data-x="cancel"]').addEventListener("click", () => { cleanup(); closeOverlay(); });
+      modal.querySelector("#bm-send").addEventListener("click", () => sendCode());
+      emailInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") sendCode();
+      });
+
+      const sendCode = async () => {
+        const email = emailInput.value.trim();
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+          toast("Enter a valid email address.", true);
+          return;
+        }
+        const remember = modal.querySelector("#bm-remember").checked;
+        modal.querySelector("#bm-send").disabled = true;
+        modal.querySelector("#bm-send").textContent = "Sending…";
+        try {
+          const r = await api("/vouchers/sync/buyme/start", "POST", { email, remember });
+          syncId = r.syncId;
+          showSigningInStep();
+        } catch (e) {
+          modal.querySelector("#bm-send").disabled = false;
+          modal.querySelector("#bm-send").textContent = "Send code";
+          toast((e && e.message) || "Could not start the sync.", true);
+        }
+      };
+    };
+
+    const showSigningInStep = () => {
+      modal.innerHTML = "<h2>Signing in…</h2>"
+        + '<p class="hint" id="bm-status">Opening BuyMe and asking for your '
+        + 'code. This usually takes 15–30 seconds.</p>'
+        + '<div class="modal-actions"><button data-x="cancel">Cancel</button></div>';
+      modal.querySelector('[data-x="cancel"]').addEventListener("click", async () => {
+        cleanup();
+        try { await api("/vouchers/sync/buyme/cancel", "POST", { syncId }); } catch (e) {}
+        closeOverlay();
+      });
+
+      const status = modal.querySelector("#bm-status");
+      pollTimer = setInterval(async () => {
+        try {
+          const s = await api("/vouchers/sync/buyme/status/" + syncId);
+          if (s.message) status.textContent = s.message;
+          if (s.status === "awaiting-otp") {
+            stopPolling();
+            showOtpStep();
+          } else if (s.finished) {
+            stopPolling();
+            handleFinish(s);
+          }
+        } catch (e) { /* keep polling */ }
+      }, 1200);
+    };
+
+    const showOtpStep = () => {
+      modal.innerHTML = "<h2>Enter the code</h2>"
+        + '<p class="hint">BuyMe just emailed you a 6-digit code. Check your '
+        + "inbox (and spam folder), then paste it below.</p>"
+        + '<div class="field"><label>Email code</label>'
+        + '<input id="bm-code" type="text" inputmode="numeric" '
+        + 'placeholder="6-digit code" maxlength="8" autocomplete="one-time-code"></div>'
+        + '<div class="hint" id="bm-status">Waiting for your code…</div>'
+        + '<div class="modal-actions"><button data-x="cancel">Cancel</button>'
+        + '<button class="primary" id="bm-verify">Verify</button></div>';
+      const codeInput = modal.querySelector("#bm-code");
+      const status = modal.querySelector("#bm-status");
+      codeInput.focus();
+
+      pollTimer = setInterval(async () => {
+        try {
+          const s = await api("/vouchers/sync/buyme/status/" + syncId);
+          if (s.message) status.textContent = s.message;
+          if (s.finished) {
+            stopPolling();
+            handleFinish(s);
+          }
+        } catch (e) { /* keep polling */ }
+      }, 1200);
+
+      modal.querySelector('[data-x="cancel"]').addEventListener("click", async () => {
+        cleanup();
+        try { await api("/vouchers/sync/buyme/cancel", "POST", { syncId }); } catch (e) {}
+        closeOverlay();
+      });
+      modal.querySelector("#bm-verify").addEventListener("click", () => verify());
+      codeInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") verify();
+      });
+
+      const verify = async () => {
+        const code = codeInput.value.replace(/\D/g, "");
+        if (code.length < 4) { toast("Enter the full code.", true); return; }
+        modal.querySelector("#bm-verify").disabled = true;
+        modal.querySelector("#bm-verify").textContent = "Verifying…";
+        status.textContent = "Verifying with BuyMe…";
+        try {
+          await api("/vouchers/sync/buyme/otp", "POST", { syncId, code });
+        } catch (e) {
+          modal.querySelector("#bm-verify").disabled = false;
+          modal.querySelector("#bm-verify").textContent = "Verify";
+          toast((e && e.message) || "Could not submit the code.", true);
+        }
+      };
+    };
+
+    const handleFinish = async (s) => {
+      if (s.status === "success") {
+        const fresh = await api("/vouchers").catch(() => ({ vouchers: state.vouchers }));
+        state.vouchers = fresh.vouchers || [];
+        try { state.summary = (await api("/summary")).summary; } catch (e) {}
+        render();
+        const n = (s.vouchers || []).length;
+        toast("BuyMe: synced " + n + " card" + (n === 1 ? "" : "s") + ".");
+        closeOverlay();
+      } else {
+        toast(s.error || "Sync failed.", true);
+        modal.innerHTML = "<h2>Sync didn't complete</h2>"
+          + '<p class="hint">' + esc(s.error || "Unknown error.") + "</p>"
+          + '<div class="modal-actions">'
+          + '<button data-x="close">Close</button>'
+          + '<button class="primary" id="bm-retry">Try again</button></div>';
+        modal.querySelector('[data-x="close"]').addEventListener("click", closeOverlay);
+        modal.querySelector("#bm-retry").addEventListener("click", () => {
+          syncId = null;
+          showEmailStep();
+        });
+      }
+    };
+
+    showEmailStep();
   });
 }
 
@@ -5587,9 +5753,21 @@ function brokerageView() {
     periodTile = statTile("—", "Gain · " + range, "");
   }
 
+  // Cost-basis unrealized P&L — the dollar amount the per-row pills add up
+  // to. Distinct from the "Gain · <range>" tile (which is series first-vs-
+  // last in the picked window) and from "Return on cost" (which shows the
+  // same number as a percent). Sums across in-scope holdings.
+  const unrealizedTile = haveGain
+    ? statTile(
+        (totalGain >= 0 ? "+" : "−") + money(Math.abs(totalGain), displayCur),
+        "Unrealized P&L",
+        totalGain >= 0 ? "good" : "bad",
+      )
+    : "";
   const tiles = '<div class="md-tiles">'
     + statTile(haveValue ? money(totalValue, displayCur) : "—", "Portfolio value", "")
     + periodTile
+    + unrealizedTile
     + statTile(gainPct == null ? "—"
         : (gainPct >= 0 ? "+" : "") + gainPct.toFixed(1) + "%",
         "Return on cost", gainPct == null ? "" : gainPct >= 0 ? "good" : "bad")
