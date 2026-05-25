@@ -22,6 +22,7 @@ declare const document: any;
 declare const window: any;
 
 const log = makeLog('vouchers:shufersal');
+const buymeLog = makeLog('vouchers:buyme');
 
 const SHUFERSAL_URL = 'https://giftcard.shufersal.co.il/giftcard/';
 
@@ -610,5 +611,312 @@ async function extractCards(page: Page): Promise<ScrapedVoucher[]> {
       if (!prev || score(c) > score(prev)) byId.set(c.externalId, c);
     }
     return Array.from(byId.values());
+  });
+}
+
+// ============================================================================
+// BuyMe — https://buyme.co.il
+// ============================================================================
+// Login flow is email-based (no SMS): click "כניסה / הרשמה" → enter email →
+// click "כניסה" → BuyMe emails a 6-digit code → enter code → click "אימות
+// מייל" → land logged in → navigate to "המתנות שלי" → parse cards.
+
+const BUYME_URL = 'https://buyme.co.il/';
+
+const BUYME_TEXT = {
+  emailLoginButton: 'כניסה',           // submit on the email step
+  otpSubmitButton: 'אימות מייל',        // submit on the OTP step ("Verify email")
+  myGiftsHeader: 'מתנות שאפשר לממש',   // "N gifts you can redeem" — anchor for parse
+  redeemBalance: 'יתרה למימוש',        // appears once per active card
+};
+
+// BuyMe routes the login modal off the home URL; we jump straight there so
+// the click-the-CTA dance is unnecessary.
+const BUYME_LOGIN_URL = 'https://buyme.co.il/?modal=login';
+
+// The wallet page is the only thing we actually need post-login. Going to
+// it directly bypasses BuyMe's first-device "phone verification" prompt
+// (which we can't complete from inside a puppeteer flow).
+const BUYME_WALLET_URL = 'https://buyme.co.il/myAccount/wallet?status=1';
+
+export interface BuyMeScrapeOptions {
+  debugDumpPath?: string;
+  headless?: boolean;
+}
+
+export async function scrapeBuyMeGiftCards(
+  email: string,
+  onOtpNeeded: OtpCallback,
+  options: BuyMeScrapeOptions = {},
+): Promise<ScrapedVoucher[]> {
+  const done = buymeLog.timer('scrape', { url: BUYME_URL });
+  const normalisedEmail = String(email || '').trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalisedEmail)) {
+    done({ result: 'invalid-email' });
+    throw new Error('A valid email address is required.');
+  }
+
+  const browser: Browser = await puppeteer.launch({
+    headless: options.headless ?? true,
+    args: process.env.HON_BROWSER_NO_SANDBOX === '1'
+      ? ['--no-sandbox', '--disable-setuid-sandbox'] : [],
+  });
+  let page: Page | undefined;
+  try {
+    page = await browser.newPage();
+    await page.setViewport({ width: 1280, height: 900 });
+
+    // Same __name polyfill the Shufersal scraper needs — tsx wraps nested
+    // arrow functions with __name(fn, "...") calls that the browser doesn't
+    // define, so any evaluate with nested arrows throws.
+    await page.evaluateOnNewDocument(() => {
+      // @ts-expect-error — defined in the page, not in Node's types
+      if (typeof globalThis.__name === 'undefined') {
+        // @ts-expect-error — runtime polyfill
+        globalThis.__name = (fn: unknown) => fn;
+      }
+    });
+
+    // Jump straight to BuyMe's login modal URL — bypasses the variable
+    // header CTA ("כניסה \ הרשמה" with a backslash, plus shortcut links).
+    buymeLog.info('navigate', { url: BUYME_LOGIN_URL });
+    await page.goto(BUYME_LOGIN_URL, { waitUntil: 'networkidle2', timeout: 60_000 });
+    buymeLog.info('navigate.done', { landedUrl: page.url() });
+
+    // The "כניסה עם מייל" method picker mounts in the modal — click it to
+    // expose the email-entry step. (BuyMe also offers "כניסה עם Google",
+    // which we don't support.)
+    try {
+      await clickByText(page, 'כניסה עם מייל', 15_000);
+      buymeLog.info('login.method.clicked');
+    } catch (err) {
+      if (options.debugDumpPath) {
+        try { writeFileSync(options.debugDumpPath, await page.content(), 'utf8'); }
+        catch {/* best effort */}
+      }
+      throw new Error(
+        'Could not find the "כניסה עם מייל" button on BuyMe — the login modal '
+        + 'may have changed. See debug HTML dump.',
+      );
+    }
+
+    // Fill the email input. BuyMe targets `input[name="email"]` with the
+    // placeholder "you.are@awesome.co.il" inside the modal.
+    await page.waitForFunction(
+      () => !!document.querySelector('input[name="email"]'),
+      { timeout: 20_000 },
+    );
+    buymeLog.info('email.input.ready');
+    await fillNamedInput(page, 'email', normalisedEmail);
+    buymeLog.info('email.filled');
+
+    // Wait for the "כניסה" submit to enable, then click it.
+    try {
+      await page.waitForFunction(
+        () => {
+          const btns: any[] = Array.from(document.querySelectorAll('button'));
+          return btns.some((b: any) => {
+            if (b.disabled) return false;
+            if (b.getAttribute && b.getAttribute('aria-disabled') === 'true') return false;
+            const t = (b.innerText || b.textContent || '').trim();
+            return t === 'כניסה' && b.offsetParent !== null;
+          });
+        },
+        { timeout: 10_000 },
+      );
+    } catch {
+      buymeLog.warn('email.submit.still.disabled');
+    }
+    await clickByText(page, BUYME_TEXT.emailLoginButton, 15_000);
+    buymeLog.info('email.submit.clicked');
+
+    // BuyMe emails a 6-digit code and swaps the modal to an OTP screen with
+    // `input[name="code"]`. Wait for that input specifically — it's a tighter
+    // signal than text scanning and avoids stalling on transient skeletons.
+    try {
+      await page.waitForFunction(
+        () => !!document.querySelector('input[name="code"]'),
+        { timeout: 30_000 },
+      );
+      buymeLog.info('otp.input.ready');
+    } catch (err) {
+      if (options.debugDumpPath) {
+        try { writeFileSync(options.debugDumpPath, await page.content(), 'utf8'); }
+        catch {/* best effort */}
+      }
+      throw new Error(
+        'BuyMe did not move to the email-code step. The email might be '
+        + 'unrecognised, or the layout changed. See debug HTML dump.',
+      );
+    }
+
+    const code = await onOtpNeeded();
+    if (!code) throw new Error('OTP entry was cancelled.');
+    buymeLog.info('otp.received', { length: code.length });
+
+    await fillNamedInput(page, 'code', code.replace(/\D/g, ''));
+    buymeLog.info('otp.filled');
+
+    try {
+      await clickByText(page, BUYME_TEXT.otpSubmitButton, 10_000);
+      buymeLog.info('otp.submit.clicked');
+    } catch (err) {
+      buymeLog.warn('otp.submit.click.failed', {
+        message: err instanceof Error ? err.message : String(err),
+      });
+      await pressEnter(page);
+    }
+
+    // BuyMe lands on either the home page OR a "phone verification" modal
+    // (?modal=phoneOtp) — for first-device logins they force a phone-OTP
+    // step. We can't complete a phone OTP from inside puppeteer (no SMS
+    // back-channel), but the wallet page is reachable while that modal is
+    // still showing, so jump straight there instead of waiting on it.
+    try {
+      await page.waitForFunction(
+        () => (document.body?.innerText || '').includes('החשבון שלי'),
+        { timeout: 30_000 },
+      );
+      buymeLog.info('logged.in', { landedUrl: page.url() });
+    } catch (err) {
+      if (options.debugDumpPath) {
+        try { writeFileSync(options.debugDumpPath, await page.content(), 'utf8'); }
+        catch {/* best effort */}
+      }
+      throw new Error(
+        'BuyMe did not accept the verification code — make sure you typed '
+        + 'the exact 6-digit code from the email and try again.',
+      );
+    }
+
+    buymeLog.info('wallet.navigate', { url: BUYME_WALLET_URL });
+    await page.goto(BUYME_WALLET_URL, { waitUntil: 'networkidle2', timeout: 30_000 });
+
+    // The wallet page renders even when the phone-OTP modal is technically
+    // still "active" — wait specifically for the gifts-table rows or the
+    // "מתנות שאפשר לממש" header. When the user has zero active gifts the
+    // header is still present ("0 מתנות"), so anchor on it instead of the
+    // table.
+    try {
+      await page.waitForFunction(
+        (needle: string) =>
+          !!document.querySelector('tr.gifts-table__row')
+          || (document.body?.innerText || '').includes(needle),
+        { timeout: 30_000 },
+        BUYME_TEXT.myGiftsHeader,
+      );
+      buymeLog.info('wallet.ready');
+    } catch {
+      buymeLog.warn('wallet.header.missing');
+    }
+
+    if (options.debugDumpPath) {
+      try {
+        writeFileSync(options.debugDumpPath, await page.content(), 'utf8');
+        buymeLog.info('debug.dump', { path: options.debugDumpPath });
+      } catch {/* best effort */}
+    }
+
+    const cards = await extractBuyMeCards(page);
+    buymeLog.info('cards.extracted', { count: cards.length });
+    done({ result: 'ok', cards: cards.length });
+    return cards;
+  } catch (err) {
+    buymeLog.error('scrape.threw', {
+      message: err instanceof Error ? err.message : String(err),
+    });
+    if (page && options.debugDumpPath) {
+      try { writeFileSync(options.debugDumpPath, await page.content(), 'utf8'); }
+      catch {/* best effort */}
+    }
+    done({ result: 'exception' });
+    throw err;
+  } finally {
+    await browser.close().catch(() => {});
+  }
+}
+
+// Fills `input[name="<name>"]` via the native setter so React's onChange
+// handler picks up the new value. fillVisibleInput picks "any visible
+// input" which is too loose for BuyMe (the page hosts hidden search +
+// marketing email inputs alongside the modal field).
+async function fillNamedInput(page: Page, name: string, value: string): Promise<void> {
+  await page.evaluate(
+    ({ name, value }: { name: string; value: string }) => {
+      const el: any = document.querySelector(`input[name="${name}"]`);
+      if (!el) throw new Error(`No input[name="${name}"] found.`);
+      const proto = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+      if (proto && proto.set) proto.set.call(el, value);
+      else el.value = value;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      el.dispatchEvent(new Event('blur', { bubbles: true }));
+    },
+    { name, value },
+  );
+}
+
+// Parses each gift-card row on BuyMe's wallet page. Cards render as
+// `<tr class="gifts-table__row">` with five cells; we drive directly off
+// that schema (verified against the real DOM via chrome-devtools-mcp).
+//   • cell[1] .gifts-table__cell--title:
+//       <span class="gifts-table__text">BUYME ALL - מגוון אדיר ...</span>   ← title
+//       <p><span class="gifts-table__text gifts-table__text--gray">
+//                                 יתרה למימוש:</span><b> ₪120</b>
+//                  <span class="gifts-table__original-text">/₪120</span></p> ← balance
+//   • cell[2] .gifts-table__cell--recipient: "לשחר סולומונס" + "מiDigital"
+//   • cell[4] .gifts-table__cell--actions:
+//       <a href="https://buyme.co.il/giftcard/{stable-id}?source=wallet"> ← stable id
+//   • brand also exposed as alt= on the cell[0] gift image.
+async function extractBuyMeCards(page: Page): Promise<ScrapedVoucher[]> {
+  return page.evaluate(() => {
+    // Best-effort balance parse: BuyMe formats it as "₪120/₪120" — first
+    // number is current, second is total. We always take the first.
+    const parseBalance = (text: string): number => {
+      const m = text.match(/₪\s*([\d,]+(?:\.\d+)?)/);
+      if (m) return parseFloat(m[1].replace(/,/g, ''));
+      const fallback = text.match(/[\d,]+(?:\.\d+)?/);
+      return fallback ? parseFloat(fallback[0].replace(/,/g, '')) : 0;
+    };
+    // The gift link is the stable id source — its URL has a slug like
+    // `/giftcard/47hmjm427crpv?source=wallet`. We use that slug as the
+    // externalId so a re-sync upserts the same row in place.
+    const extractId = (row: any): string | null => {
+      const link = row.querySelector('a[href*="/giftcard/"]');
+      if (!link) return null;
+      const m = link.getAttribute('href').match(/\/giftcard\/([A-Za-z0-9\-_]+)/);
+      return m ? m[1] : null;
+    };
+
+    const rows: any[] = Array.from(document.querySelectorAll('tr.gifts-table__row'));
+    const out: any[] = [];
+    rows.forEach((row, i) => {
+      const titleCell = row.querySelector('.gifts-table__cell--title');
+      const titleText = ((titleCell && titleCell.querySelector('.gifts-table__text')?.textContent) || '').trim();
+      const balanceText = (titleCell?.querySelector('p')?.textContent || '').trim();
+      const balance = parseBalance(balanceText);
+      const brandImg = row.querySelector('.gifts-table__image, .gifts-table__cell--image img');
+      const brandAlt = (brandImg && brandImg.getAttribute('alt')) || '';
+      const stableId = extractId(row);
+
+      // BuyMe's title is the full marketing line ("BUYME ALL - מגוון אדיר
+      // במתנה אחת"). We use it verbatim as the display name; the brand
+      // (e.g. "BUYME ALL") is the alt-text on the gift image, which is
+      // shorter but less informative on its own. Prefer the title.
+      const displayName = titleText || brandAlt || 'BuyMe gift';
+      const externalId = stableId
+        ? `buyme-${stableId}`
+        : `buyme-row-${i}-${displayName.slice(0, 30).replace(/[^A-Za-z0-9]+/g, '-')}`;
+
+      out.push({
+        externalId,
+        brand: displayName,
+        last4: '',
+        balance,
+        currency: 'ILS',
+        expiresOn: null as string | null,
+      });
+    });
+    return out;
   });
 }
