@@ -15,11 +15,13 @@
 //   7. Parse each visible card tile (brand, balance, last-4, expiry)
 
 import puppeteer, { type Browser, type Page } from 'puppeteer';
-import { writeFileSync } from 'node:fs';
+import { mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { makeLog } from './log.js';
 
 declare const document: any;
 declare const window: any;
+declare const location: any;
 
 const log = makeLog('vouchers:shufersal');
 const buymeLog = makeLog('vouchers:buyme');
@@ -642,6 +644,15 @@ const BUYME_WALLET_URL = 'https://buyme.co.il/myAccount/wallet?status=1';
 export interface BuyMeScrapeOptions {
   debugDumpPath?: string;
   headless?: boolean;
+  /**
+   * Path to a directory puppeteer should use as the Chrome user-data-dir.
+   * When set, cookies and localStorage survive across syncs, so the next
+   * scrape can skip the email-OTP flow entirely (and BuyMe stops asking
+   * for phone verification on every "new device"). The caller is
+   * responsible for picking a stable directory — typically
+   * `<dataDir>/browser-profiles/buyme`.
+   */
+  userDataDir?: string;
 }
 
 export async function scrapeBuyMeGiftCards(
@@ -656,8 +667,16 @@ export async function scrapeBuyMeGiftCards(
     throw new Error('A valid email address is required.');
   }
 
+  // When the caller supplies a `userDataDir`, sweep stale lock files Chrome
+  // leaves behind on a crash so the launch isn't blocked, then make sure
+  // the dir exists.
+  if (options.userDataDir) {
+    try { mkdirSync(options.userDataDir, { recursive: true }); } catch {/* best effort */}
+    sweepStaleProfileLocks(options.userDataDir);
+  }
   const browser: Browser = await puppeteer.launch({
     headless: options.headless ?? true,
+    userDataDir: options.userDataDir,
     args: process.env.HON_BROWSER_NO_SANDBOX === '1'
       ? ['--no-sandbox', '--disable-setuid-sandbox'] : [],
   });
@@ -677,6 +696,37 @@ export async function scrapeBuyMeGiftCards(
       }
     });
 
+    // Fast path: when the profile already has a valid BuyMe session,
+    // navigating to the wallet renders the gifts table directly. We try
+    // that first; if we land on a logged-out state (no table within a few
+    // seconds), fall through to the full email + OTP flow.
+    if (options.userDataDir) {
+      buymeLog.info('fastpath.try', { url: BUYME_WALLET_URL });
+      try {
+        await page.goto(BUYME_WALLET_URL, { waitUntil: 'networkidle2', timeout: 30_000 });
+      } catch (err) {
+        buymeLog.warn('fastpath.navigate.failed', {
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+      const loggedIn = await page.evaluate(() => {
+        const url = location.href;
+        // The wallet URL stays at /myAccount/wallet when authenticated; a
+        // logged-out request gets bounced to / or shows the login modal.
+        if (!url.includes('/myAccount/wallet')) return false;
+        if (document.querySelector('tr.gifts-table__row')) return true;
+        // No gifts is OK too — the "מתנות שאפשר לממש" header is still
+        // there as long as the user is signed in.
+        const t = document.body?.innerText || '';
+        return t.includes('מתנות שאפשר לממש');
+      }).catch(() => false);
+      if (loggedIn) {
+        buymeLog.info('fastpath.success');
+        return await harvestCardsAndFinish(page, options, done);
+      }
+      buymeLog.info('fastpath.miss', { landedUrl: page.url() });
+    }
+
     // Jump straight to BuyMe's login modal URL — bypasses the variable
     // header CTA ("כניסה \ הרשמה" with a backslash, plus shortcut links).
     buymeLog.info('navigate', { url: BUYME_LOGIN_URL });
@@ -684,10 +734,18 @@ export async function scrapeBuyMeGiftCards(
     buymeLog.info('navigate.done', { landedUrl: page.url() });
 
     // The "כניסה עם מייל" method picker mounts in the modal — click it to
-    // expose the email-entry step. (BuyMe also offers "כניסה עם Google",
-    // which we don't support.)
+    // expose the email-entry step. The same text also appears in a mobile
+    // hamburger accordion outside the modal, so we MUST scope the lookup
+    // to the modal's container (`.login-popup__content`) — clicking the
+    // accordion variant opens the menu but doesn't transition the modal.
     try {
-      await clickByText(page, 'כניסה עם מייל', 15_000);
+      await clickInsideContainer(
+        page,
+        '.login-popup__content',
+        'button.login-method-button',
+        'כניסה עם מייל',
+        15_000,
+      );
       buymeLog.info('login.method.clicked');
     } catch (err) {
       if (options.debugDumpPath) {
@@ -695,26 +753,39 @@ export async function scrapeBuyMeGiftCards(
         catch {/* best effort */}
       }
       throw new Error(
-        'Could not find the "כניסה עם מייל" button on BuyMe — the login modal '
-        + 'may have changed. See debug HTML dump.',
+        'Could not find the "כניסה עם מייל" button inside the BuyMe login modal '
+        + '— the layout may have changed. See debug HTML dump.',
       );
     }
 
-    // Fill the email input. BuyMe targets `input[name="email"]` with the
-    // placeholder "you.are@awesome.co.il" inside the modal.
+    // Fill the email input. BuyMe's footer newsletter also has
+    // `input[name="email"]`, so scope to the modal container. The modal's
+    // email field is the first input under `.login-popup__content`
+    // regardless of placeholder language (the placeholder varies between
+    // locales / A-B variants).
+    const MODAL_EMAIL_SELECTOR = '.login-popup__content input[name="email"]';
     await page.waitForFunction(
-      () => !!document.querySelector('input[name="email"]'),
+      (sel: string) => {
+        const el: any = document.querySelector(sel);
+        return !!el && el.offsetParent !== null;
+      },
       { timeout: 20_000 },
+      MODAL_EMAIL_SELECTOR,
     );
     buymeLog.info('email.input.ready');
-    await fillNamedInput(page, 'email', normalisedEmail);
+    await fillBySelector(page, MODAL_EMAIL_SELECTOR, normalisedEmail);
     buymeLog.info('email.filled');
 
-    // Wait for the "כניסה" submit to enable, then click it.
+    // Wait for the modal's "כניסה" submit to enable, then click it via the
+    // scoped helper. Critical to scope: the header accordion has a "כניסה
+    // \ הרשמה" link whose innerText also contains "כניסה", and a global
+    // text search would click that instead of the modal's button.
     try {
       await page.waitForFunction(
         () => {
-          const btns: any[] = Array.from(document.querySelectorAll('button'));
+          const container = document.querySelector('.login-popup__content');
+          if (!container) return false;
+          const btns: any[] = Array.from(container.querySelectorAll('button'));
           return btns.some((b: any) => {
             if (b.disabled) return false;
             if (b.getAttribute && b.getAttribute('aria-disabled') === 'true') return false;
@@ -727,15 +798,26 @@ export async function scrapeBuyMeGiftCards(
     } catch {
       buymeLog.warn('email.submit.still.disabled');
     }
-    await clickByText(page, BUYME_TEXT.emailLoginButton, 15_000);
+    await clickInsideContainer(
+      page,
+      '.login-popup__content',
+      'button',
+      'כניסה',
+      15_000,
+    );
     buymeLog.info('email.submit.clicked');
 
     // BuyMe emails a 6-digit code and swaps the modal to an OTP screen with
-    // `input[name="code"]`. Wait for that input specifically — it's a tighter
-    // signal than text scanning and avoids stalling on transient skeletons.
+    // `input[name="code"]` (placeholder "------"). Wait for that input
+    // specifically AND require it to be visible — input[name="code"] is
+    // not present until the email step succeeds, so this signal also
+    // confirms the email actually went through.
     try {
       await page.waitForFunction(
-        () => !!document.querySelector('input[name="code"]'),
+        () => {
+          const el: any = document.querySelector('input[name="code"]');
+          return !!el && el.offsetParent !== null;
+        },
         { timeout: 30_000 },
       );
       buymeLog.info('otp.input.ready');
@@ -754,11 +836,17 @@ export async function scrapeBuyMeGiftCards(
     if (!code) throw new Error('OTP entry was cancelled.');
     buymeLog.info('otp.received', { length: code.length });
 
-    await fillNamedInput(page, 'code', code.replace(/\D/g, ''));
+    await fillBySelector(page, 'input[name="code"]', code.replace(/\D/g, ''));
     buymeLog.info('otp.filled');
 
     try {
-      await clickByText(page, BUYME_TEXT.otpSubmitButton, 10_000);
+      await clickInsideContainer(
+        page,
+        '.login-popup__content',
+        'button',
+        BUYME_TEXT.otpSubmitButton,
+        10_000,
+      );
       buymeLog.info('otp.submit.clicked');
     } catch (err) {
       buymeLog.warn('otp.submit.click.failed', {
@@ -810,17 +898,7 @@ export async function scrapeBuyMeGiftCards(
       buymeLog.warn('wallet.header.missing');
     }
 
-    if (options.debugDumpPath) {
-      try {
-        writeFileSync(options.debugDumpPath, await page.content(), 'utf8');
-        buymeLog.info('debug.dump', { path: options.debugDumpPath });
-      } catch {/* best effort */}
-    }
-
-    const cards = await extractBuyMeCards(page);
-    buymeLog.info('cards.extracted', { count: cards.length });
-    done({ result: 'ok', cards: cards.length });
-    return cards;
+    return await harvestCardsAndFinish(page, options, done);
   } catch (err) {
     buymeLog.error('scrape.threw', {
       message: err instanceof Error ? err.message : String(err),
@@ -836,15 +914,130 @@ export async function scrapeBuyMeGiftCards(
   }
 }
 
+// Shared tail used by both the fast-path (we're already logged in via the
+// persistent profile) and the full login flow. Dumps the wallet HTML for
+// offline parser tuning, runs the per-row parser, and reports the timer.
+async function harvestCardsAndFinish(
+  page: Page,
+  options: BuyMeScrapeOptions,
+  done: (fields?: Record<string, unknown>) => void,
+): Promise<ScrapedVoucher[]> {
+  if (options.debugDumpPath) {
+    try {
+      writeFileSync(options.debugDumpPath, await page.content(), 'utf8');
+      buymeLog.info('debug.dump', { path: options.debugDumpPath });
+    } catch {/* best effort */}
+  }
+  const cards = await extractBuyMeCards(page);
+  buymeLog.info('cards.extracted', { count: cards.length });
+  done({ result: 'ok', cards: cards.length });
+  return cards;
+}
+
+// Chrome writes lock files in the profile dir on launch and removes them on
+// clean shutdown. A crashed/killed previous run leaves them behind and the
+// next launch errors with "browser is already running for <dir>". Sweep
+// unconditionally — if Chrome IS still running it'll recreate them.
+function sweepStaleProfileLocks(profileDir: string): void {
+  const targets = [
+    'DevToolsActivePort',
+    'SingletonLock',
+    'SingletonSocket',
+    'SingletonCookie',
+    'Default/LOCK',
+  ];
+  for (const rel of targets) {
+    try { unlinkSync(join(profileDir, rel)); }
+    catch (err: any) { if (err?.code !== 'ENOENT') {/* best effort */} }
+  }
+}
+
 // Fills `input[name="<name>"]` via the native setter so React's onChange
 // handler picks up the new value. fillVisibleInput picks "any visible
 // input" which is too loose for BuyMe (the page hosts hidden search +
 // marketing email inputs alongside the modal field).
 async function fillNamedInput(page: Page, name: string, value: string): Promise<void> {
+  await fillBySelector(page, `input[name="${name}"]`, value);
+}
+
+// Click the first visible, enabled element matching `childSelector` whose
+// trimmed innerText matches `text`, scoped to descendants of an element
+// matching `containerSelector`. Solves the BuyMe duplicate-button problem
+// where the same label exists inside a mobile accordion and inside the
+// login modal — and a global clickByText was clicking the wrong one.
+async function clickInsideContainer(
+  page: Page,
+  containerSelector: string,
+  childSelector: string,
+  text: string,
+  timeoutMs: number,
+): Promise<void> {
+  await page.waitForFunction(
+    ({ container, child, needle }: { container: string; child: string; needle: string }) => {
+      const containers: any[] = Array.from(document.querySelectorAll(container));
+      for (const c of containers) {
+        if (!c.offsetParent) continue;
+        const cands: any[] = Array.from(c.querySelectorAll(child));
+        if (cands.some((el: any) =>
+          el.offsetParent !== null
+          && !el.disabled
+          && el.getAttribute('aria-disabled') !== 'true'
+          && (el.innerText || el.textContent || '').trim().includes(needle))) {
+          return true;
+        }
+      }
+      return false;
+    },
+    { timeout: timeoutMs },
+    { container: containerSelector, child: childSelector, needle: text },
+  );
+  const tag = '__hon_scoped_click_' + Math.random().toString(36).slice(2, 10);
+  const tagged = await page.evaluate(
+    ({ container, child, needle, tag }: { container: string; child: string; needle: string; tag: string }) => {
+      const containers: any[] = Array.from(document.querySelectorAll(container));
+      for (const c of containers) {
+        if (!c.offsetParent) continue;
+        const cands: any[] = Array.from(c.querySelectorAll(child));
+        for (const el of cands) {
+          if (!el.offsetParent) continue;
+          if (el.disabled) continue;
+          if (el.getAttribute('aria-disabled') === 'true') continue;
+          const txt = (el.innerText || el.textContent || '').trim();
+          if (!txt.includes(needle)) continue;
+          try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch {/* ignore */}
+          el.setAttribute(tag, '1');
+          return true;
+        }
+      }
+      return false;
+    },
+    { container: containerSelector, child: childSelector, needle: text, tag },
+  );
+  if (!tagged) throw new Error(`No enabled "${text}" inside ${containerSelector}.`);
+  try {
+    const handle = await page.$(`[${tag}]`);
+    if (handle) {
+      await handle.click({ delay: 30 });
+      await handle.evaluate((el: any, t: string) => el.removeAttribute(t), tag);
+      await handle.dispose();
+      return;
+    }
+  } catch {/* fall through */}
+  await page.evaluate((tag: string) => {
+    const el: any = document.querySelector(`[${tag}]`);
+    if (el) { el.click(); el.removeAttribute(tag); }
+  }, tag);
+}
+
+// Fills the first input matching `selector`, using the React-aware native
+// setter so the form's onChange picks the value up. Prefer this over
+// fillNamedInput when an input attribute is ambiguous between the modal
+// and other parts of the page (e.g. BuyMe's footer newsletter form).
+async function fillBySelector(page: Page, selector: string, value: string): Promise<void> {
   await page.evaluate(
-    ({ name, value }: { name: string; value: string }) => {
-      const el: any = document.querySelector(`input[name="${name}"]`);
-      if (!el) throw new Error(`No input[name="${name}"] found.`);
+    ({ selector, value }: { selector: string; value: string }) => {
+      const el: any = document.querySelector(selector);
+      if (!el) throw new Error(`No element matches ${selector}`);
       const proto = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
       if (proto && proto.set) proto.set.call(el, value);
       else el.value = value;
@@ -852,7 +1045,7 @@ async function fillNamedInput(page: Page, name: string, value: string): Promise<
       el.dispatchEvent(new Event('change', { bubbles: true }));
       el.dispatchEvent(new Event('blur', { bubbles: true }));
     },
-    { name, value },
+    { selector, value },
   );
 }
 

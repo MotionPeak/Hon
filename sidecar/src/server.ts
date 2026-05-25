@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { openDatabase, type DbHandle } from './db.js';
 import { Repo } from './repo.js';
 import { ScrapeRunner } from './runner.js';
-import { scrapeShufersalGiftCards } from './voucherScrapers.js';
+import { scrapeShufersalGiftCards, scrapeBuyMeGiftCards } from './voucherScrapers.js';
 import { companyCatalog, isSupportedCompany } from './scrapers.js';
 import { createPortalLink, listBrokerages, describeSnapError } from './snaptrade.js';
 import { migrateLegacySnapTradeUsers } from './snaptradeUser.js';
@@ -1242,6 +1242,149 @@ app.post('/vouchers/sync/shufersal/cancel', async (req, reply) => {
 setInterval(() => {
   for (const [id, state] of shufersalSyncs) {
     if (state.finished) shufersalSyncs.delete(id);
+  }
+}, 60 * 60 * 1000).unref?.();
+
+// --- Voucher sync: BuyMe ---------------------------------------------------
+// Same 2-step flow as Shufersal but email-based OTP instead of SMS, so the
+// "awaiting code" wait can be a little longer (users may need to flip to
+// their email client). The state shape and endpoints mirror Shufersal so
+// the front-end's polling/modal pattern stays the same.
+
+interface BuyMeSync {
+  status: 'signing-in' | 'awaiting-otp' | 'syncing' | 'success' | 'error';
+  message?: string;
+  error?: string;
+  vouchers?: { id: string; name: string; balance: number; currency: string }[];
+  resolveOtp?: (code: string) => void;
+  rejectOtp?: (err: Error) => void;
+  finished?: boolean;
+}
+
+const buymeSyncs = new Map<string, BuyMeSync>();
+const BUYME_PROVIDER_LABEL = 'BuyMe';
+const BUYME_EMAIL_VAULT_KEY = 'buyme:email';
+
+app.get('/vouchers/sync/buyme/saved-email', async (_req, reply) => {
+  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+  if (!vault || !vault.unlocked) return { email: null };
+  try {
+    const email = vault.loadSecret(BUYME_EMAIL_VAULT_KEY) ?? null;
+    return { email };
+  } catch {
+    return { email: null };
+  }
+});
+
+app.post('/vouchers/sync/buyme/start', async (req, reply) => {
+  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+  const body = (req.body ?? {}) as { email?: string; remember?: boolean };
+  const email = String(body.email || '').trim();
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return reply.code(400).send({ error: 'a valid email address is required' });
+  }
+
+  const syncId = shortId();
+  const state: BuyMeSync = { status: 'signing-in', message: 'Opening BuyMe…' };
+  buymeSyncs.set(syncId, state);
+
+  if (body.remember && vault && vault.unlocked) {
+    try { vault.saveSecret(BUYME_EMAIL_VAULT_KEY, email); }
+    catch { /* fine, just won't be remembered */ }
+  }
+
+  const onOtpNeeded = () =>
+    new Promise<string>((resolve, reject) => {
+      state.status = 'awaiting-otp';
+      state.message = 'Check your inbox — paste the 6-digit code BuyMe just emailed you.';
+      state.resolveOtp = (code) => { state.status = 'syncing'; state.message = 'Verifying with BuyMe…'; resolve(code); };
+      state.rejectOtp = (err) => reject(err);
+    });
+
+  const debugDir = join(dataDir, 'debug');
+  try { mkdirSync(debugDir, { recursive: true }); } catch { /* best effort */ }
+  // Persistent BuyMe profile so cookies survive between syncs — first run
+  // does the full email-OTP dance, every later one skips straight to the
+  // wallet (also dodges BuyMe's first-device phone-verification wall).
+  const buymeProfileDir = join(dataDir, 'browser-profiles', 'buyme');
+  void (async () => {
+    try {
+      const cards = await scrapeBuyMeGiftCards(email, onOtpNeeded, {
+        debugDumpPath: join(debugDir, 'buyme-dashboard.html'),
+        userDataDir: buymeProfileDir,
+      });
+      const created: { id: string; name: string; balance: number; currency: string }[] = [];
+      for (const card of cards) {
+        // BuyMe's scraper packs the gift's display title into `brand`
+        // (since cards rarely have a "last 4 digits" notion the way
+        // Shufersal does). Use that directly as the Hon-side name.
+        const name = card.brand || 'BuyMe gift';
+        const v = repo!.upsertScrapedVoucher({
+          name,
+          provider: BUYME_PROVIDER_LABEL,
+          balance: card.balance,
+          currency: card.currency,
+          expiresOn: card.expiresOn,
+          externalId: card.externalId,
+        });
+        created.push({ id: v.id, name: v.name, balance: v.balance, currency: v.currency });
+      }
+      state.status = 'success';
+      state.message = `Synced ${cards.length} card${cards.length === 1 ? '' : 's'}.`;
+      state.vouchers = created;
+      state.finished = true;
+    } catch (err) {
+      state.status = 'error';
+      state.error = err instanceof Error ? err.message : String(err);
+      state.message = state.error;
+      state.finished = true;
+    }
+  })();
+
+  return { syncId };
+});
+
+app.get('/vouchers/sync/buyme/status/:id', async (req, reply) => {
+  const { id } = req.params as { id: string };
+  const state = buymeSyncs.get(id);
+  if (!state) return reply.code(404).send({ error: 'sync not found' });
+  return {
+    status: state.status,
+    message: state.message ?? null,
+    error: state.error ?? null,
+    vouchers: state.vouchers ?? null,
+    finished: !!state.finished,
+  };
+});
+
+app.post('/vouchers/sync/buyme/otp', async (req, reply) => {
+  const body = (req.body ?? {}) as { syncId?: string; code?: string };
+  const syncId = String(body.syncId || '');
+  const code = String(body.code || '').trim();
+  if (!syncId || !code) return reply.code(400).send({ error: 'syncId and code are required' });
+  const state = buymeSyncs.get(syncId);
+  if (!state || !state.resolveOtp) return reply.code(404).send({ error: 'no sync waiting for OTP' });
+  state.resolveOtp(code);
+  state.resolveOtp = undefined;
+  state.rejectOtp = undefined;
+  return { ok: true };
+});
+
+app.post('/vouchers/sync/buyme/cancel', async (req, reply) => {
+  const body = (req.body ?? {}) as { syncId?: string };
+  const syncId = String(body.syncId || '');
+  const state = buymeSyncs.get(syncId);
+  if (!state) return reply.code(404).send({ error: 'sync not found' });
+  if (state.rejectOtp) state.rejectOtp(new Error('Sync cancelled.'));
+  state.status = 'error';
+  state.error = 'Cancelled.';
+  state.finished = true;
+  return { ok: true };
+});
+
+setInterval(() => {
+  for (const [id, state] of buymeSyncs) {
+    if (state.finished) buymeSyncs.delete(id);
   }
 }, 60 * 60 * 1000).unref?.();
 

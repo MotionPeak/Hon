@@ -1816,6 +1816,12 @@
   .vc-name { white-space: normal; display: -webkit-box;
     -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-clamp: 2;
     overflow: hidden; line-height: 1.25; }
+  /* Excluded vouchers: only the balance figure dims (since that's what's
+   * actually excluded from the net-worth total). Title + provider +
+   * actions stay full-opacity so the user can still read and toggle. */
+  .pgy-card.vc-excluded .pgy-saved { opacity: 0.45; text-decoration: line-through;
+    text-decoration-thickness: 1.5px; }
+  .pgy-card.vc-excluded .pgy-target { color: var(--faint); }
   .vc-sub { flex-wrap: wrap; }
   .vc-desc { color: var(--muted); }
   .vc-sep { color: var(--faint); }
@@ -4733,7 +4739,11 @@ function voucherCard(v) {
       + '<span class="vc-desc">' + esc(split.description) + "</span>"
     : esc(v.provider);
 
-  return '<div class="pgy-card' + (v.excluded ? " onhold" : "") + '">'
+  // `.vc-excluded` is voucher-specific: only the balance figure dims
+  // (since that's literally what gets excluded from net worth). The card
+  // chrome, title, provider, and action buttons stay full-opacity so the
+  // user can still read and interact with them.
+  return '<div class="pgy-card' + (v.excluded ? " vc-excluded" : "") + '">'
     + '<div class="pgy-card-top"><div class="pgy-emoji">' + meta.emoji
     + '</div><div style="flex:1;min-width:0"><div class="pgy-name vc-name">'
     + esc(split.title) + excludedTag + "</div>"
@@ -4741,15 +4751,20 @@ function voucherCard(v) {
     + '<div class="pgy-body">'
     + '<div class="pgy-figs"><div class="pgy-saved">'
     + money(v.balance, cur) + "</div>"
-    + '<div class="pgy-target">current balance</div>'
+    + '<div class="pgy-target">current balance'
+    + (v.excluded ? " · not counted" : "") + "</div>"
     + notesLine + "</div></div>"
     + expiryBadge
     + '<div class="pgy-actions">'
     + '<button class="mini" data-action="edit-voucher" data-id="' + esc(v.id)
     + '">Edit</button>'
     + '<button class="mini" data-action="toggle-voucher-excluded" data-id="'
-    + esc(v.id) + '">'
-    + (v.excluded ? "Include in net worth" : "Exclude from net worth")
+    + esc(v.id)
+    + '" title="' + (v.excluded
+        ? "Include this voucher's balance in your net worth again"
+        : "Don't count this voucher toward your net worth")
+    + '">'
+    + (v.excluded ? "Include" : "Exclude")
     + "</button>"
     + '<span class="spacer"></span>'
     + '<button class="mini danger" data-action="remove-voucher" data-id="'
