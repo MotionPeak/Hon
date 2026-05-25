@@ -482,22 +482,36 @@ export async function runPensionScrape(
       onProgress?.('Waiting for you to finish signing in…');
       const deadline = Date.now() + INTERACTIVE_LOGIN_TIMEOUT_MS;
       let accounts: NormalizedAccount[] = [];
-      // Login-URL hints by fund. Meitav lives at /v2/login/, Menora at
-      // /Login/. Anything else on the host counts as "past login" and we
-      // can read balances. A wrong-positive (user navigates to a help page)
-      // is harmless — the read returns 0 accounts and the loop keeps polling.
+      // "Still on the login form" detection. The poll loop must NEVER call
+      // readBalances while this is true — readMeitavBalances navigates to
+      // /lobbymanager and readMenoraBalances has similar moves, which would
+      // yank the user off the form they're typing into ("the page keeps
+      // refreshing while I try to sign in"). Match generously:
+      //   - any /login or /signin segment (Meitav: /v2/login/loginAmit,
+      //     Menora: /Login)
+      //   - any /auth / /otp / /verify / /sso step
+      //   - hash-routed equivalents (#/login, #!/login)
+      //   - the literal `loginamit` route name
+      // A false positive (user navigates to /login-help) just keeps the
+      // poll quiet for a few extra cycles — harmless. A false negative is
+      // what we're guarding against, so the bias is intentional.
       const onLoginPage = (url: string): boolean =>
-        /\/login\b|\/v2\/login\/|loginamit/i.test(url);
+        /[\/#](v\d+\/)?(login|signin|sign-in|auth|otp|verify|sso)\b|loginamit/i.test(url);
+      let lastReportedUrl = '';
       while (Date.now() < deadline) {
         await delay(5000);
         if (page.isClosed()) break;
-        // Don't even attempt readBalances while the user is still on the
-        // login form — readMeitavBalances navigates the page to /lobbymanager
-        // and readMenoraBalances has similar moves. Calling them mid-sign-in
-        // yanks the user off the form they're typing into, which manifests
-        // as "the page keeps refreshing while I try to sign in." Wait for
-        // the post-login redirect to happen first.
-        if (onLoginPage(page.url())) continue;
+        const currentUrl = page.url();
+        // Periodic diagnostic — every URL transition gets logged exactly
+        // once so the engine log shows when (or whether) the user moved
+        // past the login form. Helps debug "I signed in but Hon never
+        // noticed" complaints without the user pasting screenshots.
+        if (currentUrl !== lastReportedUrl) {
+          plog(`${companyId}: url changed → ${currentUrl} ` +
+            `(onLoginPage=${onLoginPage(currentUrl)})`);
+          lastReportedUrl = currentUrl;
+        }
+        if (onLoginPage(currentUrl)) continue;
         try {
           accounts = await readBalances(companyId, page, screenshotPath, extras);
         } catch {
