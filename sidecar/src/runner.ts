@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import type { Repo } from './repo.js';
 import type { Vault } from './vault.js';
 import { isSnapTrade, runSnapTradeSync, SNAPTRADE_COMPANY_ID } from './snaptrade.js';
-import { fetchYahooHistory } from './marketData.js';
+import { fetchHistoryForSymbol } from './marketData.js';
 import { isPensionCompany, runPensionScrape } from './pension.js';
 import { runInteractiveScrape, runScrape, type ScrapeOutcome } from './scrapers.js';
 import { openSession } from './session.js';
@@ -368,16 +368,18 @@ export class ScrapeRunner {
    * Hon's own daily snapshots to accumulate.
    */
   private async backfillBrokerageHistory(status: RunStatus): Promise<void> {
-    const brkAccts = this.repo.listBrokerageAccounts(SNAPTRADE_COMPANY_ID);
+    // Backfill every holding — fetchHistoryForSymbol dispatches numeric
+    // symbols (Israeli mutual funds / ETFs, e.g. Meitav's MisparNiar) to TASE
+    // Maya and everything else to Yahoo Finance, so a holding from any
+    // connection that ended up with a `holdings[]` array gets its history
+    // pulled, not just SnapTrade brokerage positions.
     const holdings = this.repo.listHoldings();
-    const inScope = new Set(brkAccts.map((a) => a.id));
     let touched = 0;
     for (const h of holdings) {
-      if (!inScope.has(h.accountId)) continue;
       const bounds = this.repo.holdingSnapshotBounds(h.accountId, h.symbol);
       if (bounds.count >= 120) continue; // already well-populated
       status.message = `Backfilling price history for ${h.symbol}…`;
-      const history = await fetchYahooHistory(h.symbol, 365 * 10);
+      const history = await fetchHistoryForSymbol(h.symbol, 365 * 10);
       if (!history.length) continue;
       const inserted = this.repo.backfillHoldingHistory(
         h.accountId,
@@ -388,9 +390,9 @@ export class ScrapeRunner {
       if (inserted > 0) touched += 1;
     }
     if (touched > 0) {
-      runnerLog.info('yahoo.backfill.done', { positions: touched });
+      runnerLog.info('history.backfill.done', { positions: touched });
     } else {
-      runnerLog.debug('yahoo.backfill.skipped', { reason: 'no-positions-needed-backfill' });
+      runnerLog.debug('history.backfill.skipped', { reason: 'no-positions-needed-backfill' });
     }
   }
 
