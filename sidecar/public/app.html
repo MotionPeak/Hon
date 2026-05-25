@@ -1033,28 +1033,6 @@
     text-transform: uppercase; letter-spacing: .8px; }
   .hp-list { display: flex; flex-direction: column; gap: 2px;
     margin: 0 -6px; }
-  /* Collapsible provider summary row inside the holdings panel. Default
-     state is collapsed (shows portfolio-level totals); click to expand the
-     individual positions underneath. Quiet styling — it lives inside a card
-     and shouldn't fight the per-holding rows. */
-  .hp-prov-row { display: flex; align-items: center; gap: 10px;
-    width: 100%; background: transparent; border: 0;
-    padding: 12px 8px; margin: 6px 0 0;
-    border-radius: 10px; cursor: pointer; color: inherit;
-    transition: background .18s ease; }
-  .hp-prov-row:hover { background: var(--card-hi); }
-  .hp-prov-row.open { background: var(--card-hi); }
-  .hp-prov-chev { width: 12px; color: var(--faint);
-    font-size: 11px; transition: transform .15s ease; }
-  .hp-prov-row.open .hp-prov-chev { transform: rotate(0); }
-  .hp-prov-name { font: 600 14px/1 system-ui; flex: 1;
-    text-align: left; }
-  .hp-prov-cnt { font: 500 11.5px/1 system-ui; color: var(--faint); }
-  .hp-prov-val { font: 700 14px/1 system-ui; margin-left: auto;
-    text-align: right; display: flex; flex-direction: column;
-    gap: 3px; align-items: flex-end; }
-  .hp-prov-pct { font: 500 11px/1 system-ui; color: var(--faint); }
-  .hp-prov-body { padding: 2px 0 8px; }
   .hp-item { border-radius: 12px;
     animation: fade-up .35s ease both;
     transition: background .18s ease; }
@@ -2006,11 +1984,6 @@ const state = {
   brkBase: "native",     // "native" | "ILS" — currency the headlines render in
   brkAccount: "all",     // "all" | accountId — filter for chart + holdings
   brkOpenHolding: null,  // symbol of the holding whose detail card is open
-  // Per-provider collapse map for the holdings panel. Keys are provider keys
-  // ('conn:<id>' or 'acct:<id>'); value true ⇒ collapsed (positions hidden).
-  // Default-collapsed when ≥ 2 providers; the user can expand a section to
-  // see its individual holdings.
-  brkProvCollapsed: {},
   expandedHoldings: {},  // { accountId: true } account cards showing holdings
   subAliases: {},        // { lapsedName: activeName } — AI-detected renames
   subAliasSig: null,     // signature of the name set subAliases was built for
@@ -5645,40 +5618,16 @@ function brokerageView() {
 // --- Holdings panel --------------------------------------------------------
 
 // Builds the consolidated holdings allocation card. Each row is clickable;
-// the expanded state shows a stats grid and a per-holding sparkline. When
-// holdings span more than one provider (e.g. SnapTrade + Meitav portfolio),
-// each provider gets its own subheader so the user can see at a glance what
-// sits where without the lists merging.
+// the expanded state shows a stats grid and a per-holding sparkline. One
+// flat list, sorted by value — the per-account filter pills at the top of
+// the panel already let the user narrow to a single provider.
 function holdingsPanel(holdings, holdSnaps, conv, useIls, displayCur, totalValue, acctCount, range) {
-  // Resolve which provider each holding sits in via its account's connection.
-  // Providers without a matching connection (very unlikely) fall through to
-  // a synthetic "Other" group so they don't get dropped.
-  const acctById = {};
-  state.accounts.forEach((a) => { acctById[a.id] = a; });
-  const connById = {};
-  (state.connections || []).forEach((c) => { connById[c.id] = c; });
-  const companyById = {};
-  (state.companies || []).forEach((c) => { companyById[c.id] = c; });
-  const providerOf = (accountId) => {
-    const a = acctById[accountId];
-    if (!a) return { key: 'other', label: 'Other' };
-    const conn = connById[a.connectionId];
-    if (!conn) return { key: 'acct:' + a.id, label: a.label || a.accountNumber };
-    const company = companyById[conn.companyId];
-    return {
-      key: 'conn:' + conn.id,
-      label: conn.displayName || (company && company.name) || conn.companyId,
-    };
-  };
-
-  // Consolidate by (provider, symbol) so the same ticker held at two brokers
-  // doesn't merge into a single row.
-  const groups = {}; // key = provider.key  →  { label, bySym }
+  // Consolidate by symbol across accounts in scope, carrying every
+  // contributing accountId so the per-holding sparkline can pull its history.
+  const bySym = {};
   holdings.forEach((h) => {
-    const prov = providerOf(h.accountId);
-    const g = groups[prov.key] || (groups[prov.key] = { label: prov.label, bySym: {} });
     const s = holdingStats(h);
-    const e = g.bySym[h.symbol] || (g.bySym[h.symbol] = {
+    const e = bySym[h.symbol] || (bySym[h.symbol] = {
       symbol: h.symbol, description: h.description, units: 0,
       value: 0, cost: 0, gain: 0, price: h.price, currency: h.currency,
       haveGain: false, accountIds: [],
@@ -5689,81 +5638,35 @@ function holdingsPanel(holdings, holdSnaps, conv, useIls, displayCur, totalValue
     if (s.gain != null) { e.gain += s.gain; e.haveGain = true; }
     e.accountIds.push(h.accountId);
   });
-
-  // Flat row list (for the allocation-% denominator + the count in the head).
-  const allRows = Object.values(groups).flatMap((g) =>
-    Object.values(g.bySym),
-  );
-  const allocTotal = allRows.reduce((sum, r) => sum + r.value, 0);
+  const rows = Object.keys(bySym).map((k) => bySym[k])
+    .sort((a, b) => b.value - a.value);
+  const allocTotal = rows.reduce((sum, r) => sum + r.value, 0);
 
   const total = totalValue != null ? totalValue
-    : allRows.reduce((sum, r) => {
+    : rows.reduce((sum, r) => {
         const v = conv(r.value, r.currency);
         return sum + (v == null ? 0 : v);
       }, 0);
 
   // Card header: title + portfolio total + count.
   let head = '<div class="hp-head"><div><div class="label">Holdings</div>'
-    + '<div class="hp-sub">' + allRows.length + " position"
-    + (allRows.length === 1 ? "" : "s") + " across "
+    + '<div class="hp-sub">' + rows.length + " position"
+    + (rows.length === 1 ? "" : "s") + " across "
     + acctCount + " account" + (acctCount === 1 ? "" : "s") + "</div></div>"
     + '<div class="hp-totals"><div class="hp-total-val">'
     + money(total, displayCur) + "</div>"
     + '<div class="hp-total-cap">Portfolio total</div></div></div>';
 
   let body;
-  if (!allRows.length) {
+  if (!rows.length) {
     body = '<div class="empty" style="padding:14px 2px">No positions yet — '
       + "your broker may still be syncing holdings (give it a few minutes "
       + "after linking). Hit <b>↻ Sync</b> on the connection and try again."
       + "</div>";
   } else {
-    // Provider order: most valuable first.
-    const provKeys = Object.keys(groups).sort((a, b) => {
-      const va = Object.values(groups[a].bySym).reduce((s, r) => s + (r.value || 0), 0);
-      const vb = Object.values(groups[b].bySym).reduce((s, r) => s + (r.value || 0), 0);
-      return vb - va;
-    });
-    // When ≥ 2 providers, default to collapsed so the panel shows portfolio-
-    // level summaries first; the user expands to drill in. With one provider
-    // there's nothing to group by, so render flat.
-    const multi = provKeys.length > 1;
-    const sections = provKeys.map((k) => {
-      const g = groups[k];
-      const rows = Object.values(g.bySym).sort((x, y) => y.value - x.value);
-      if (!multi) {
-        return rows.map((r, idx) =>
-          holdingRow(r, idx, allocTotal, holdSnaps, conv, useIls, displayCur, range)).join('');
-      }
-      // Default collapsed unless the user opened it. Toggle key is the
-      // provider key; click anywhere on the header row flips it.
-      const collapsed = state.brkProvCollapsed[k] !== false; // undefined ⇒ collapsed
-      const provValueNative = rows.reduce((s, r) => s + (r.value || 0), 0);
-      // Convert to display currency; conv handles per-row currency, but rows
-      // within a single provider share currency in practice (Meitav = ILS,
-      // SnapTrade = the broker's native), so use the first row's currency.
-      const provCur = rows[0] ? rows[0].currency : displayCur;
-      const provValueShown = conv(provValueNative, provCur);
-      const provPct = allocTotal ? (provValueNative / allocTotal) * 100 : 0;
-      const chev = collapsed ? '▸' : '▾';
-      const header = '<button class="hp-prov-row' + (collapsed ? '' : ' open')
-        + '" data-action="brk-prov-toggle" data-arg="' + esc(k) + '">'
-        + '<span class="hp-prov-chev">' + chev + '</span>'
-        + '<span class="hp-prov-name">' + esc(g.label) + '</span>'
-        + '<span class="hp-prov-cnt">' + rows.length
-        + (rows.length === 1 ? ' position' : ' positions') + '</span>'
-        + '<span class="hp-prov-val">'
-        + (provValueShown == null ? '' : money(provValueShown, displayCur))
-        + '<span class="hp-prov-pct">' + provPct.toFixed(1) + '%</span></span>'
-        + '</button>';
-      const body = collapsed
-        ? ''
-        : '<div class="hp-prov-body">' + rows.map((r, idx) =>
-            holdingRow(r, idx, allocTotal, holdSnaps, conv, useIls, displayCur, range)).join('')
-          + '</div>';
-      return header + body;
-    }).join('');
-    body = '<div class="hp-list">' + sections + '</div>';
+    body = '<div class="hp-list">' + rows.map((r, idx) =>
+      holdingRow(r, idx, allocTotal, holdSnaps, conv, useIls, displayCur, range)).join("")
+      + "</div>";
   }
   return '<div class="card hp-card">' + head + body + "</div>";
 }
@@ -9436,13 +9339,6 @@ function handleAction(action, btn) {
       if (btn && btn.dataset.arg) {
         state.brkOpenHolding = state.brkOpenHolding === btn.dataset.arg
           ? null : btn.dataset.arg;
-        render();
-      }
-      break;
-    case "brk-prov-toggle":
-      if (btn && btn.dataset.arg) {
-        const key = btn.dataset.arg;
-        state.brkProvCollapsed[key] = !state.brkProvCollapsed[key];
         render();
       }
       break;
