@@ -21,7 +21,10 @@ import { dirname, join } from 'node:path';
 import puppeteerVanilla, { type Browser, type Frame, type Page } from 'puppeteer';
 import { addExtra } from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
-import type { CompanyInfo, NormalizedAccount, NormalizedHolding, ScrapeOutcome } from './scrapers.js';
+import type {
+  BrokeragePerformanceData, CompanyInfo, NormalizedAccount, NormalizedHolding,
+  PerformancePoint, ScrapeOutcome,
+} from './scrapers.js';
 import type { OtpCallback } from './otp.js';
 import { persistSession, restoreSession, type SessionHandle } from './session.js';
 import { makeLog } from './log.js';
@@ -333,6 +336,10 @@ export async function runPensionScrape(
   const htmlPath = debugSibling(screenshotPath, '-pension.html');
   const dataPath = debugSibling(screenshotPath, '-pension.json');
   const jsonResponses: { url: string; body: string }[] = [];
+  // Side-channel from readBalances → here, so Meitav can return its
+  // historical-return series alongside the account list. Other funds leave
+  // this untouched.
+  const extras: { performance?: BrokeragePerformanceData } = {};
 
   let browser: Browser | undefined;
   let page!: Page;
@@ -368,7 +375,7 @@ export async function runPensionScrape(
           timeout: 60_000,
         });
         if (!/login/i.test(page.url())) {
-          const resumed = await readBalances(companyId, page, screenshotPath).catch(
+          const resumed = await readBalances(companyId, page, screenshotPath, extras).catch(
             () => [] as NormalizedAccount[],
           );
           if (resumed.length > 0) {
@@ -376,7 +383,7 @@ export async function runPensionScrape(
             await saveDebug(page, screenshotPath, htmlPath, dataPath, jsonResponses).catch(
               () => {},
             );
-            return { success: true, accounts: resumed };
+            return { success: true, accounts: resumed, brokeragePerformance: extras.performance };
           }
         }
       } catch {
@@ -411,7 +418,7 @@ export async function runPensionScrape(
           await saveDebug(page, screenshotPath, htmlPath, dataPath, jsonResponses).catch(
             () => {},
           );
-          return { success: true, accounts: resumed };
+          return { success: true, accounts: resumed, brokeragePerformance: extras.performance };
         }
       }
       // Not signed in — the user does it themselves in the visible window.
@@ -429,7 +436,7 @@ export async function runPensionScrape(
         await delay(5000);
         if (page.isClosed()) break;
         try {
-          accounts = await readBalances(companyId, page, screenshotPath);
+          accounts = await readBalances(companyId, page, screenshotPath, extras);
         } catch {
           accounts = []; // a navigation mid-read — try again next tick
         }
@@ -446,7 +453,7 @@ export async function runPensionScrape(
         );
       }
       await persistSession(browser, session);
-      return { success: true, accounts };
+      return { success: true, accounts, brokeragePerformance: extras.performance };
     }
 
     onProgress?.('Logging in…');
@@ -496,7 +503,7 @@ export async function runPensionScrape(
     }
     onProgress?.('Reading your balances…');
     await delay(4000); // let the products page render its data
-    const accounts = await readBalances(companyId, page, screenshotPath);
+    const accounts = await readBalances(companyId, page, screenshotPath, extras);
     await saveDebug(page, screenshotPath, htmlPath, dataPath, jsonResponses);
 
     if (accounts.length === 0) {
@@ -879,13 +886,18 @@ async function readBalances(
   companyId: string,
   page: Page,
   screenshotPath: string | undefined,
+  /** Optional out parameter — Meitav writes its computed performance series
+   *  here so the pension scraper can bubble it up in the ScrapeOutcome. */
+  extras?: { performance?: BrokeragePerformanceData },
 ): Promise<NormalizedAccount[]> {
   if (companyId === 'migdal') return readMigdalBalances(page);
   if (companyId === 'harel') {
     return readHarelBalances(page, debugSibling(screenshotPath, '-harel-frame.html'));
   }
   if (companyId === 'clal') return readClalBalances(page);
-  if (companyId === 'meitav') return readMeitavBalances(page, debugSibling(screenshotPath, '-meitav-api.json'));
+  if (companyId === 'meitav') {
+    return readMeitavBalances(page, debugSibling(screenshotPath, '-meitav-api.json'), extras);
+  }
   if (companyId === 'menora') return readMenoraBalances(page);
   return readGenericBalances(page);
 }
@@ -1195,6 +1207,7 @@ interface MeitavRow {
 async function readMeitavBalances(
   page: Page,
   rawDumpPath?: string,
+  extras?: { performance?: BrokeragePerformanceData },
 ): Promise<NormalizedAccount[]> {
   // Meitav splits a customer across multiple "personal areas", each a separate
   // sub-portal with its own API root:
@@ -1288,6 +1301,11 @@ async function readMeitavBalances(
       '/v3/api/Manager/GetHerkevDate',
       '/v3/api/Manager/GetMediniyutHashkaa',
       '/v3/api/Manager/GetCalculatedHerkevNehasim',
+      // Monthly return series — one row per month with `Taarich`, `tsua`
+      // (monthly return %), `shoviTik` (end-of-month value), `hafkadot`
+      // (deposits), `meshichot` (withdrawals — negative). Fed into the
+      // brokerage performance chart and 1M/3M/YTD/1Y/ALL tiles.
+      '/v3/api/Manager/GetTsuot',
     ]);
     const tikDump = dump.find((d) => d.url.endsWith('/Manager/GetTikInfo'));
     // GetCalculatedHerkevNehasim returns Array[{ RowId, MisparTik, MisparNiar,
@@ -1348,6 +1366,83 @@ async function readMeitavBalances(
     }
   } catch {
     /* portfolio area unreachable — pension still got pulled */
+  }
+
+  // 3) PERFORMANCE — GetTsuot returns a monthly series back to portfolio
+  // inception. Each row carries the end-of-month value (`shoviTik`), the
+  // monthly return (`tsua`, percent), deposits and withdrawals. We map it to
+  // the same BrokeragePerformanceData shape SnapTrade returns, so the UI's
+  // existing performance chart + 1M / 3M / YTD / 1Y / ALL pills work for the
+  // Meitav portfolio with no further wiring.
+  const tsuotDump = dump.find((d) => d.url.endsWith('/Manager/GetTsuot'));
+  if (extras && tsuotDump && tsuotDump.body) {
+    const raw: any[] = Array.isArray(tsuotDump.body)
+      ? tsuotDump.body
+      : Array.isArray(tsuotDump.body?.t) ? tsuotDump.body.t : [];
+    const rows = raw
+      .map((r) => ({
+        date: typeof r.Taarich === 'string' ? r.Taarich.slice(0, 10) : '',
+        value: Number(r.shoviTik),
+        tsua: Number(r.tsua),
+        contribution: Number(r.hafkadot ?? 0) + Number(r.meshichot ?? 0),
+      }))
+      .filter((r) => r.date && Number.isFinite(r.value))
+      .sort((a, b) => a.date.localeCompare(b.date));
+    if (rows.length) {
+      const totalEquity: PerformancePoint[] = rows.map((r) => ({
+        date: r.date,
+        value: Math.round(r.value * 100) / 100,
+        currency: 'ILS',
+      }));
+      let cum = 0;
+      const contributionsCumulative: PerformancePoint[] = rows.map((r) => {
+        cum += Number.isFinite(r.contribution) ? r.contribution : 0;
+        return { date: r.date, value: Math.round(cum * 100) / 100, currency: 'ILS' };
+      });
+      // Compound the monthly returns inside each window. tsua arrives as a
+      // percent (e.g. -0.43 means -0.43%), so each factor is (1 + tsua/100).
+      const compound = (window: typeof rows): number | null => {
+        if (!window.length) return null;
+        let product = 1;
+        for (const r of window) {
+          if (!Number.isFinite(r.tsua)) continue;
+          product *= 1 + r.tsua / 100;
+        }
+        return Math.round((product - 1) * 10000) / 100; // back to %, 2 dp
+      };
+      const sumContrib = (window: typeof rows): number | null =>
+        window.length
+          ? Math.round(window.reduce((s, r) => s + (Number.isFinite(r.contribution) ? r.contribution : 0), 0) * 100) / 100
+          : null;
+      const last = rows[rows.length - 1];
+      const lastDate = new Date(last.date + 'T00:00:00Z');
+      const monthsBack = (n: number) => rows.filter((r) => {
+        const d = new Date(r.date + 'T00:00:00Z');
+        const cutoff = new Date(lastDate);
+        cutoff.setUTCMonth(cutoff.getUTCMonth() - n);
+        return d > cutoff;
+      });
+      const yearStart = `${lastDate.getUTCFullYear()}-01-01`;
+      const ytd = rows.filter((r) => r.date >= yearStart);
+      const byRange: BrokeragePerformanceData['byRange'] = {
+        '1M':  { rateOfReturn: compound(monthsBack(1)),  contributions: sumContrib(monthsBack(1)),  dividendIncome: null },
+        '3M':  { rateOfReturn: compound(monthsBack(3)),  contributions: sumContrib(monthsBack(3)),  dividendIncome: null },
+        'YTD': { rateOfReturn: compound(ytd),            contributions: sumContrib(ytd),            dividendIncome: null },
+        '1Y':  { rateOfReturn: compound(monthsBack(12)), contributions: sumContrib(monthsBack(12)), dividendIncome: null },
+        'ALL': { rateOfReturn: compound(rows),           contributions: sumContrib(rows),           dividendIncome: null },
+      };
+      extras.performance = {
+        totalEquity,
+        contributionsCumulative,
+        currency: 'ILS',
+        rangeStart: rows[0].date,
+        rangeEnd: last.date,
+        rateOfReturn: byRange.ALL?.rateOfReturn ?? null,
+        contributions: byRange.ALL?.contributions ?? null,
+        dividendIncome: null,
+        byRange,
+      };
+    }
   }
 
   if (rawDumpPath && dump.length) {
