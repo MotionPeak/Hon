@@ -689,8 +689,13 @@ function parseHapoalimRow(raw: HapoalimRowRaw): ScrapedLoan | null {
   if (cells.length < 5) return null;
 
   const nameCell = cells[0] || '';
-  // The name cell ends with "ערוך כינוי" ("edit alias") link text — strip it.
-  const name = nameCell.replace(/\s*ערוך כינוי\s*$/u, '').trim();
+  // The name cell carries the loan title plus a trailing "ערוך כינוי"
+  // ("edit alias") link and, once expanded, a "למידע נוסף" ("more info")
+  // anchor inside the same <td>. Split on the first of those known UI
+  // suffixes so the title is captured cleanly regardless of expand state.
+  const name = nameCell
+    .split(/\s*(?:ערוך\s*כינוי|למידע\s*נוסף)\s*/u)[0]
+    .trim();
   if (!name) return null;
 
   const principal = parseMoney(cells[1]);
