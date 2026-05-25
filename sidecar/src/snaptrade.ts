@@ -552,12 +552,19 @@ async function fetchEarliestActivityDate(
     });
     const rows = Array.isArray(res.data) ? res.data : [];
     let earliest: string | undefined;
+    let sampleKeys: string[] = [];
     for (const r of rows) {
+      if (sampleKeys.length === 0 && r && typeof r === 'object') {
+        sampleKeys = Object.keys(r).slice(0, 20);
+      }
       // The library types `trade_date` and `settlement_date` as string |
       // Date | undefined. Trade date is the canonical "when this happened"
       // for portfolio history; settlement is the bookkeeping date. Prefer
       // trade_date; fall back to settlement_date for activities without it.
-      const raw = (r as any).trade_date ?? (r as any).settlement_date;
+      const raw = (r as any).trade_date
+        ?? (r as any).settlement_date
+        ?? (r as any).tradeDate
+        ?? (r as any).settlementDate;
       const iso = typeof raw === 'string'
         ? raw.slice(0, 10)
         : raw instanceof Date && !Number.isNaN(raw.valueOf())
@@ -566,6 +573,12 @@ async function fetchEarliestActivityDate(
       if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) continue;
       if (!earliest || iso < earliest) earliest = iso;
     }
+    process.stdout.write(
+      `snaptrade activities ${accountId}: ${rows.length} rows, `
+      + `earliest=${earliest ?? 'NONE'}`
+      + (rows.length && !earliest ? `, sample keys=[${sampleKeys.join(',')}]` : '')
+      + '\n',
+    );
     return earliest;
   } catch (err) {
     process.stdout.write(
