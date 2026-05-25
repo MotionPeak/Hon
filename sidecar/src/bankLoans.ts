@@ -14,7 +14,9 @@ import { makeLog } from './log.js';
 // puppeteer-extra value import, which this file does not pull in.
 declare const document: any;
 
-const log = makeLog('loans:fibi');
+const fibiLog = makeLog('loans:fibi');
+const hapoalimLog = makeLog('loans:hapoalim');
+const log = fibiLog;
 
 /** One loan exactly as the bank shows it on its loans page. */
 export interface ScrapedLoan {
@@ -333,11 +335,453 @@ function monthsBetweenDates(fromIso: string, toIso: string): number {
 
 // The Beinleumi-group banks share one portal and one loans page; the company
 // ids below all route through the same scraper, so the same URL applies.
+// Hapoalim has its own portal and is dispatched by `scrapeBankLoans`.
 export function supportsBankLoans(companyId: string): boolean {
   return (
     companyId === 'beinleumi' ||
     companyId === 'otsarHahayal' ||
     companyId === 'massad' ||
-    companyId === 'pagi'
+    companyId === 'pagi' ||
+    companyId === 'hapoalim'
   );
+}
+
+/**
+ * Dispatches to the right per-bank loan scraper for `companyId`. Returns an
+ * empty array (never throws) when the bank is unsupported or the scrape fails
+ * for any reason — see the per-bank implementations for details.
+ */
+export async function scrapeBankLoans(
+  companyId: string,
+  browser: Browser,
+  debugDumpPath?: string,
+): Promise<ScrapedLoan[]> {
+  if (companyId === 'hapoalim') {
+    return scrapeHapoalimLoans(browser, debugDumpPath);
+  }
+  if (supportsBankLoans(companyId)) {
+    return scrapeFibiLoans(browser, debugDumpPath);
+  }
+  return [];
+}
+
+// --- Hapoalim ---------------------------------------------------------------
+// Hapoalim's loans page lives in their PortalNG Angular shell. Unlike FIBI it
+// renders a per-loan summary table, but the rate/term/start-date fields only
+// appear inside an expander panel for each row. So the scraper walks the
+// rows, clicks each expander, and harvests the detail panel before moving on.
+
+const HAPOALIM_LOANS_URL =
+  'https://login.bankhapoalim.co.il/ng-portals/rb/he/credit-and-mortgage/transactions';
+
+// Anchor text in the summary table head; appears once per loans page.
+const HAPOALIM_HEADER_HE = 'סוג האשראי';
+
+// Labels in the expanded detail panel. We anchor on label text rather than
+// CSS selectors because the Angular shell hashes classnames between deploys.
+const HAPOALIM_LABEL = {
+  serial: 'סידורי',
+  startDate: 'יום תחילת החישוב',
+  endDate: 'תאריך הסיום',
+  rateType: 'סוג הריבית',
+  currentRate: 'שיעור הריבית הנוכחי',
+  sourceRate: 'ריבית המקור',
+  cpiBase: 'בסיס ההצמדה',
+  principalCount: 'הקרן',
+};
+
+export async function scrapeHapoalimLoans(
+  browser: Browser,
+  debugDumpPath?: string,
+): Promise<ScrapedLoan[]> {
+  const done = hapoalimLog.timer('scrape', { url: HAPOALIM_LOANS_URL });
+  const page = await browser.newPage();
+  try {
+    hapoalimLog.info('navigate', { url: HAPOALIM_LOANS_URL, timeoutMs: 60_000 });
+    try {
+      await page.goto(HAPOALIM_LOANS_URL, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+    } catch (err) {
+      hapoalimLog.warn('goto.failed', { message: err instanceof Error ? err.message : String(err) });
+    }
+    hapoalimLog.info('navigate.done', { landedUrl: page.url() });
+
+    const target = await waitForHapoalimAnchor(page, 45_000);
+    if (!target) {
+      hapoalimLog.error('anchor.missing', {
+        landedUrl: page.url(),
+        frameCount: page.frames().length,
+        frameUrls: page.frames().map((f) => f.url()),
+      });
+      await dumpDebugFor(page, debugDumpPath, hapoalimLog);
+      done({ result: 'anchor-missing', loans: 0 });
+      return [];
+    }
+
+    if (debugDumpPath) {
+      try {
+        const html = await target.content();
+        const { writeFileSync } = await import('node:fs');
+        writeFileSync(debugDumpPath, html, 'utf8');
+        hapoalimLog.info('debug.dump', { path: debugDumpPath, bytes: html.length });
+      } catch (err) {
+        hapoalimLog.warn('debug.dump.failed', {
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    // Each row needs its expander opened so the detail panel materialises. We
+    // do this row by row and read both the summary + detail in one pass.
+    const rowCount = await countHapoalimRows(target);
+    hapoalimLog.info('rows.counted', { count: rowCount });
+    const loans: ScrapedLoan[] = [];
+    for (let i = 0; i < rowCount; i += 1) {
+      try {
+        const expanded = await expandHapoalimRow(target, i);
+        if (!expanded) {
+          hapoalimLog.warn('row.expand.failed', { index: i });
+          continue;
+        }
+        const raw = await readHapoalimRow(target, i);
+        if (!raw) {
+          hapoalimLog.warn('row.read.failed', { index: i });
+          continue;
+        }
+        const parsed = parseHapoalimRow(raw);
+        if (parsed) {
+          hapoalimLog.info('row.parsed', {
+            externalId: parsed.externalId,
+            name: parsed.name,
+            principal: parsed.principal,
+            rate: parsed.rateValue,
+            isPrime: parsed.isPrime,
+            isCpiLinked: parsed.isCpiLinked,
+            termMonths: parsed.termMonths,
+          });
+          loans.push(parsed);
+        } else {
+          hapoalimLog.warn('row.skipped', { index: i, raw });
+        }
+      } catch (err) {
+        hapoalimLog.warn('row.threw', {
+          index: i,
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    done({ result: 'ok', loans: loans.length });
+    return loans;
+  } catch (err) {
+    hapoalimLog.error('scrape.threw', {
+      message: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack : undefined,
+    });
+    done({ result: 'exception', loans: 0 });
+    return [];
+  } finally {
+    await page.close().catch(() => {});
+  }
+}
+
+async function dumpDebugFor(
+  page: Page,
+  debugPath: string | undefined,
+  logger: ReturnType<typeof makeLog>,
+): Promise<void> {
+  if (!debugPath) return;
+  try {
+    const html = await page.content();
+    const { writeFileSync } = await import('node:fs');
+    writeFileSync(debugPath, html, 'utf8');
+    logger.info('debug.dump', { path: debugPath, bytes: html.length });
+  } catch (err) {
+    logger.warn('debug.dump.failed', {
+      message: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+async function waitForHapoalimAnchor(page: Page, timeoutMs: number): Promise<Page | Frame | null> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const candidates: (Page | Frame)[] = [page, ...page.frames()];
+    for (const target of candidates) {
+      const has = await target
+        .evaluate((needle: string) => {
+          const body = document.body;
+          return !!body && body.innerText.includes(needle);
+        }, HAPOALIM_HEADER_HE)
+        .catch(() => false);
+      if (has) return target;
+    }
+    await new Promise((r) => setTimeout(r, 750));
+  }
+  return null;
+}
+
+// Returns the number of loan rows in the summary table — excludes the head
+// row and any totals row. Anchored on the same Hebrew header as the parser.
+async function countHapoalimRows(target: Page | Frame): Promise<number> {
+  return (target as Page).evaluate((needle: string) => {
+    const SUMMARY_HE = 'סה"כ';
+    const headerCells: any[] = Array.from(document.querySelectorAll('th, td'));
+    let table: any = null;
+    for (const cell of headerCells) {
+      if ((cell.textContent || '').trim() === needle) {
+        table = cell.closest('table');
+        if (table) break;
+      }
+    }
+    if (!table) return 0;
+    const trs: any[] = Array.from(table.querySelectorAll('tbody tr, tr'));
+    let count = 0;
+    for (const tr of trs) {
+      const tds: any[] = Array.from(tr.querySelectorAll('td'));
+      if (tds.length < 4) continue;
+      const cells: string[] = tds.map((td: any) =>
+        (td.innerText || td.textContent || '').replace(/\s+/g, ' ').trim(),
+      );
+      if (cells.some((c) => c.startsWith(SUMMARY_HE))) continue;
+      if (cells.includes(needle)) continue;
+      count += 1;
+    }
+    return count;
+  }, HAPOALIM_HEADER_HE);
+}
+
+// Clicks the expander button in row `index`. Hapoalim renders the toggle as
+// the rightmost cell's chevron — `aria-expanded` flips when the panel opens.
+// Returns true when the panel is visible.
+async function expandHapoalimRow(target: Page | Frame, index: number): Promise<boolean> {
+  const clicked = await (target as Page).evaluate(
+    ({ needle, idx }: { needle: string; idx: number }) => {
+      const headerCells: any[] = Array.from(document.querySelectorAll('th, td'));
+      let table: any = null;
+      for (const cell of headerCells) {
+        if ((cell.textContent || '').trim() === needle) {
+          table = cell.closest('table');
+          if (table) break;
+        }
+      }
+      if (!table) return false;
+      const SUMMARY_HE = 'סה"כ';
+      const dataRows: any[] = [];
+      const trs: any[] = Array.from(table.querySelectorAll('tbody tr, tr'));
+      for (const tr of trs) {
+        const tds: any[] = Array.from(tr.querySelectorAll('td'));
+        if (tds.length < 4) continue;
+        const cells: string[] = tds.map((td: any) =>
+          (td.innerText || td.textContent || '').replace(/\s+/g, ' ').trim(),
+        );
+        if (cells.some((c) => c.startsWith(SUMMARY_HE))) continue;
+        if (cells.includes(needle)) continue;
+        dataRows.push(tr);
+      }
+      const row = dataRows[idx];
+      if (!row) return false;
+      // Already expanded? aria-expanded on a button/cell inside the row.
+      const toggles: any[] = Array.from(
+        row.querySelectorAll('[aria-expanded], button, a, .toggle, [role="button"]'),
+      );
+      // Prefer an aria-expanded element since we can read state from it.
+      let toggle: any =
+        toggles.find((t: any) => t.hasAttribute && t.hasAttribute('aria-expanded')) || toggles[0];
+      if (!toggle) {
+        // Fall back to clicking the last cell (the "מידע ופעולות" column).
+        const tds: any[] = Array.from(row.querySelectorAll('td'));
+        toggle = tds[tds.length - 1];
+      }
+      if (!toggle) return false;
+      if (toggle.getAttribute && toggle.getAttribute('aria-expanded') === 'true') return true;
+      toggle.click();
+      return true;
+    },
+    { needle: HAPOALIM_HEADER_HE, idx: index },
+  );
+  if (!clicked) return false;
+  // Give the Angular animation a moment to settle and the panel content to
+  // render. The detail panel only mounts once the row's expanded flag flips.
+  await new Promise((r) => setTimeout(r, 600));
+  return true;
+}
+
+interface HapoalimRowRaw {
+  summaryCells: string[];
+  detailText: string;
+}
+
+async function readHapoalimRow(
+  target: Page | Frame,
+  index: number,
+): Promise<HapoalimRowRaw | null> {
+  return (target as Page).evaluate(
+    ({ needle, idx }: { needle: string; idx: number }) => {
+      const SUMMARY_HE = 'סה"כ';
+      const headerCells: any[] = Array.from(document.querySelectorAll('th, td'));
+      let table: any = null;
+      for (const cell of headerCells) {
+        if ((cell.textContent || '').trim() === needle) {
+          table = cell.closest('table');
+          if (table) break;
+        }
+      }
+      if (!table) return null;
+
+      // Find the data rows in index order, then return the row's <td> texts
+      // and the immediately-following row's text (Hapoalim renders the
+      // detail panel as the sibling <tr> after the summary row, often with
+      // a colspan-spanning <td>).
+      const dataRows: any[] = [];
+      const allRows: any[] = Array.from(table.querySelectorAll('tbody tr, tr'));
+      for (const tr of allRows) {
+        const tds: any[] = Array.from(tr.querySelectorAll('td'));
+        if (tds.length < 4) continue;
+        const cells: string[] = tds.map((td: any) =>
+          (td.innerText || td.textContent || '').replace(/\s+/g, ' ').trim(),
+        );
+        if (cells.some((c) => c.startsWith(SUMMARY_HE))) continue;
+        if (cells.includes(needle)) continue;
+        dataRows.push(tr);
+      }
+      const row = dataRows[idx];
+      if (!row) return null;
+      const tds: any[] = Array.from(row.querySelectorAll('td'));
+      const summaryCells: string[] = tds.map((td: any) =>
+        (td.innerText || td.textContent || '').replace(/\s+/g, ' ').trim(),
+      );
+
+      // The detail panel can be either: (a) the very next <tr> sibling, or
+      // (b) a div placed inside the same row that expands in-place. We grab
+      // text from whichever sibling/child carries the "סידורי" anchor.
+      const collected: string[] = [];
+      const anchor = 'סידורי';
+      const next = row.nextElementSibling as any;
+      if (next && (next.innerText || '').includes(anchor)) {
+        collected.push((next.innerText || next.textContent || '').toString());
+      }
+      // Some layouts place the panel inside the same row in a hidden cell.
+      const inRow = Array.from(row.querySelectorAll('div, section')) as any[];
+      for (const el of inRow) {
+        const t = (el.innerText || el.textContent || '').toString();
+        if (t.includes(anchor) && t.length > 30) {
+          collected.push(t);
+          break;
+        }
+      }
+      const detailText = collected.join('\n').replace(/[ \t]+/g, ' ').trim();
+      return { summaryCells, detailText };
+    },
+    { needle: HAPOALIM_HEADER_HE, idx: index },
+  );
+}
+
+// Hapoalim's summary table in DOM order (RTL, so first <td> = rightmost):
+//   0  סוג האשראי              loan name (e.g. "אוניברסיטה העברית ים")
+//   1  הקרן                    original principal (e.g. 5,500.00)
+//   2  יתרה משוערכת            current outstanding (CPI-revalued)
+//   3  תשלום קרוב משוער        next payment
+//   4  מועד התשלום הקרוב       next payment date  (DD/MM/YY)
+//   5  שינוי בתשלומי ההלוואה   (text or empty)
+//   6  למידע ופעולות           expander chevron
+function parseHapoalimRow(raw: HapoalimRowRaw): ScrapedLoan | null {
+  const cells = raw.summaryCells;
+  if (cells.length < 5) return null;
+
+  const nameCell = cells[0] || '';
+  // The name cell ends with "ערוך כינוי" ("edit alias") link text — strip it.
+  const name = nameCell.replace(/\s*ערוך כינוי\s*$/u, '').trim();
+  if (!name) return null;
+
+  const principal = parseMoney(cells[1]);
+  const currentDebt = parseMoney(cells[2]);
+  const nextPayment = parseMoney(cells[3]);
+
+  const detail = raw.detailText || '';
+  const serial = findLabelValue(detail, HAPOALIM_LABEL.serial);
+  const startDate = parseDate(findLabelValue(detail, HAPOALIM_LABEL.startDate) ?? undefined);
+  const endDate = parseDate(findLabelValue(detail, HAPOALIM_LABEL.endDate) ?? undefined);
+  const rateType = findLabelValue(detail, HAPOALIM_LABEL.rateType) || '';
+  const currentRate = findLabelValue(detail, HAPOALIM_LABEL.currentRate) || '';
+  const cpiBase = findLabelValue(detail, HAPOALIM_LABEL.cpiBase) || '';
+  // "הקרן: 1 מתוך 2" — second number is the total payment count.
+  const principalCount = findLabelValue(detail, HAPOALIM_LABEL.principalCount) || '';
+  const totalPayments = parseTotalPayments(principalCount);
+
+  if (!Number.isFinite(principal) || !startDate) return null;
+
+  const termMonths = totalPayments && totalPayments > 0
+    ? totalPayments
+    : endDate
+      ? monthsBetweenDates(startDate, endDate)
+      : 0;
+  if (termMonths <= 0) return null;
+
+  const isCpiLinked = !!cpiBase && cpiBase.trim() !== '-' && cpiBase.trim().length > 0;
+  // Hapoalim labels prime as "פריים" inside the rate-type string. The
+  // currentRate field carries the effective annual % ("6.00 | מיום ..."), so
+  // we read it directly and let Hon's UI display it as a fixed rate snapshot.
+  // Prime-tracking is recomputed each sync anyway — the user can re-sync
+  // when prime moves and the new effective rate flows through.
+  const isPrime = /פריים|prime/i.test(rateType);
+  const rateValue = parseRateNumber(currentRate) ??
+    parseRateNumber(findLabelValue(detail, HAPOALIM_LABEL.sourceRate) || '') ??
+    0;
+
+  // externalId: prefer "סידורי" (Hapoalim's per-account stable loan number).
+  // Fall back to a name+startDate composite so we still upsert deterministically.
+  const externalId = serial ? `hapoalim-${serial}` : `hapoalim-${name}-${startDate}`;
+
+  return {
+    externalId,
+    name,
+    principal,
+    startDate,
+    termMonths,
+    isPrime,
+    isCpiLinked,
+    rateValue,
+    currency: 'ILS',
+    currentDebt: Number.isFinite(currentDebt) ? currentDebt : 0,
+    nextPayment: Number.isFinite(nextPayment) ? nextPayment : null,
+  };
+}
+
+// Pulls the value that follows a known Hebrew label in a free-text blob. The
+// detail panel is rendered as label/value pairs on adjacent lines, so we
+// match "label\nvalue" first and fall back to "label: value" / "label value".
+function findLabelValue(text: string, label: string): string | null {
+  if (!text) return null;
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (line === label) {
+      return lines[i + 1] ?? null;
+    }
+    if (line.startsWith(label + ':')) {
+      return line.slice(label.length + 1).trim();
+    }
+    if (line.startsWith(label + ' ')) {
+      const rest = line.slice(label.length).trim();
+      if (rest) return rest;
+    }
+  }
+  return null;
+}
+
+// Parses "1 מתוך 2" → 2 (total). Returns 0 when the value is missing.
+function parseTotalPayments(s: string): number {
+  if (!s) return 0;
+  const m = s.match(/מתוך\s*(\d+)/);
+  return m ? parseInt(m[1], 10) : 0;
+}
+
+// Parses "6.00", "6.00 | מיום 10/05/26", "P+0.50" etc. into a plain number.
+// Prefer the first decimal-looking token; ignore everything after a separator.
+function parseRateNumber(s: string): number | null {
+  if (!s) return null;
+  const m = s.replace(/[()]/g, '').match(/-?\d+(?:\.\d+)?/);
+  if (!m) return null;
+  const n = parseFloat(m[0]);
+  return Number.isFinite(n) ? n : null;
 }

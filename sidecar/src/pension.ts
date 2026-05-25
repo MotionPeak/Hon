@@ -1026,25 +1026,71 @@ async function readHarelBalances(
   // digits and made the connector give up with a false "needs mapping". Some
   // accounts (many products, slow connection) need well past a minute before
   // the tiles paint, so the deadline is intentionally generous.
+  //
+  // Frame discovery uses TWO paths because `page.frames()` does not reliably
+  // expose cross-origin iframes (Chrome's site-isolation runs them in a
+  // separate process, and Puppeteer's frame tree can lag or skip them):
+  //   1. URL match on `page.frames()` — primary, picks the frame up as soon
+  //      as it's attached even before navigation completes.
+  //   2. `iframe#client-view` → `contentFrame()` — fallback, works even when
+  //      site-isolation hides the frame from page.frames() altogether.
+  // This was the cause of the 2026-05-25 "NEEDS_SELECTORS" timeout: the
+  // host-page dump showed `apps.client-view/client-view/?…` in the DOM but
+  // page.frames() never listed a matching entry, so the polling loop ran
+  // its full 180s deadline without ever reaching extractTiles.
   const deadline = Date.now() + 180_000;
   let frame: Frame | undefined;
   let found: { label: string; balance: number }[] = [];
+  let polls = 0;
   while (Date.now() < deadline) {
+    polls += 1;
     // The portal greets a fresh session with a privacy-policy modal and a
     // cookie banner that sit over (and can stall) the widget. They can also
     // appear late, so clear them on every pass rather than just once.
     await clickByText(page, [
       'הבנתי, תודה', 'הבנתי', 'אישור', 'סגירה', 'סגור', 'קיבלתי',
     ]);
-    frame = page
-      .frames()
-      .find((f) => /client-view|digital\.harel/.test(f.url()));
+    const frames = page.frames();
+    // Match the digital.harel-group.co.il widget specifically. The previous
+    // regex (`client-view|digital.harel`) also matched the host page itself
+    // because Harel's host URL is `…/Pages/client-view.aspx` — `.find()`
+    // then returned the host frame, extractTiles ran on the wrong document,
+    // and the loop spun out the full 180s deadline. (Confirmed by the
+    // 2026-05-25 21:43 run: targetFrame was the .aspx host page even though
+    // the digital.harel iframe was right there at index 3.)
+    frame = frames.find((f) => /digital\.harel-group\.co\.il/.test(f.url()))
+      ?? frames.find((f) =>
+          /\/apps\.client-view\/|client-view\.aspx?\?|client-view\/\?/.test(f.url())
+          && !/\.aspx/i.test(f.url()));
+    if (!frame) {
+      // Cross-origin fallback: ask the element for its contentFrame() —
+      // this navigates through Chrome's frame proxy and exposes the iframe
+      // even when site-isolation removes it from page.frames().
+      try {
+        const handle = await page.$('iframe#client-view, iframe[title="תמונת לקוח"]');
+        if (handle) {
+          const cf = await handle.contentFrame();
+          if (cf) frame = cf;
+        }
+      } catch {
+        /* swallow — fall through to "frame missing" diagnostics below */
+      }
+    }
+    // Periodic diagnostic so a debugger can see WHY no balances are landing.
+    // Every 10s (≈ every 7th poll at 1500ms) emit a snapshot of frame state.
+    if (polls % 7 === 1) {
+      plog(`harel.poll #${polls}: frames=${frames.length} ` +
+        `frameUrls=${JSON.stringify(frames.map((f) => f.url()).slice(0, 8))} ` +
+        `targetFrame=${frame ? frame.url() : 'none'}`);
+    }
     if (frame) {
       found = await extractTiles(frame);
       if (found.length > 0) break;
     }
     await delay(1500);
   }
+  plog(`harel.poll done: polls=${polls} foundTiles=${found.length} ` +
+    `frameResolved=${!!frame}`);
 
   // Always dump *something* — if the iframe never appeared, dump the host page
   // so we can see what Harel actually rendered (cookie wall, error page, etc.);

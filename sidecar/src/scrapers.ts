@@ -6,7 +6,7 @@ import { SNAPTRADE_COMPANY_ID, snaptradeCompany } from './snaptrade.js';
 import { PENSION_COMPANIES, isPensionCompany } from './pension.js';
 import { watchForOtp, type OtpCallback } from './otp.js';
 import { persistSession, restoreSession, type SessionHandle } from './session.js';
-import { scrapeFibiLoans, supportsBankLoans, type ScrapedLoan } from './bankLoans.js';
+import { scrapeBankLoans, supportsBankLoans, type ScrapedLoan } from './bankLoans.js';
 import { scrapeDiscountKerenKaspit } from './discountSavings.js';
 import { makeLog } from './log.js';
 
@@ -139,16 +139,21 @@ const UNSUPPORTED = new Set<string>([
   'beyahadBishvilha',
 ]);
 
-// Banks the in-browser OTP watcher knows how to drive. The watcher's hints
-// and selectors are FIBI-group specific (Beinleumi, Otsar, Massad, Pagi all
-// share Beinleumi's portal). For any other institution the underlying
-// israeli-bank-scrapers library handles its own 2FA — running our watcher
-// risks misfiring on coincidental Hebrew phrases.
+// Banks the in-browser OTP watcher knows how to drive. Each id here selects
+// a per-bank driver in `otp.ts` (FIBI-group portals share one; Hapoalim
+// has its own). Anything not listed leans on the underlying
+// israeli-bank-scrapers library to handle login — running our watcher
+// against an unknown portal risks misfiring on coincidental Hebrew text.
 const HON_OTP_WATCHER_COMPANIES = new Set<string>([
   'beinleumi',
   'otsarHahayal',
   'massad',
   'pagi',
+  // Hapoalim's library scraper has no OTP code — when the bank shows its
+  // 2FA page the library just hangs. Hon's watcher fills the gap with a
+  // Hapoalim-shaped driver (input[autocomplete=one-time-code], "שלח קוד",
+  // "המשך"). Selectors are best-effort across portal versions.
+  'hapoalim',
 ]);
 
 // israeli-bank-scrapers does not tag institutions by kind, so Hon classifies
@@ -307,7 +312,7 @@ export async function runScrape(
         ? screenshotPath.replace(/\.png$/i, '-loans.html')
         : undefined;
       try {
-        scrapedLoans = await scrapeFibiLoans(browser, loansDebugPath);
+        scrapedLoans = await scrapeBankLoans(companyId, browser, loansDebugPath);
       } catch (err) {
         log.error('loans.post-hook.threw', {
           message: err instanceof Error ? err.message : String(err),
@@ -402,17 +407,16 @@ export async function runInteractiveScrape(
       .scrape(credentials as unknown as ScraperCredentials)
       .finally(() => controller.abort());
 
-    // The OTP watcher is Beinleumi-specific: it looks for Hebrew phrases like
-    // "סיסמה חד פעמית" and drives the FIBI-group SMS form (#sendSms / "שלח").
-    // Running it for Max / Isracard / Cal / Amex risks misfiring on any page
-    // that happens to contain those phrases — the user gets an OTP prompt
-    // for a code their card provider never actually sent. So scope it to
-    // the banks it was built for; everyone else relies on the underlying
-    // scraper library's own login flow.
+    // The OTP watcher looks for generic Hebrew/English 2FA phrases ("סיסמה
+    // חד פעמית", "קוד אימות", etc.) and then dispatches to a per-bank
+    // driver in `otp.ts`. We still scope it to known banks — running it
+    // against Max / Isracard / Cal / Amex risks misfiring on any page
+    // that coincidentally contains those phrases. The driver name passed
+    // through is the company id so otp.ts can pick FIBI vs. Hapoalim.
     if (HON_OTP_WATCHER_COMPANIES.has(companyId)) {
-      log.info('otp.watcher.armed');
+      log.info('otp.watcher.armed', { companyId });
       void pagePromise
-        .then((page) => watchForOtp(page, onOtpNeeded, controller.signal))
+        .then((page) => watchForOtp(page, onOtpNeeded, controller.signal, companyId))
         .catch((err) => log.warn('otp.watcher.threw', {
           message: err instanceof Error ? err.message : String(err),
         }));
@@ -446,7 +450,7 @@ export async function runInteractiveScrape(
         ? screenshotPath.replace(/\.png$/i, '-loans.html')
         : undefined;
       try {
-        scrapedLoans = await scrapeFibiLoans(launched, loansDebugPath);
+        scrapedLoans = await scrapeBankLoans(companyId, launched, loansDebugPath);
       } catch (err) {
         log.error('loans.post-hook.threw', {
           message: err instanceof Error ? err.message : String(err),
