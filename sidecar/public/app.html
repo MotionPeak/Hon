@@ -5495,9 +5495,28 @@ function brokerageView() {
     ? performance
     : performance.filter((p) => state.accounts.some((a) =>
         a.id === acctFilter && a.connectionId === p.connectionId));
-  const fullSeries = acctFilter === "all"
+  const fullSeriesRaw = acctFilter === "all"
     ? buildEquitySeries(performance, snaps, holdSnaps, conv)
     : buildEquitySeries(filteredPerf, snapsScoped, holdSnapsScoped, conv);
+  // SnapTrade reports historical equity going back to whenever the broker
+  // first opened the account — often years before the user actually
+  // started buying. Anchor the chart to the user's earliest transaction
+  // on the in-scope accounts so "ALL" doesn't paint a 10-year line of
+  // pretend ownership. Fall back to the unfiltered series when capping
+  // would leave the chart empty (brand-new connection with no points yet
+  // past that date, or a brokerage that doesn't expose transactions).
+  const scopedAcctIdsForTxn = acctFilter === "all"
+    ? brkAcctIds : new Set([acctFilter]);
+  let firstTxnDate = null;
+  for (const t of (state.transactions || [])) {
+    if (!scopedAcctIdsForTxn.has(t.accountId)) continue;
+    if (!t.date) continue;
+    if (firstTxnDate == null || t.date < firstTxnDate) firstTxnDate = t.date;
+  }
+  const fullSeriesCapped = firstTxnDate
+    ? fullSeriesRaw.filter((p) => p.date >= firstTxnDate)
+    : fullSeriesRaw;
+  const fullSeries = fullSeriesCapped.length ? fullSeriesCapped : fullSeriesRaw;
   const range = state.brkRange || "1Y";
   const series = sliceRange(fullSeries, range);
   const first = series.length ? series[0].value : null;
@@ -5862,18 +5881,20 @@ function buildEquitySeries(performance, snaps, holdSnaps, conv) {
   //    reported history (SnapTrade reports, Meitav GetTsuot) take path (1)
   //    above and aren't affected.
   if (holdSnaps && holdSnaps.length) {
-    // Inception cap: prefer the user's real-history boundary so ALL stops
-    // painting 10 years of pretend "what if you'd held this since 2016".
-    // But Hon's first sync is *only* days old in the screenshot the user
-    // sent, which leaves an essentially empty chart — worse than synthetic.
-    // Only cap when there's enough real data for the chart to look like
-    // anything (≥30 days span). Until then the Yahoo backfill stands.
-    let earliestRealSnap = null;
+    // Inception cap: ALL was painting 10 years of synthetic "what if you'd
+    // always held these units" because Yahoo's backfill goes back that far.
+    // Cap to the *later* of:
+    //   • the earliest real Hon snap (when the account was first synced —
+    //     authoritative, but only days old on a fresh link)
+    //   • 1 year ago (sensible default ceiling so a freshly-linked account
+    //     doesn't show pre-investment fake history)
+    // As Hon accumulates real syncs the first-snap boundary moves forward
+    // and eventually overtakes the 1-year fallback.
+    let earliestRealSnap = new Date(Date.now() - 365 * 24 * 3600 * 1000)
+      .toISOString().slice(0, 10);
     if (snaps && snaps.length) {
       const min = snaps.reduce((m, s) => s.date < m ? s.date : m, snaps[0].date);
-      const max = snaps.reduce((m, s) => s.date > m ? s.date : m, snaps[0].date);
-      const spanMs = new Date(max).getTime() - new Date(min).getTime();
-      if (spanMs >= 30 * 24 * 3600 * 1000) earliestRealSnap = min;
+      if (min > earliestRealSnap) earliestRealSnap = min;
     }
     const bySym = {};
     holdSnaps.forEach((s) => {
