@@ -1810,7 +1810,30 @@
   .pgy-em:hover { transform: translateY(-2px); }
   .pgy-em.on { border-color: var(--accent); background: var(--accent-soft);
     transform: translateY(-2px); }
-  /* Voucher provider picker — one tile per known sync source. */
+  /* Voucher card title — allow up to 2 lines, then ellipsis. Piggy cards
+   * still single-line via .pgy-name above; .vc-name only overrides on
+   * vouchers. */
+  .vc-name { white-space: normal; display: -webkit-box;
+    -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-clamp: 2;
+    overflow: hidden; line-height: 1.25; }
+  .vc-sub { flex-wrap: wrap; }
+  .vc-desc { color: var(--muted); }
+  .vc-sep { color: var(--faint); }
+  /* Voucher add-voucher picker — uses the same .pick-list/.pick-row
+   * vertical layout as the bank picker for visual consistency. */
+  .vc-pick.disabled { opacity: 0.55; cursor: default; }
+  .vc-pick.disabled:hover { background: transparent; }
+  .vc-pick-meta { flex: 1; min-width: 0; }
+  .vc-pick-name { font-weight: 600; font-size: 14px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .vc-pick-sub { font-size: 11.5px; color: var(--muted); font-weight: 500;
+    margin-top: 2px; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; }
+  .vc-pick-soon { margin-left: auto; flex: none; font-size: 10px;
+    font-weight: 700; padding: 3px 8px; border-radius: 999px;
+    white-space: nowrap; color: var(--faint);
+    background: var(--hairline); }
+  /* Legacy voucher-source tile classes — kept for any future use. */
   .voucher-source-grid { display: grid; grid-template-columns: 1fr;
     gap: 8px; margin: 12px 0; }
   @media (min-width: 540px) {
@@ -4625,22 +4648,16 @@ function vouchersView() {
     + '<div class="pgy-sub">תלושים ותוים — Shufersal Tav Hazahav, Pluxee, '
     + "Cibus, employer gifts. Track current balances here; they count toward "
     + 'your net worth.</div></div><span class="spacer"></span>'
-    + '<button class="mini" data-action="pick-voucher-source">🔄 Sync from provider</button>'
-    + '<button class="primary" data-action="new-voucher">+ Add voucher</button>'
+    + '<button class="primary" data-action="add-voucher">+ Add voucher</button>'
     + "</div>";
 
   if (!vouchers.length) {
     return head + '<div class="blank"><div class="be">🎟️</div>'
       + "<h2>No vouchers yet</h2>"
-      + "<p>Add a voucher (תו הזהב, BuyMe, Pluxee, a gift card you received) "
-      + "with its current balance — Hon will fold it into your net worth and "
-      + "remind you when it's about to expire. Or sync directly from a "
-      + "provider — even if you're not sure you have any, the check is "
-      + "free.</p>"
-      + '<div class="blank-actions">'
-      + '<button class="mini" data-action="pick-voucher-source">🔄 Check a provider</button>'
-      + '<button class="primary" data-action="new-voucher">+ Add your first voucher</button>'
-      + "</div></div>";
+      + "<p>Sync directly from a provider — Shufersal Tav Hazahav, BuyMe and "
+      + "more — or add one by hand. Either way, Hon folds it into your net "
+      + "worth and reminds you when it's about to expire.</p>"
+      + '<button class="primary" data-action="add-voucher">+ Add your first voucher</button></div>';
   }
 
   // A small per-currency total strip up top so the user can see at a glance
@@ -4664,10 +4681,26 @@ function vouchersView() {
     + vouchers.map(voucherCard).join("") + "</div>";
 }
 
+// "BUYME ALL - מגוון אדיר במתנה אחת" → { title: "BUYME ALL",
+//                                          description: "מגוון אדיר במתנה אחת" }
+// Voucher providers (BuyMe especially) ship long titles like
+// "<brand> - <marketing description>". Splitting on the " - " separator
+// gives a short headline + a smaller subtitle, so the card doesn't
+// truncate mid-Hebrew-word.
+function splitVoucherTitle(name) {
+  const s = String(name || "");
+  const idx = s.indexOf(" - ");
+  if (idx > 0 && idx < s.length - 3) {
+    return { title: s.slice(0, idx).trim(), description: s.slice(idx + 3).trim() };
+  }
+  return { title: s, description: "" };
+}
+
 function voucherCard(v) {
   const meta = voucherProviderMeta(v.provider);
   const cur = v.currency || "ILS";
   const days = daysUntil(v.expiresOn);
+  const split = splitVoucherTitle(v.name);
 
   let expiryBadge = "";
   if (days != null) {
@@ -4691,11 +4724,20 @@ function voucherCard(v) {
   const excludedTag = v.excluded
     ? ' <span class="pgy-tag">excluded</span>' : "";
 
+  // Subtitle line: provider + optional description, joined with " · ".
+  // BuyMe gifts like "BUYME ALL - מגוון אדיר במתנה אחת" surface as
+  // headline "BUYME ALL" with subtitle "BuyMe · מגוון אדיר במתנה אחת",
+  // which fits a single line and respects RTL flow.
+  const subtitle = split.description
+    ? esc(v.provider) + ' <span class="vc-sep">·</span> '
+      + '<span class="vc-desc">' + esc(split.description) + "</span>"
+    : esc(v.provider);
+
   return '<div class="pgy-card' + (v.excluded ? " onhold" : "") + '">'
     + '<div class="pgy-card-top"><div class="pgy-emoji">' + meta.emoji
-    + '</div><div style="flex:1;min-width:0"><div class="pgy-name">'
-    + esc(v.name) + excludedTag + "</div>"
-    + '<div class="pgy-monthly">' + esc(v.provider) + "</div></div></div>"
+    + '</div><div style="flex:1;min-width:0"><div class="pgy-name vc-name">'
+    + esc(split.title) + excludedTag + "</div>"
+    + '<div class="pgy-monthly vc-sub">' + subtitle + "</div></div></div>"
     + '<div class="pgy-body">'
     + '<div class="pgy-figs"><div class="pgy-saved">'
     + money(v.balance, cur) + "</div>"
@@ -4832,16 +4874,19 @@ async function toggleVoucherExcluded(id) {
 }
 
 // Voucher providers Hon can (or will) sync from. Each entry is shown in
-// the source-picker modal — providers without `available: true` render as
+// the add-voucher picker — providers without `available: true` render as
 // "Coming soon" so the user is reminded to check those services for cards
-// they may have forgotten. Adding a new provider is one entry here plus
-// the `start` function that drives its sync flow.
+// they may have forgotten. `domain` is used to pull the provider's
+// favicon via Hon's /logo/* endpoint (which Google-favicons it on first
+// fetch and caches on disk). Adding a new provider is one entry here
+// plus the `start` function that drives its sync flow.
 const VOUCHER_SOURCES = [
   {
     id: "shufersal",
     emoji: "🛒",
     label: "Shufersal — תו הזהב / GiftCard",
     sub: "Tav Hazahav and GiftCard balances",
+    domain: "shufersal.co.il",
     available: true,
     start: () => shufersalSyncModal(),
   },
@@ -4850,6 +4895,7 @@ const VOUCHER_SOURCES = [
     emoji: "🎁",
     label: "BuyMe",
     sub: "Digital gift cards from BuyMe",
+    domain: "buyme.co.il",
     available: true,
     start: () => buymeSyncModal(),
   },
@@ -4858,6 +4904,7 @@ const VOUCHER_SOURCES = [
     emoji: "💎",
     label: "Hi-Tech Zone — היי טק זון",
     sub: "Employer perks and gift sums",
+    domain: "hitechzone.co.il",
     available: false,
     note: "Coming soon — log in to Hi-Tech Zone for your balance.",
   },
@@ -4866,6 +4913,7 @@ const VOUCHER_SOURCES = [
     emoji: "🍱",
     label: "Pluxee / Sodexo",
     sub: "Food vouchers loaded by your employer",
+    domain: "pluxee.co.il",
     available: false,
     note: "Coming soon — check the Pluxee app for the live balance.",
   },
@@ -4874,41 +4922,71 @@ const VOUCHER_SOURCES = [
     emoji: "🍽️",
     label: "Cibus / 10bis",
     sub: "Restaurant credit",
+    domain: "10bis.co.il",
     available: false,
     note: "Coming soon — Cibus loads the daily allowance, no card to track.",
   },
 ];
 
-// Provider-picker modal — a grid of tiles, one per supported source. An
-// available tile starts the provider's own sync flow; a "coming soon" tile
-// just nudges the user to open the provider's app to look. Either way the
-// picker closes before the chosen flow opens, so we don't stack overlays.
-function voucherSourceModal() {
-  openModal((modal) => {
-    const tiles = VOUCHER_SOURCES.map((p) => {
-      const ctaLabel = p.available ? "Sync now →" : "Coming soon";
-      const cls = "voucher-source" + (p.available ? "" : " disabled");
-      return '<button type="button" class="' + cls + '" data-source="'
-        + esc(p.id) + '"' + (p.available ? "" : " disabled")
-        + ' title="' + esc(p.available ? p.sub : (p.note || p.sub)) + '">'
-        + '<div class="voucher-source-emoji">' + p.emoji + "</div>"
-        + '<div class="voucher-source-meta"><div class="voucher-source-name">'
-        + esc(p.label) + "</div>"
-        + '<div class="voucher-source-sub">' + esc(p.sub) + "</div></div>"
-        + '<div class="voucher-source-cta">' + ctaLabel + "</div></button>";
-    }).join("");
+// Renders a logo cell for a voucher provider, layered the same way the
+// bank picker does: emoji as base + favicon overlaid via Hon's /logo/*
+// endpoint. The endpoint accepts a ?domain= override so non-bank
+// providers work without being in the scraper company catalog.
+function voucherSourceLogo(p) {
+  const img = p.domain
+    ? '<img src="/logo/voucher-' + esc(p.id)
+      + '?domain=' + encodeURIComponent(p.domain) + '" '
+      + 'alt="" onerror="this.remove()">'
+    : '';
+  return '<span class="logo">' + p.emoji + img + '</span>';
+}
 
-    modal.innerHTML = "<h2>Sync vouchers from a provider</h2>"
-      + '<p class="hint">Hon can sign in to your gift-card portal and pull '
-      + "active balances — even if you're not sure you have any cards, the "
-      + "check itself is free.</p>"
-      + '<div class="voucher-source-grid">' + tiles + "</div>"
+// Add-voucher picker — mirrors the bank picker's `.pick-list` layout so
+// the visual language is consistent across "+ Add asset" and "+ Add
+// voucher". Available providers start their own sync flow; coming-soon
+// rows render with a small badge and do nothing on click. The last item
+// is "Custom voucher" — opens the manual-entry form for providers Hon
+// doesn't sync (or for a one-off gift card you typed in by hand).
+function addVoucherModal() {
+  openModal((modal) => {
+    const providerRows = VOUCHER_SOURCES.map((p) => {
+      const badge = p.available
+        ? ''
+        : '<span class="pc-count vc-pick-soon">Coming soon</span>';
+      return '<div class="pick-row vc-pick' + (p.available ? '' : ' disabled')
+        + '" data-source="' + esc(p.id) + '"'
+        + (p.available ? '' : ' aria-disabled="true"')
+        + ' title="' + esc(p.available ? p.sub : (p.note || p.sub)) + '">'
+        + voucherSourceLogo(p)
+        + '<div class="vc-pick-meta"><div class="vc-pick-name">'
+        + esc(p.label) + '</div>'
+        + '<div class="vc-pick-sub">' + esc(p.sub) + '</div></div>'
+        + badge + '</div>';
+    }).join('');
+
+    const customRow = '<div class="pick-row vc-pick" data-source="__custom__"'
+      + ' title="Enter a voucher manually">'
+      + '<span class="logo">✏️</span>'
+      + '<div class="vc-pick-meta"><div class="vc-pick-name">Custom voucher</div>'
+      + '<div class="vc-pick-sub">Type in a voucher Hon doesn\'t sync — a gift '
+      + 'card you received, an employer holiday sum, anything.</div></div></div>';
+
+    modal.innerHTML = '<h2>Add a voucher</h2>'
+      + '<p class="hint">Pick a provider to sync your active gift cards, or '
+      + 'enter one by hand. Coming-soon providers are a reminder to check '
+      + 'those services manually until Hon can read them.</p>'
+      + '<div class="pick-list">' + providerRows + customRow + '</div>'
       + '<div class="modal-actions"><button data-x="cancel">Close</button></div>';
 
     modal.querySelector('[data-x="cancel"]').addEventListener("click", closeOverlay);
-    modal.querySelectorAll("[data-source]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const id = btn.dataset.source;
+    modal.querySelectorAll("[data-source]").forEach((row) => {
+      row.addEventListener("click", () => {
+        const id = row.dataset.source;
+        if (id === "__custom__") {
+          closeOverlay();
+          voucherModal(null);
+          return;
+        }
         const src = VOUCHER_SOURCES.find((p) => p.id === id);
         if (!src) return;
         if (!src.available) { toast(src.note || "Not available yet.", false); return; }
@@ -5658,6 +5736,33 @@ function brokerageView() {
       if (g != null) { totalGain += g; haveGain = true; }
     }
   });
+  // Provider-level fallback: when no per-holding cost basis is available
+  // (Meitav reports only value per position) but the connection's
+  // performance report includes cumulative contributions, use that as the
+  // synthetic "cost" — net deposits minus withdrawals. Gain becomes
+  // `current value − net contributions`, which is the same intuition as
+  // cost-basis P&L at the portfolio level. Picks performance reports whose
+  // connection owns any in-scope account (same scoping the chart uses).
+  if (!haveGain && totalValue > 0) {
+    const acctIdsInScope = new Set(acctsInScope.map((a) => a.id));
+    const perfInScope = (performance || []).filter((p) =>
+      state.accounts.some((a) =>
+        acctIdsInScope.has(a.id) && a.connectionId === p.connectionId));
+    let contribs = 0, haveContribs = false;
+    perfInScope.forEach((p) => {
+      const c = p.data && typeof p.data.contributions === "number"
+        ? p.data.contributions : null;
+      if (c != null) {
+        const v = conv(c, p.data.currency || "ILS");
+        if (v != null) { contribs += v; haveContribs = true; }
+      }
+    });
+    if (haveContribs && contribs > 0) {
+      totalCost = contribs;
+      totalGain = totalValue - contribs;
+      haveGain = true;
+    }
+  }
   const gainPct = haveGain && totalCost ? (totalGain / Math.abs(totalCost)) * 100 : null;
 
   // Equity series — SnapTrade's reporting timeline when an account isn't
@@ -9574,6 +9679,10 @@ function handleAction(action, btn) {
     case "toggle-hold": if (id) togglePiggyHold(id); break;
     case "remove-piggy": if (id) removePiggy(id); break;
     case "mark-piggy-used": if (id) markPiggyUsed(id); break;
+    // "Add voucher" opens the unified picker (providers + Custom). The
+    // legacy `new-voucher` action skips straight to the manual form and
+    // is still used internally (e.g. picker → "Custom voucher" row).
+    case "add-voucher": addVoucherModal(); break;
     case "new-voucher": voucherModal(null); break;
     case "edit-voucher": {
       const v = id && (state.vouchers || []).find((x) => x.id === id);
@@ -9582,7 +9691,6 @@ function handleAction(action, btn) {
     }
     case "remove-voucher": if (id) removeVoucher(id); break;
     case "toggle-voucher-excluded": if (id) toggleVoucherExcluded(id); break;
-    case "pick-voucher-source": voucherSourceModal(); break;
     case "month-prev": shiftMonth(1); break;
     case "month-next": shiftMonth(-1); break;
     case "toggle-select":

@@ -1517,7 +1517,10 @@ async function readMeitavBalances(
           if (!Number.isFinite(r.tsua)) continue;
           product *= 1 + r.tsua / 100;
         }
-        return Math.round((product - 1) * 10000) / 100; // back to %, 2 dp
+        // Return a decimal (0.2875 = 28.75%) to match SnapTrade's units —
+        // the UI multiplies by 100 to display as a percent, so emitting a
+        // percent here would double-scale into a 2875% display.
+        return Math.round((product - 1) * 10000) / 10000;
       };
       const sumContrib = (window: typeof rows): number | null =>
         window.length
