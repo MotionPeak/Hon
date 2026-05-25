@@ -11,6 +11,25 @@ import { makeLog } from './log.js';
 
 const runnerLog = makeLog('runner');
 
+// Bank scrapers where pre-restored cookies are known to break the
+// underlying israeli-bank-scrapers login() step (the library waits for a
+// login form, but the cookies have already authenticated the user past
+// it, so the scrape hangs to its 90s timeout). Anything not listed here
+// gets full session reuse — typically skipping the OTP for several days
+// after the first successful sign-in.
+//
+// Add new ids here ONLY after seeing the symptom in the logs:
+//   `library.progress type=LOGGING_IN`  → never reaches LOGIN_SUCCESS
+//   the failure screenshot lands on the post-login dashboard
+// Removing one is just as safe — the scraper falls back to a fresh login
+// the moment the cookies don't actually skip the form.
+const BANK_SESSION_DENYLIST = new Set<string>([
+  // Max consistently lands the browser on the dashboard when cookies are
+  // pre-loaded, but the library still waits for the login form. The hang
+  // wastes 4 minutes per attempt until the default timeout kicks in.
+  'max',
+]);
+
 // Companies whose "balance" is the next-bill outstanding, computed by the
 // scraper from the full set of pending + scheduled charges across the cycle.
 // Skipping the incremental-scrape shortcut for them — see chooseStartDate.
@@ -210,13 +229,19 @@ export class ScrapeRunner {
           session,
         );
       } else if (args.interactive) {
-        // No session for bank scrapers: israeli-bank-scrapers re-runs its full
-        // login every sync, and pre-restoring cookies has confused some banks
-        // into landing on the post-login dashboard while the library waited
-        // for a login form — hanging the scrape with no timeout. Sessions
-        // stay where they actually pay off: the pension flow below, which
-        // Hon drives itself.
-        log.info('dispatch', { runner: 'bank.interactive', companyId: args.companyId });
+        // Pass the per-connection session through so the bank can trust the
+        // device and skip the OTP step (Hapoalim/Beinleumi/etc. honour
+        // remembered cookies for a window of days). The denylist holds the
+        // banks where cookie-restore has historically confused the
+        // underlying scraper into landing on the dashboard while the
+        // library was still waiting for a login form — for those Hon falls
+        // back to a clean session every sync.
+        const bankSession = BANK_SESSION_DENYLIST.has(args.companyId) ? undefined : session;
+        log.info('dispatch', {
+          runner: 'bank.interactive',
+          companyId: args.companyId,
+          sessionReused: !!bankSession && !!bankSession.cookies?.length,
+        });
         outcome = await runInteractiveScrape(
           args.companyId,
           args.credentials,
@@ -224,17 +249,22 @@ export class ScrapeRunner {
           onProgress,
           this.prepareScreenshotPath(args.companyId),
           () => this.requestOtp(status),
-          undefined,
+          bankSession,
         );
       } else {
-        log.info('dispatch', { runner: 'bank.headless', companyId: args.companyId });
+        const bankSession = BANK_SESSION_DENYLIST.has(args.companyId) ? undefined : session;
+        log.info('dispatch', {
+          runner: 'bank.headless',
+          companyId: args.companyId,
+          sessionReused: !!bankSession && !!bankSession.cookies?.length,
+        });
         outcome = await runScrape(
           args.companyId,
           args.credentials,
           startDate,
           onProgress,
           this.prepareScreenshotPath(args.companyId),
-          undefined,
+          bankSession,
         );
       }
 
@@ -408,7 +438,47 @@ function describeError(outcome: { errorType?: string; errorMessage?: string }): 
     TIMEOUT: 'The institution timed out. Try again.',
   };
   const type = outcome.errorType ?? 'GENERIC';
-  return hints[type] ?? outcome.errorMessage ?? 'The scrape failed.';
+  if (hints[type]) return hints[type];
+  return humanizeRawError(outcome.errorMessage) ?? outcome.errorMessage ?? 'The scrape failed.';
+}
+
+/**
+ * Rewrites the most common infrastructure errors that bubble up from puppeteer
+ * / fetch / fs into a short summary plus a hint at what to do, so the UI shows
+ * something actionable instead of a stack-trace excerpt with documentation URLs.
+ * Returns undefined when the message looks like a real domain error worth
+ * showing verbatim.
+ */
+function humanizeRawError(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  const msg = raw.replace(/\s+/g, ' ').trim();
+
+  if (/Could not find Chrome \(ver/i.test(msg) || /Could not find expected browser/i.test(msg)) {
+    return (
+      'Hon’s bundled Chrome is missing. Either point Hon at an installed ' +
+      'Chrome by setting PUPPETEER_EXECUTABLE_PATH (on Windows, often ' +
+      '"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"), or ' +
+      're-run `npm install` in sidecar/ to download the bundled build. ' +
+      'See the README’s Windows gotchas for the step-by-step.'
+    );
+  }
+  if (/ENOTFOUND|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|getaddrinfo/i.test(msg)) {
+    return 'Network error reaching the institution. Check the connection and try again.';
+  }
+  if (/Navigation timeout|Waiting for selector .* failed: timeout/i.test(msg)) {
+    return 'The institution’s page took too long to load. Try syncing again.';
+  }
+  if (/Target closed|Session closed|Protocol error \(.*\): Target closed/i.test(msg)) {
+    return 'The browser closed before the scrape finished. Try syncing again.';
+  }
+  if (/EACCES|EPERM/i.test(msg)) {
+    return (
+      'Hon could not write to its data folder. Check the permissions on ' +
+      '~/Library/Application Support/Hon (macOS), %APPDATA%\\Hon (Windows), ' +
+      'or your $HON_DATA_DIR.'
+    );
+  }
+  return undefined;
 }
 
 function humanizeProgress(progressType: string, reusingSession = false): string {
