@@ -573,7 +573,10 @@ async function fetchEarliestActivityDate(
       if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) continue;
       if (!earliest || iso < earliest) earliest = iso;
     }
-    process.stdout.write(
+    // Write to stderr so the line lands in the sidecar.log file
+    // (web.mjs tees stderr → ~/Library/.../Hon/sidecar.log; stdout is
+    // inherit and only the launching terminal sees it).
+    process.stderr.write(
       `snaptrade activities ${accountId}: ${rows.length} rows, `
       + `earliest=${earliest ?? 'NONE'}`
       + (rows.length && !earliest ? `, sample keys=[${sampleKeys.join(',')}]` : '')
@@ -581,7 +584,7 @@ async function fetchEarliestActivityDate(
     );
     return earliest;
   } catch (err) {
-    process.stdout.write(
+    process.stderr.write(
       `snaptrade activities ${accountId}: ${describeSnapError(err)}\n`,
     );
     return undefined;
