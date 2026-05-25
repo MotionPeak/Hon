@@ -94,6 +94,42 @@ quickstart above runs the same way on Windows once they are in place.
   Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" `
     -Name "LongPathsEnabled" -Value 1
   ```
+- **`Could not find Chrome (ver. X)` at first launch.** Puppeteer downloads
+  a pinned Chrome build (~170 MB) during `npm install`. On Windows the
+  download often gets silently quarantined by **Windows Defender** or
+  blocked by **Controlled Folder Access** mid-extraction — you end up
+  with the version folder but no `chrome.exe` inside. Two ways out:
+
+  **Easy path — use the Chrome you already have.** Almost every Windows
+  machine already has Google Chrome installed. Point Hon at it and skip
+  the bundled download entirely:
+  ```cmd
+  setx PUPPETEER_EXECUTABLE_PATH "C:\Program Files\Google\Chrome\Application\chrome.exe"
+  ```
+  (Use whatever `chrome://version` shows under "Executable Path" if
+  yours is elsewhere — quotes matter.) `setx` writes the variable
+  permanently, but only new terminals inherit it — **close that window
+  and open a fresh one**, then `cd %USERPROFILE%\Hon\sidecar && npm run web`.
+  Don't have Chrome? Install it from <https://www.google.com/chrome/>
+  first — the regular installer is fine.
+
+  **Or: retry the bundled download cleanly.** Add
+  `C:\Users\<you>\.cache\puppeteer` to Windows Security → Virus &
+  threat protection → **Exclusions**, force-delete any half-extracted
+  leftovers, and reinstall to the path Puppeteer reads from:
+  ```powershell
+  Remove-Item -Recurse -Force "$env:USERPROFILE\Hon\sidecar\chrome", `
+    "$env:USERPROFILE\.cache\puppeteer" -ErrorAction SilentlyContinue
+  cd "$env:USERPROFILE\Hon\sidecar"
+  node node_modules\@puppeteer\browsers\lib\cjs\main-cli.js `
+    install chrome@stable --path "$env:USERPROFILE\.cache\puppeteer"
+  ```
+  Then verify the binary actually survived:
+  `dir %USERPROFILE%\.cache\puppeteer\chrome\*\chrome-win64\chrome.exe`.
+  If it's missing, the AV exclusion didn't take — check **Protection
+  history** in Windows Security; the quarantine entry will name the
+  exact tool that ate it.
+
 - **Running inside a Parallels (or other) VM?** If the engine runs on
   your Mac and you only want the UI on the Windows side, leave the
   engine on the Mac and point Edge/Chrome inside the VM at the Mac's
@@ -514,6 +550,7 @@ NAS, or unusual setups.
 | `HON_DATA_DIR` | OS app-data dir (see [Where data lives](#where-data-lives)) | Override the location of `hon.db`, `models/`, `browser-profiles/`, `debug/`. The Docker image points this at `/data` so the volume captures it. |
 | `HON_PENSION_HEADFUL` | unset | When set (`1`), forces every pension scrape to launch a visible Chromium window — handy for debugging silent failures. Meitav/Menora are always headful. |
 | `HON_BROWSER_NO_SANDBOX` | unset | Add Chromium's `--no-sandbox` flag. Needed in some Docker/Linux server setups; harmless on desktops. |
+| `PUPPETEER_EXECUTABLE_PATH` | unset | Skip Puppeteer's bundled Chrome and drive the Chrome at this path instead. Handy on Windows when antivirus blocks the bundled download — point it at your installed Chrome (e.g. `C:\Program Files\Google\Chrome\Application\chrome.exe`). Read by Puppeteer itself, not Hon. |
 | `HON_LOG_DEBUG` | unset | Verbose logging across the engine — request bodies, scraper steps, LLM prompts. Off by default to keep logs readable. |
 | `XDG_DATA_HOME` | unset | Standard XDG variable Hon honours on Linux when picking the default data dir. |
 | `APPDATA` | set by Windows | Windows-only; standard env Hon honours when picking the default data dir. |
