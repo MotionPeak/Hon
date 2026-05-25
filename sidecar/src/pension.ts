@@ -1418,6 +1418,32 @@ async function readMeitavBalances(
         holdingsByTik.set(tikKey, list);
       }
     }
+    // Portfolio inception — Meitav reports it two ways and we use whichever
+    // we get:
+    //   • GetTikInfo's `TarichPticha` is the broker-recorded open date of
+    //     the portfolio (preferred — authoritative, set once).
+    //   • Failing that, the earliest `Taarich` in GetTsuot's monthly series
+    //     is the first month with returns, which is effectively inception.
+    // Both arrive as ISO strings ("2023-09-12T00:00:00"); slice to YYYY-MM-DD
+    // before handing to the runner. The repo only overrides accounts whose
+    // inception column is currently NULL, so this never stomps a user-set
+    // override from the UI date picker.
+    // Look up the GetTsuot response directly (the named `tsuotDump` const
+    // declared later in this function is for the performance-series parse).
+    const tsuotForInception = dump.find((d) => d.url.endsWith('/Manager/GetTsuot'));
+    let tsuotInception: string | undefined;
+    if (tsuotForInception && tsuotForInception.body) {
+      const raw: any[] = Array.isArray(tsuotForInception.body)
+        ? tsuotForInception.body
+        : Array.isArray((tsuotForInception.body as any)?.t)
+          ? (tsuotForInception.body as any).t : [];
+      const dates = raw
+        .map((r) => (typeof r.Taarich === 'string' ? r.Taarich.slice(0, 10) : ''))
+        .filter((s) => /^\d{4}-\d{2}-\d{2}$/.test(s));
+      if (dates.length) {
+        tsuotInception = dates.sort()[0];
+      }
+    }
     if (tikDump && typeof tikDump.body === 'object' && tikDump.body) {
       const data: any = tikDump.body;
       const t: any = data && data.t ? data.t : data;
@@ -1431,6 +1457,11 @@ async function readMeitavBalances(
         // "תיק השקעות 40739" — fall back to "Meitav portfolio" if no number.
         const label = `תיק השקעות${num ? ` ${num}` : ''}${host ? ` · ${host}` : ''}`;
         const holdings = holdingsByTik.get(num) ?? [];
+        const tarichPticha: unknown = tik.TarichPticha;
+        const inceptionDate = typeof tarichPticha === 'string'
+            && /^\d{4}-\d{2}-\d{2}/.test(tarichPticha)
+          ? tarichPticha.slice(0, 10)
+          : tsuotInception;
         accounts.push({
           accountNumber: `meitav:portfolio:${num || label}`,
           label,
@@ -1438,6 +1469,7 @@ async function readMeitavBalances(
           currency: 'ILS',
           transactions: [],
           holdings: holdings.length ? holdings : undefined,
+          inceptionDate,
         });
       }
     }
