@@ -885,7 +885,7 @@ async function readBalances(
     return readHarelBalances(page, debugSibling(screenshotPath, '-harel-frame.html'));
   }
   if (companyId === 'clal') return readClalBalances(page);
-  if (companyId === 'meitav') return readMeitavBalances(page);
+  if (companyId === 'meitav') return readMeitavBalances(page, debugSibling(screenshotPath, '-meitav-api.json'));
   if (companyId === 'menora') return readMenoraBalances(page);
   return readGenericBalances(page);
 }
@@ -1192,44 +1192,136 @@ interface MeitavRow {
  * The same fund recurs once per period — dedup by account number, keeping the
  * largest (latest) balance. Returns [] until the session is authenticated.
  */
-async function readMeitavBalances(page: Page): Promise<NormalizedAccount[]> {
-  let raw: { pension: MeitavRow[]; other: MeitavRow[] } | null = null;
-  try {
-    raw = (await page.evaluate(async () => {
-      const res = await fetch('/v2/api/AllAccounts/GetAllAmitAccounts', {
-        credentials: 'include',
+async function readMeitavBalances(
+  page: Page,
+  rawDumpPath?: string,
+): Promise<NormalizedAccount[]> {
+  // Meitav splits a customer across multiple "personal areas", each a separate
+  // sub-portal with its own API root:
+  //   • Pension (default landing)          → /v2/api/AllAccounts/GetAllAmitAccounts
+  //   • Gemel + Hishtalmut (אזור גמל)      → /v2/api/AmitLobby/* with role switch
+  //   • Portfolio Management (אזור ניהול תיקים) → /v3/api/Manager/* at /lobbymanager
+  // We pull each area we can reach, dump everything to disk verbatim so the
+  // structure is always recoverable for future extension, and merge the result
+  // into a single account list. saveDebug's network-capture path caps at 60
+  // entries and frequently misses dashboard XHRs entirely, so this dedicated
+  // dump is the source of truth.
+  const accounts: NormalizedAccount[] = [];
+  const dump: { url: string; status: number; body: any }[] = [];
+
+  // Small helper: fetch a list of endpoints in the page context and append
+  // each response to the shared dump.
+  const probe = async (urls: string[]): Promise<void> => {
+    try {
+      const results = (await page.evaluate(async (us: string[]) => {
+        const out: { url: string; status: number; body: any }[] = [];
+        for (const u of us) {
+          try {
+            const r = await fetch(u, { credentials: 'include' });
+            const text = await r.text();
+            let body: any = text;
+            try { body = JSON.parse(text); } catch { /* keep as text */ }
+            out.push({ url: u, status: r.status, body });
+          } catch (e: any) {
+            out.push({ url: u, status: 0, body: { error: String(e && e.message) } });
+          }
+        }
+        return out;
+      }, urls)) as { url: string; status: number; body: any }[];
+      dump.push(...results);
+    } catch {
+      /* page navigated away — caller handles the gap */
+    }
+  };
+
+  // 1) PENSION area — the page lands here after sign-in.
+  await probe([
+    '/v2/api/AllAccounts/GetAllAmitAccounts',
+    '/v2/api/AmitLobby/getAllAmitAccounts',
+    '/v2/api/DepositProcess/GetDepsitBalance',
+  ]);
+  const amitDump = dump.find((d) => d.url.endsWith('/AllAccounts/GetAllAmitAccounts'));
+  if (amitDump && typeof amitDump.body === 'object' && amitDump.body) {
+    const data: any = amitDump.body;
+    const t: any = data && data.t ? data.t : data;
+    const pick = (arr: any[]): MeitavRow[] =>
+      (arr || []).map((p: any) => ({
+        name: p.AccountNumForShow,
+        accountNum: p.AccountNum,
+        balance: p.YitrotAccountSum,
+      }));
+    const byAccount = new Map<string, { name: string; balance: number }>();
+    for (const row of [...pick(t.CustomPensionAccountMain), ...pick(t.CustomAccountMain)]) {
+      const balance = Number(row.balance);
+      const name = (row.name ?? '').trim();
+      if (!name || !Number.isFinite(balance)) continue;
+      const key = String(row.accountNum ?? name);
+      const prev = byAccount.get(key);
+      if (!prev || balance > prev.balance) byAccount.set(key, { name, balance });
+    }
+    for (const p of byAccount.values()) {
+      accounts.push({
+        accountNumber: `meitav:${p.name}`,
+        label: p.name,
+        balance: Math.round(p.balance * 100) / 100,
+        currency: 'ILS',
+        transactions: [],
       });
-      if (!res.ok) return null;
-      const data: any = await res.json();
+    }
+  }
+
+  // 2) PORTFOLIO MANAGEMENT area (תיק השקעות) — gated behind a role switch
+  // implemented by navigating to /lobbymanager. The page sets CurrentRole=1
+  // and PortfolioNumber=<n> cookies, after which /v3/api/Manager/* is live.
+  // GetTikInfo returns MisparTikList[]: each entry is one managed portfolio
+  // with TotalTikAmount (current value), MisparTik (portfolio number) and
+  // NameHevra (the host bank/broker). One row per portfolio the user holds.
+  try {
+    await page.goto('https://customers.meitav.co.il/lobbymanager', {
+      waitUntil: 'domcontentloaded',
+      timeout: 30_000,
+    });
+    await delay(3000);
+    await probe([
+      '/v3/api/Manager/GetTikInfo',
+      '/v3/api/Manager/GetHerkevTik',
+      '/v3/api/Manager/GetHerkevDate',
+      '/v3/api/Manager/GetMediniyutHashkaa',
+    ]);
+    const tikDump = dump.find((d) => d.url.endsWith('/Manager/GetTikInfo'));
+    if (tikDump && typeof tikDump.body === 'object' && tikDump.body) {
+      const data: any = tikDump.body;
       const t: any = data && data.t ? data.t : data;
-      const pick = (arr: any[]): any[] =>
-        (arr || []).map((p: any) => ({
-          name: p.AccountNumForShow,
-          accountNum: p.AccountNum,
-          balance: p.YitrotAccountSum,
-        }));
-      return { pension: pick(t.CustomPensionAccountMain), other: pick(t.CustomAccountMain) };
-    })) as { pension: MeitavRow[]; other: MeitavRow[] } | null;
+      const list: any[] = Array.isArray(t.MisparTikList) ? t.MisparTikList
+        : (t.Tik ? [t.Tik] : []);
+      for (const tik of list) {
+        const balance = Number(tik.TotalTikAmount);
+        if (!Number.isFinite(balance)) continue;
+        const num = tik.MisparTik != null ? String(tik.MisparTik) : '';
+        const host = (tik.NameHevra || tik.BankName || '').trim();
+        // "תיק השקעות 40739" — fall back to "Meitav portfolio" if no number.
+        const label = `תיק השקעות${num ? ` ${num}` : ''}${host ? ` · ${host}` : ''}`;
+        accounts.push({
+          accountNumber: `meitav:portfolio:${num || label}`,
+          label,
+          balance: Math.round(balance * 100) / 100,
+          currency: 'ILS',
+          transactions: [],
+        });
+      }
+    }
   } catch {
-    return [];
+    /* portfolio area unreachable — pension still got pulled */
   }
-  if (!raw) return [];
-  const byAccount = new Map<string, { name: string; balance: number }>();
-  for (const row of [...raw.pension, ...raw.other]) {
-    const balance = Number(row.balance);
-    const name = (row.name ?? '').trim();
-    if (!name || !Number.isFinite(balance)) continue;
-    const key = String(row.accountNum ?? name);
-    const prev = byAccount.get(key);
-    if (!prev || balance > prev.balance) byAccount.set(key, { name, balance });
+
+  if (rawDumpPath && dump.length) {
+    try {
+      writeFileSync(rawDumpPath, JSON.stringify(dump, null, 2), 'utf8');
+    } catch {
+      /* best effort */
+    }
   }
-  return [...byAccount.values()].map((p) => ({
-    accountNumber: `meitav:${p.name}`,
-    label: p.name,
-    balance: Math.round(p.balance * 100) / 100,
-    currency: 'ILS',
-    transactions: [],
-  }));
+  return accounts;
 }
 
 /**
