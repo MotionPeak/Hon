@@ -1033,16 +1033,28 @@
     text-transform: uppercase; letter-spacing: .8px; }
   .hp-list { display: flex; flex-direction: column; gap: 2px;
     margin: 0 -6px; }
-  /* Subheader per provider when holdings span more than one (SnapTrade +
-     Meitav portfolio, etc.). Quiet divider rather than a loud card. */
-  .hp-prov-head { font: 600 11.5px/1 system-ui;
-    letter-spacing: .6px; text-transform: uppercase;
-    color: var(--faint); padding: 14px 8px 6px;
-    border-bottom: 1px solid var(--card-hi); margin: 2px 0; }
-  .hp-prov-head:first-child { padding-top: 4px; }
-  .hp-prov-count { color: var(--faint); font-weight: 500;
-    text-transform: none; letter-spacing: 0; margin-left: 6px;
-    font-size: 11px; }
+  /* Collapsible provider summary row inside the holdings panel. Default
+     state is collapsed (shows portfolio-level totals); click to expand the
+     individual positions underneath. Quiet styling — it lives inside a card
+     and shouldn't fight the per-holding rows. */
+  .hp-prov-row { display: flex; align-items: center; gap: 10px;
+    width: 100%; background: transparent; border: 0;
+    padding: 12px 8px; margin: 6px 0 0;
+    border-radius: 10px; cursor: pointer; color: inherit;
+    transition: background .18s ease; }
+  .hp-prov-row:hover { background: var(--card-hi); }
+  .hp-prov-row.open { background: var(--card-hi); }
+  .hp-prov-chev { width: 12px; color: var(--faint);
+    font-size: 11px; transition: transform .15s ease; }
+  .hp-prov-row.open .hp-prov-chev { transform: rotate(0); }
+  .hp-prov-name { font: 600 14px/1 system-ui; flex: 1;
+    text-align: left; }
+  .hp-prov-cnt { font: 500 11.5px/1 system-ui; color: var(--faint); }
+  .hp-prov-val { font: 700 14px/1 system-ui; margin-left: auto;
+    text-align: right; display: flex; flex-direction: column;
+    gap: 3px; align-items: flex-end; }
+  .hp-prov-pct { font: 500 11px/1 system-ui; color: var(--faint); }
+  .hp-prov-body { padding: 2px 0 8px; }
   .hp-item { border-radius: 12px;
     animation: fade-up .35s ease both;
     transition: background .18s ease; }
@@ -1994,6 +2006,11 @@ const state = {
   brkBase: "native",     // "native" | "ILS" — currency the headlines render in
   brkAccount: "all",     // "all" | accountId — filter for chart + holdings
   brkOpenHolding: null,  // symbol of the holding whose detail card is open
+  // Per-provider collapse map for the holdings panel. Keys are provider keys
+  // ('conn:<id>' or 'acct:<id>'); value true ⇒ collapsed (positions hidden).
+  // Default-collapsed when ≥ 2 providers; the user can expand a section to
+  // see its individual holdings.
+  brkProvCollapsed: {},
   expandedHoldings: {},  // { accountId: true } account cards showing holdings
   subAliases: {},        // { lapsedName: activeName } — AI-detected renames
   subAliasSig: null,     // signature of the name set subAliases was built for
@@ -5707,18 +5724,44 @@ function holdingsPanel(holdings, holdSnaps, conv, useIls, displayCur, totalValue
       const vb = Object.values(groups[b].bySym).reduce((s, r) => s + (r.value || 0), 0);
       return vb - va;
     });
+    // When ≥ 2 providers, default to collapsed so the panel shows portfolio-
+    // level summaries first; the user expands to drill in. With one provider
+    // there's nothing to group by, so render flat.
+    const multi = provKeys.length > 1;
     const sections = provKeys.map((k) => {
       const g = groups[k];
       const rows = Object.values(g.bySym).sort((x, y) => y.value - x.value);
-      // Per-provider subheader, only when there's more than one provider.
-      const header = provKeys.length > 1
-        ? '<div class="hp-prov-head">' + esc(g.label)
-          + ' <span class="hp-prov-count">'
-          + rows.length + (rows.length === 1 ? ' position' : ' positions')
-          + '</span></div>'
-        : '';
-      return header + rows.map((r, idx) =>
-        holdingRow(r, idx, allocTotal, holdSnaps, conv, useIls, displayCur, range)).join('');
+      if (!multi) {
+        return rows.map((r, idx) =>
+          holdingRow(r, idx, allocTotal, holdSnaps, conv, useIls, displayCur, range)).join('');
+      }
+      // Default collapsed unless the user opened it. Toggle key is the
+      // provider key; click anywhere on the header row flips it.
+      const collapsed = state.brkProvCollapsed[k] !== false; // undefined ⇒ collapsed
+      const provValueNative = rows.reduce((s, r) => s + (r.value || 0), 0);
+      // Convert to display currency; conv handles per-row currency, but rows
+      // within a single provider share currency in practice (Meitav = ILS,
+      // SnapTrade = the broker's native), so use the first row's currency.
+      const provCur = rows[0] ? rows[0].currency : displayCur;
+      const provValueShown = conv(provValueNative, provCur);
+      const provPct = allocTotal ? (provValueNative / allocTotal) * 100 : 0;
+      const chev = collapsed ? '▸' : '▾';
+      const header = '<button class="hp-prov-row' + (collapsed ? '' : ' open')
+        + '" data-action="brk-prov-toggle" data-arg="' + esc(k) + '">'
+        + '<span class="hp-prov-chev">' + chev + '</span>'
+        + '<span class="hp-prov-name">' + esc(g.label) + '</span>'
+        + '<span class="hp-prov-cnt">' + rows.length
+        + (rows.length === 1 ? ' position' : ' positions') + '</span>'
+        + '<span class="hp-prov-val">'
+        + (provValueShown == null ? '' : money(provValueShown, displayCur))
+        + '<span class="hp-prov-pct">' + provPct.toFixed(1) + '%</span></span>'
+        + '</button>';
+      const body = collapsed
+        ? ''
+        : '<div class="hp-prov-body">' + rows.map((r, idx) =>
+            holdingRow(r, idx, allocTotal, holdSnaps, conv, useIls, displayCur, range)).join('')
+          + '</div>';
+      return header + body;
     }).join('');
     body = '<div class="hp-list">' + sections + '</div>';
   }
@@ -9393,6 +9436,13 @@ function handleAction(action, btn) {
       if (btn && btn.dataset.arg) {
         state.brkOpenHolding = state.brkOpenHolding === btn.dataset.arg
           ? null : btn.dataset.arg;
+        render();
+      }
+      break;
+    case "brk-prov-toggle":
+      if (btn && btn.dataset.arg) {
+        const key = btn.dataset.arg;
+        state.brkProvCollapsed[key] = !state.brkProvCollapsed[key];
         render();
       }
       break;
