@@ -6041,9 +6041,19 @@ function holdingColor(idx) {
 // across every account it sits in. Currency conversion happens on each point.
 function buildHoldingSeries(holdSnaps, symbol, accountIds, conv, currency) {
   const ids = new Set(accountIds);
+  // Per-account inception cap — clip snapshots before the account's user-set
+  // inception date so the sparkline obeys the same "since I started" rule as
+  // the main equity chart. A holding can span multiple accounts; each one's
+  // contribution gets clipped to its own inception.
+  const inceptionByAcct = {};
+  (state.accounts || []).forEach((a) => {
+    if (a.inceptionDate) inceptionByAcct[a.id] = a.inceptionDate;
+  });
   const byDate = {};
   holdSnaps.forEach((s) => {
     if (s.symbol !== symbol || !ids.has(s.accountId)) return;
+    const cap = inceptionByAcct[s.accountId];
+    if (cap && s.date < cap) return;
     const v = conv(s.value, s.currency || currency);
     if (v == null) return;
     const e = byDate[s.date] || (byDate[s.date] = {
