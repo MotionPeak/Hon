@@ -99,45 +99,51 @@ export async function scrapeShufersalGiftCards(
     });
 
     log.info('navigate', { url: SHUFERSAL_URL });
-    await page.goto(SHUFERSAL_URL, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+    // networkidle2 waits for the SPA bundle's initial XHRs to settle so
+    // Angular's NgZone has wired its (click) listeners by the time we
+    // click the CTA. domcontentloaded fires too early — the button is in
+    // the DOM but its handler may not be attached yet, so a real-mouse
+    // click silently goes nowhere.
+    await page.goto(SHUFERSAL_URL, { waitUntil: 'networkidle2', timeout: 60_000 });
     log.info('navigate.done', { landedUrl: page.url() });
 
-    // The "אולי יש לך תו?" button mounts after the SPA bundle finishes booting.
-    // Click it to open the phone-entry modal. If we can't find it, dump the
-    // page HTML so the next pass can locate the right selector.
-    try {
-      await clickByText(page, TEXT.haveCardCta, 30_000);
-      log.info('modal.opened');
-    } catch (err) {
-      log.error('cta.missing', {
-        landedUrl: page.url(),
-        message: err instanceof Error ? err.message : String(err),
-      });
-      if (options.debugDumpPath) {
-        try {
-          const html = await page.content();
-          writeFileSync(options.debugDumpPath, html, 'utf8');
-          log.info('debug.dump', { path: options.debugDumpPath, bytes: html.length });
-        } catch {/* best effort */}
+    // Click-and-verify: click the CTA, then briefly wait for the modal's
+    // marker text to appear. If Angular still hadn't wired the click
+    // handler the first time, a second click on the now-live button does
+    // the trick. Up to 3 tries (≈ 5s total) before we give up and dump.
+    let modalOpened = false;
+    for (let attempt = 1; attempt <= 3 && !modalOpened; attempt += 1) {
+      try {
+        await clickByText(page, TEXT.haveCardCta, 30_000);
+      } catch (err) {
+        log.error('cta.missing', {
+          attempt,
+          landedUrl: page.url(),
+          message: err instanceof Error ? err.message : String(err),
+        });
+        if (options.debugDumpPath) {
+          try {
+            writeFileSync(options.debugDumpPath, await page.content(), 'utf8');
+          } catch {/* best effort */}
+        }
+        throw new Error(
+          'Could not find the "אולי יש לך תו?" button on the Shufersal landing page. '
+          + 'Their layout may have changed — see debug HTML dump.',
+        );
       }
-      throw new Error(
-        'Could not find the "אולי יש לך תו?" button on the Shufersal landing page. '
-        + 'Their layout may have changed — see debug HTML dump.',
-      );
+      try {
+        await page.waitForFunction(
+          (link: string) => (document.body?.innerText || '').includes(link),
+          { timeout: 1500 },
+          TEXT.termsLink,
+        );
+        modalOpened = true;
+        log.info('modal.opened', { attempt });
+      } catch {
+        log.warn('modal.not.yet.open.retrying', { attempt });
+      }
     }
-
-    // Wait specifically for the modal to mount — the "תנאי השימוש" link only
-    // exists inside the phone-entry dialog, so its presence is a much
-    // tighter signal than "any visible input on the page" (the landing has
-    // a search box and other inputs that could mislead).
-    try {
-      await page.waitForFunction(
-        (link: string) => (document.body?.innerText || '').includes(link),
-        { timeout: 25_000 },
-        TEXT.termsLink,
-      );
-      log.info('modal.mounted');
-    } catch (err) {
+    if (!modalOpened) {
       log.error('modal.never.mounted', { landedUrl: page.url() });
       if (options.debugDumpPath) {
         try {
@@ -146,8 +152,8 @@ export async function scrapeShufersalGiftCards(
         } catch {/* best effort */}
       }
       throw new Error(
-        'Clicked the CTA but the phone-entry modal never opened. The page '
-        + 'layout may have changed — see debug HTML dump.',
+        'Clicked the "אולי יש לך תו?" CTA but the phone-entry modal never opened. '
+        + 'The page layout may have changed — see debug HTML dump.',
       );
     }
 
@@ -168,7 +174,11 @@ export async function scrapeShufersalGiftCards(
 
     // Send-code is `disabled="true"` until the form is fully valid (phone
     // typed + terms ticked AND ng-touched). Wait for it to enable so we
-    // don't click through to a no-op state.
+    // don't click through to a no-op state. If it stays disabled past the
+    // wait, that's almost always Shufersal's anti-abuse rate-limit kicking
+    // in after many OTPs to the same number — surface that to the user as
+    // a real error instead of letting the next step time out cryptically.
+    let sendEnabled = false;
     try {
       await page.waitForFunction(
         (label: string) => {
@@ -183,11 +193,26 @@ export async function scrapeShufersalGiftCards(
         { timeout: 10_000 },
         TEXT.sendCode,
       );
+      sendEnabled = true;
       log.info('sms.send.enabled');
     } catch (err) {
       log.warn('sms.send.still.disabled', {
         message: err instanceof Error ? err.message : String(err),
       });
+    }
+    if (!sendEnabled) {
+      if (options.debugDumpPath) {
+        try {
+          writeFileSync(options.debugDumpPath, await page.content(), 'utf8');
+          log.info('debug.dump', { path: options.debugDumpPath });
+        } catch {/* best effort */}
+      }
+      throw new Error(
+        "Shufersal's \"שליחת קוד\" button never enabled. The most likely "
+        + 'cause is that Shufersal is rate-limiting your phone number after '
+        + 'too many OTP requests today — try again in 30–60 minutes. If it '
+        + 'persists, the form layout may have changed (see debug HTML dump).',
+      );
     }
 
     await clickByText(page, TEXT.sendCode, 15_000);
