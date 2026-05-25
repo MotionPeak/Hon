@@ -12,6 +12,47 @@ import { fileURLToPath } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 process.chdir(here);
 
+// Hon skips Puppeteer's bundled Chrome download at install (see .npmrc) —
+// 170 MB that Windows AV routinely quarantines mid-extract, and that nearly
+// every machine already has installed via a regular Chrome install. So at
+// launch time, find the installed Chrome (or Edge as a fallback) and point
+// Puppeteer at it. Honours PUPPETEER_EXECUTABLE_PATH when the user set it.
+if (!process.env.PUPPETEER_EXECUTABLE_PATH) {
+  const candidates = process.platform === 'win32'
+    ? [
+        `${process.env.ProgramFiles || 'C:\\Program Files'}\\Google\\Chrome\\Application\\chrome.exe`,
+        `${process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)'}\\Google\\Chrome\\Application\\chrome.exe`,
+        `${process.env.LOCALAPPDATA || ''}\\Google\\Chrome\\Application\\chrome.exe`,
+        `${process.env.ProgramFiles || ''}\\Microsoft\\Edge\\Application\\msedge.exe`,
+        `${process.env['ProgramFiles(x86)'] || ''}\\Microsoft\\Edge\\Application\\msedge.exe`,
+      ]
+    : process.platform === 'darwin'
+    ? [
+        '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+        `${process.env.HOME || ''}/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`,
+        '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+        '/Applications/Chromium.app/Contents/MacOS/Chromium',
+      ]
+    : [
+        '/usr/bin/google-chrome',
+        '/usr/bin/google-chrome-stable',
+        '/usr/bin/chromium',
+        '/usr/bin/chromium-browser',
+        '/snap/bin/chromium',
+      ];
+  const found = candidates.filter(Boolean).find((p) => existsSync(p));
+  if (found) {
+    process.env.PUPPETEER_EXECUTABLE_PATH = found;
+    console.log(`Using installed browser: ${found}`);
+  } else {
+    console.warn(
+      '\n⚠  No installed Chrome found. Hon needs Chrome (or Chromium / Edge)' +
+      '\n   to scrape banks and pension portals. Install Chrome from' +
+      '\n   https://www.google.com/chrome/ and re-run `npm run web`.\n',
+    );
+  }
+}
+
 const port = process.env.HON_PORT || '4000';
 // Reuse a token from the environment when one is set — a server keeps the same
 // token across restarts so its URL stays stable; otherwise generate a fresh

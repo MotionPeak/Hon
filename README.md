@@ -33,7 +33,10 @@ npm run web        # opens http://127.0.0.1:4000 in your browser
 - **macOS / Linux** — `./web.sh`
 - **Windows** — double-click `web.cmd`, or run `web.cmd` in a terminal
 
-Requires [Node.js](https://nodejs.org) 22.12 or later.
+Requires [Node.js](https://nodejs.org) 22.12 or later, and
+[Google Chrome](https://www.google.com/chrome/) installed system-wide (Hon
+drives your installed Chrome for scraping — see
+[How Hon finds Chrome](#how-hon-finds-chrome) for the discovery order).
 
 #### Setting up on Windows (from scratch)
 
@@ -94,41 +97,13 @@ quickstart above runs the same way on Windows once they are in place.
   Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" `
     -Name "LongPathsEnabled" -Value 1
   ```
-- **`Could not find Chrome (ver. X)` at first launch.** Puppeteer downloads
-  a pinned Chrome build (~170 MB) during `npm install`. On Windows the
-  download often gets silently quarantined by **Windows Defender** or
-  blocked by **Controlled Folder Access** mid-extraction — you end up
-  with the version folder but no `chrome.exe` inside. Two ways out:
-
-  **Easy path — use the Chrome you already have.** Almost every Windows
-  machine already has Google Chrome installed. Point Hon at it and skip
-  the bundled download entirely:
-  ```cmd
-  setx PUPPETEER_EXECUTABLE_PATH "C:\Program Files\Google\Chrome\Application\chrome.exe"
-  ```
-  (Use whatever `chrome://version` shows under "Executable Path" if
-  yours is elsewhere — quotes matter.) `setx` writes the variable
-  permanently, but only new terminals inherit it — **close that window
-  and open a fresh one**, then `cd %USERPROFILE%\Hon\sidecar && npm run web`.
-  Don't have Chrome? Install it from <https://www.google.com/chrome/>
-  first — the regular installer is fine.
-
-  **Or: retry the bundled download cleanly.** Add
-  `C:\Users\<you>\.cache\puppeteer` to Windows Security → Virus &
-  threat protection → **Exclusions**, force-delete any half-extracted
-  leftovers, and reinstall to the path Puppeteer reads from:
-  ```powershell
-  Remove-Item -Recurse -Force "$env:USERPROFILE\Hon\sidecar\chrome", `
-    "$env:USERPROFILE\.cache\puppeteer" -ErrorAction SilentlyContinue
-  cd "$env:USERPROFILE\Hon\sidecar"
-  node node_modules\@puppeteer\browsers\lib\cjs\main-cli.js `
-    install chrome@stable --path "$env:USERPROFILE\.cache\puppeteer"
-  ```
-  Then verify the binary actually survived:
-  `dir %USERPROFILE%\.cache\puppeteer\chrome\*\chrome-win64\chrome.exe`.
-  If it's missing, the AV exclusion didn't take — check **Protection
-  history** in Windows Security; the quarantine entry will name the
-  exact tool that ate it.
+- **"No installed Chrome found" at first launch.** Hon uses your installed
+  Chrome to scrape — no bundled-Chrome download fight with Defender, no
+  170 MB extra to install. If you don't have Chrome yet, grab it from
+  <https://www.google.com/chrome/> and re-run `npm run web`. Hon will
+  also find Microsoft Edge if Chrome isn't there. The exact paths it
+  checks (and how to override them) are in
+  [How Hon finds Chrome](#how-hon-finds-chrome).
 
 - **Running inside a Parallels (or other) VM?** If the engine runs on
   your Mac and you only want the UI on the Windows side, leave the
@@ -243,6 +218,7 @@ in the DB. The UI polls `/scrape/:runId` until done.
 - [Where data lives](#where-data-lives)
 - [External APIs & data sources](#external-apis--data-sources)
 - [Environment variables](#environment-variables)
+- [How Hon finds Chrome](#how-hon-finds-chrome)
 - [Troubleshooting & diagnostics](#troubleshooting--diagnostics)
 - [Project layout](#project-layout)
 - [Sidecar scripts](#sidecar-scripts)
@@ -561,6 +537,50 @@ Read by the wrapper scripts:
   before launching is passed straight through.
 - `web.mjs` → opens the browser to the printed URL once the engine reports
   ready, then leaves the engine running in the foreground. Ctrl-C kills both.
+
+## How Hon finds Chrome
+
+Hon drives **your installed Chrome** for every browser-based scrape (banks,
+credit cards, pension portals). It does **not** ship a bundled Chromium —
+the `npm install` step explicitly skips Puppeteer's bundled download
+(`.npmrc` sets `puppeteer_skip_download=true`) because:
+
+- it's 170 MB of redundant binary on machines that already have Chrome;
+- on Windows, Defender and most third-party AVs routinely quarantine the
+  bundled `chrome.exe` mid-extract, leaving a half-installed folder that
+  fails verification and blocks the whole install.
+
+**Discovery order at launch** (`sidecar/web.mjs`):
+
+1. If `PUPPETEER_EXECUTABLE_PATH` is set, Hon uses that and skips discovery.
+2. Otherwise it scans the standard install locations for the platform:
+
+| OS | Paths checked, in order |
+| --- | --- |
+| **Windows** | `%ProgramFiles%\Google\Chrome\Application\chrome.exe` · `%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe` · `%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe` · `%ProgramFiles%\Microsoft\Edge\Application\msedge.exe` · `%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe` |
+| **macOS** | `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome` · `~/Applications/Google Chrome.app/Contents/MacOS/Google Chrome` · `/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge` · `/Applications/Chromium.app/Contents/MacOS/Chromium` |
+| **Linux** | `/usr/bin/google-chrome` · `/usr/bin/google-chrome-stable` · `/usr/bin/chromium` · `/usr/bin/chromium-browser` · `/snap/bin/chromium` |
+
+The first one that exists wins, and Hon prints `Using installed browser: …`
+at startup. If none match, Hon prints a clear "install Chrome" message
+rather than crashing on the first scrape.
+
+**To use a Chrome that lives elsewhere** (a portable build, a custom
+install, a non-default channel), set `PUPPETEER_EXECUTABLE_PATH` before
+launching. Get the full path from Chrome's `chrome://version` page,
+"Executable Path" line.
+
+- **macOS / Linux:**
+  ```bash
+  export PUPPETEER_EXECUTABLE_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+  npm run web
+  ```
+- **Windows:**
+  ```cmd
+  setx PUPPETEER_EXECUTABLE_PATH "C:\Program Files\Google\Chrome\Application\chrome.exe"
+  ```
+  `setx` writes the var permanently — **close the terminal and open a
+  fresh one** so the new env is picked up.
 
 ## Troubleshooting & diagnostics
 
