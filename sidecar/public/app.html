@@ -1020,6 +1020,22 @@
   .brk-acct-pill:hover { color: var(--text); }
   .brk-acct-pill.on { background: var(--accent); color: #fff;
     border-color: transparent; }
+  /* Inception-date control row under the account filter pills. Sits between
+     the pills and the holdings card; quiet styling. */
+  .brk-inception-row { display: flex; align-items: center; flex-wrap: wrap;
+    gap: 10px; margin: 0 2px 6px; font: 500 12px/1.4 system-ui;
+    color: var(--muted); }
+  .brk-inception-label { display: inline-flex; align-items: center; gap: 8px; }
+  .brk-inception-input { background: var(--bg-elev);
+    border: 1px solid var(--hairline); color: var(--text);
+    padding: 4px 8px; border-radius: 8px; font: 500 12px/1 system-ui;
+    color-scheme: dark; }
+  .brk-inception-input:hover { border-color: var(--accent); }
+  .brk-inception-clear { background: transparent; border: 0;
+    color: var(--faint); cursor: pointer; font-size: 16px;
+    padding: 0 4px; line-height: 1; }
+  .brk-inception-clear:hover { color: var(--text); }
+  .brk-inception-hint { color: var(--faint); font-size: 11.5px; }
   .hp-card { padding: 18px 18px 10px; }
   .hp-head { display: flex; align-items: flex-start; gap: 12px;
     margin-bottom: 14px; }
@@ -5639,7 +5655,35 @@ function brokerageView() {
       + "</div>";
   }
 
-  return tiles + trendCard + acctFilterRow
+  // Inception-date control — only when a specific account is in focus, since
+  // it's a per-account setting. Lets the user pin "this is when I actually
+  // started" so the chart's ALL range stops painting Yahoo's pretend history
+  // from a decade ago.
+  let inceptionRow = "";
+  if (acctFilter !== "all") {
+    const focused = brkAccts.find((a) => a.id === acctFilter);
+    if (focused) {
+      const value = focused.inceptionDate || "";
+      inceptionRow = '<div class="brk-inception-row">'
+        + '<label class="brk-inception-label">'
+        + 'Investment start (since when "ALL" counts):'
+        + '<input type="date" class="brk-inception-input" value="'
+        + esc(value) + '" '
+        + 'data-action="brk-inception" data-arg="' + esc(focused.id) + '" />'
+        + (value ? '<button class="brk-inception-clear" '
+          + 'data-action="brk-inception-clear" data-arg="' + esc(focused.id)
+          + '" title="Clear">×</button>' : '')
+        + '</label>'
+        + (value
+          ? '<span class="brk-inception-hint">Synthetic backfill before this '
+            + 'date is hidden.</span>'
+          : '<span class="brk-inception-hint">Until set, the chart shows '
+            + 'whatever the price source returns (Yahoo: up to 10 years).</span>')
+        + '</div>';
+    }
+  }
+
+  return tiles + trendCard + acctFilterRow + inceptionRow
     + holdingsPanel(holdings, holdSnaps, conv, useIls, displayCur,
         haveValue ? totalValue : null, acctsInScope.length, range);
 }
@@ -5881,20 +5925,24 @@ function buildEquitySeries(performance, snaps, holdSnaps, conv) {
   //    reported history (SnapTrade reports, Meitav GetTsuot) take path (1)
   //    above and aren't affected.
   if (holdSnaps && holdSnaps.length) {
-    // Inception cap: ALL was painting 10 years of synthetic "what if you'd
-    // always held these units" because Yahoo's backfill goes back that far.
-    // Cap to the *later* of:
-    //   • the earliest real Hon snap (when the account was first synced —
-    //     authoritative, but only days old on a fresh link)
-    //   • 1 year ago (sensible default ceiling so a freshly-linked account
-    //     doesn't show pre-investment fake history)
-    // As Hon accumulates real syncs the first-snap boundary moves forward
-    // and eventually overtakes the 1-year fallback.
-    let earliestRealSnap = new Date(Date.now() - 365 * 24 * 3600 * 1000)
-      .toISOString().slice(0, 10);
-    if (snaps && snaps.length) {
-      const min = snaps.reduce((m, s) => s.date < m ? s.date : m, snaps[0].date);
-      if (min > earliestRealSnap) earliestRealSnap = min;
+    // Inception cap: when an account has a per-account inception date set
+    // (via the brokerage settings — see /accounts/:id/inception PATCH),
+    // clip synthetic Yahoo backfill before that date. Without it we don't
+    // know when the user actually started investing, so the full backfill
+    // stands. ALL ends up matching whatever the source goes back to —
+    // pretend-history for Yahoo, real history for SnapTrade / Meitav.
+    let earliestRealSnap = null;
+    // Only consider accounts whose holdings actually feed this series — for
+    // a per-account filter, that means just the one focused account.
+    const acctIdsInSeries = new Set(holdSnaps.map((s) => s.accountId));
+    const inceptionDates = (state.accounts || [])
+      .filter((a) => acctIdsInSeries.has(a.id) && a.inceptionDate)
+      .map((a) => a.inceptionDate);
+    if (inceptionDates.length) {
+      // Cap at the *earliest* inception across in-scope accounts so a multi-
+      // account portfolio still shows the full joint history.
+      earliestRealSnap = inceptionDates
+        .reduce((m, d) => d < m ? d : m, inceptionDates[0]);
     }
     const bySym = {};
     holdSnaps.forEach((s) => {
@@ -9404,6 +9452,9 @@ function handleAction(action, btn) {
         render();
       }
       break;
+    case "brk-inception-clear":
+      if (btn && btn.dataset.arg) setAccountInception(btn.dataset.arg, null);
+      break;
     case "view-month-activity":
       if (btn && btn.dataset.arg) {
         state.tab = "activity";
@@ -9437,6 +9488,23 @@ async function toggleNetWorth(kind, id, counted) {
   } catch (err) {
     toast("Couldn't update the net-worth setting.");
     render(); // re-render to restore the checkbox to the stored state
+  }
+}
+
+// Sets (or clears, when date is null/empty) the user-defined "when did I
+// actually start investing" date for an account. The brokerage chart's
+// equity series clips synthetic Yahoo/Maya pre-link history before this
+// date so ALL means "since I started", not 10 years of pretend.
+async function setAccountInception(id, date) {
+  try {
+    await api("/accounts/" + id + "/inception", "PATCH", {
+      inceptionDate: date || null,
+    });
+    await loadAll();
+    render();
+  } catch (err) {
+    toast("Couldn't save the investment-start date.");
+    render();
   }
 }
 
@@ -9604,6 +9672,16 @@ document.getElementById("sidebar").addEventListener("change", (e) => {
   }
   if (e.target.id === "move-income" && state.move) {
     state.move.frequency = e.target.checked ? "income" : "none";
+  }
+});
+
+// Persist the brokerage account's inception date when the user picks a new
+// value in the date input. Empty value clears the override.
+document.getElementById("content").addEventListener("change", (e) => {
+  const el = e.target;
+  if (el && el.dataset && el.dataset.action === "brk-inception"
+      && el.dataset.arg) {
+    setAccountInception(el.dataset.arg, el.value || null);
   }
 });
 

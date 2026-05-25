@@ -438,6 +438,30 @@ app.patch('/accounts/:id/balance', async (req, reply) => {
   return { ok: true };
 });
 
+// Sets (or clears, when body.inceptionDate is null) the user-defined
+// "when I actually started investing here" date for a brokerage account.
+// The Insights brokerage chart uses this to clip the synthetic Yahoo/Maya
+// backfill — so ALL means "since I started", not the 10 years of pretend
+// history Yahoo's chart API otherwise paints.
+app.patch('/accounts/:id/inception', async (req, reply) => {
+  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+  const { id } = req.params as { id: string };
+  const body = (req.body ?? {}) as { inceptionDate?: string | null };
+  let inceptionDate: string | null = null;
+  if (body.inceptionDate != null && body.inceptionDate !== '') {
+    if (typeof body.inceptionDate !== 'string'
+      || !/^\d{4}-\d{2}-\d{2}$/.test(body.inceptionDate)) {
+      return reply.code(400).send({ error: 'inceptionDate must be YYYY-MM-DD' });
+    }
+    inceptionDate = body.inceptionDate;
+  }
+  if (!repo.listAccounts().some((a) => a.id === id)) {
+    return reply.code(404).send({ error: 'account not found' });
+  }
+  repo.setAccountInceptionDate(id, inceptionDate);
+  return { ok: true };
+});
+
 // Includes or excludes one account from the net-worth total. The account stays
 // visible on its connection card either way — only the totals change.
 app.patch('/accounts/:id/excluded', async (req, reply) => {

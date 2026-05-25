@@ -41,6 +41,10 @@ export interface AccountRow {
   updatedAt: string;
   /** When true, this account is left out of the net-worth total. */
   excluded: boolean;
+  /** User-set "when I actually started investing here" date (YYYY-MM-DD).
+   *  Used by the Insights brokerage chart to clip pretend pre-link history
+   *  from the Yahoo / Maya backfill. Null means "no override — show all". */
+  inceptionDate: string | null;
 }
 
 // SQLite has no boolean type, so `excluded` arrives as 0 | 1.
@@ -341,13 +345,22 @@ export class Repo {
         `SELECT a.id, a.connection_id AS connectionId, c.company_id AS companyId,
                 c.display_name AS connectionName, a.account_number AS accountNumber,
                 a.label, a.balance, a.currency, a.updated_at AS updatedAt,
-                a.excluded
+                a.excluded, a.inception_date AS inceptionDate
          FROM accounts a
          JOIN connections c ON c.id = a.connection_id
          ORDER BY c.display_name, a.account_number`,
       )
       .all() as AccountRowDb[];
     return rows.map((r) => ({ ...r, excluded: r.excluded !== 0 }));
+  }
+
+  /** Sets (or clears, when null) the user-defined inception date for an
+   *  account — the "when I actually started investing here" boundary used by
+   *  the brokerage chart to clip synthetic Yahoo/Maya pre-link history. */
+  setAccountInceptionDate(id: string, inceptionDate: string | null): void {
+    this.db
+      .prepare('UPDATE accounts SET inception_date = ?, updated_at = ? WHERE id = ?')
+      .run(inceptionDate, new Date().toISOString(), id);
   }
 
   /** Every brokerage position across all accounts. */

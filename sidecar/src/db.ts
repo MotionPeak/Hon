@@ -626,6 +626,16 @@ const MIGRATIONS: { version: number; sql: string }[] = [
         WHERE connection_id IS NOT NULL AND external_id IS NOT NULL;
     `,
   },
+  {
+    // Per-account "when did I actually start investing in this" override.
+    // The Insights brokerage chart's ALL range otherwise either paints 10
+    // years of synthetic Yahoo-backfill history or, with cap heuristics
+    // applied, narrows to Hon's first sync — which on a freshly-linked
+    // account is just a few days old. A user-set inception date lets the
+    // chart clip pretend-history precisely at the user's known buy date.
+    version: 32,
+    sql: `ALTER TABLE accounts ADD COLUMN inception_date TEXT;`,
+  },
 ];
 
 /**
