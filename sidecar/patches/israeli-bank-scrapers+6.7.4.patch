@@ -78,6 +78,25 @@ index 630d930..b2e041f 100644
    urls[_baseScraperWithBrowser.LoginResults.InvalidPassword] = [`${BASE_URL}/apollo/core/templates/lobby/masterPage.html#/LOGIN_PAGE`];
    urls[_baseScraperWithBrowser.LoginResults.ChangePassword] = [`${BASE_URL}/apollo/core/templates/lobby/masterPage.html#/PWD_RENEW`];
    return urls;
+diff --git a/node_modules/israeli-bank-scrapers/lib/scrapers/hapoalim.js b/node_modules/israeli-bank-scrapers/lib/scrapers/hapoalim.js
+index 4ffa0b2..fba8efe 100644
+--- a/node_modules/israeli-bank-scrapers/lib/scrapers/hapoalim.js
++++ b/node_modules/israeli-bank-scrapers/lib/scrapers/hapoalim.js
+@@ -186,7 +186,13 @@ class HapoalimScraper extends _baseScraperWithBrowser.BaseScraperWithBrowser {
+       loginUrl: `${this.baseUrl}/cgi-bin/poalwwwc?reqName=getLogonPage`,
+       fields: createLoginFields(credentials),
+       submitButtonSelector: '.login-btn',
+-      postAction: async () => (0, _navigation.waitForRedirect)(this.page),
++      // Hon patch: Hapoalim's NG portal always shows a 2FA challenge after
++      // the username/password POST. The library's default 20s redirect wait
++      // expires before a human can read the SMS and type the code, so the
++      // scrape times out as "waiting for redirect from .../auth/he/" even
++      // when the OTP is valid. Bump to 5 minutes so Hon's OTP watcher
++      // (sidecar/src/otp.ts) has time to prompt the user and fill the form.
++      postAction: async () => (0, _navigation.waitForRedirect)(this.page, 300000),
+       possibleResults: getPossibleLoginResults(this.baseUrl)
+     };
+   }
 diff --git a/node_modules/israeli-bank-scrapers/lib/scrapers/max.js b/node_modules/israeli-bank-scrapers/lib/scrapers/max.js
 index ab8e48d..5f8a87a 100644
 --- a/node_modules/israeli-bank-scrapers/lib/scrapers/max.js
