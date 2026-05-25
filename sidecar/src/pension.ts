@@ -16,7 +16,7 @@
 // The session cookies are saved (encrypted, per connection) so the next sync
 // resumes already logged in — no sign-in at all — until they expire.
 
-import { writeFileSync } from 'node:fs';
+import { unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import puppeteerVanilla, { type Browser, type Frame, type Page } from 'puppeteer';
 import { addExtra } from 'puppeteer-extra';
@@ -233,6 +233,44 @@ function debugSibling(screenshotPath: string | undefined, suffix: string): strin
 }
 
 /**
+ * Removes the four lock files Chrome writes when it boots a profile (and
+ * normally removes on clean shutdown). When a previous pension launch was
+ * killed before the close hook ran, these files remain and the next launch
+ * refuses with "browser is already running for <profile dir>". Best-effort
+ * — a missing file is fine, a permission error is logged but doesn't break
+ * the launch (Chrome will surface the original "already running" error if
+ * we couldn't clear the orphan).
+ */
+function sweepStalePensionLocks(profileDir: string): void {
+  // Names to clear, with their relative path inside the profile dir. The
+  // Default/LOCK is a leveldb byte-sized lock Chrome rewrites every launch.
+  const targets = [
+    'DevToolsActivePort',
+    'SingletonLock',
+    'SingletonSocket',
+    'SingletonCookie',
+    'Default/LOCK',
+  ];
+  let cleared = 0;
+  for (const rel of targets) {
+    const path = join(profileDir, rel);
+    try {
+      // unlinkSync throws ENOENT when the file isn't there — that's the
+      // common case and we silently move on.
+      unlinkSync(path);
+      cleared += 1;
+    } catch (err: any) {
+      if (err?.code !== 'ENOENT') {
+        plog(`sweepStalePensionLocks: could not remove ${rel} — ${err?.message ?? err}`);
+      }
+    }
+  }
+  if (cleared > 0) {
+    plog(`sweepStalePensionLocks: removed ${cleared} stale lock file(s) in ${profileDir}`);
+  }
+}
+
+/**
  * Launches a Chromium for a pension scrape and prepares a page: user agent,
  * Hebrew Accept-Language, the tsx `__name` shim, and a JSON-response collector
  * feeding `jsonResponses` (the dashboard's real balance data, kept for debug).
@@ -250,6 +288,18 @@ async function launchPensionBrowser(
   jsonResponses: { url: string; body: string }[],
   profileDir?: string,
 ): Promise<{ browser: Browser; page: Page }> {
+  // Self-heal stale lock files left by a crashed previous launch. Chrome
+  // writes `DevToolsActivePort` / `SingletonLock` / `SingletonSocket` /
+  // `SingletonCookie` on startup and removes them on clean shutdown — when
+  // the process is killed (engine restart, hard quit, OS crash) they're
+  // orphaned and the next launch errors with "browser is already running
+  // for <profile dir>". Sweep them unconditionally before launching: if a
+  // Chrome IS still running on this profile, it'll just recreate the files
+  // and the launch will fail the same way it would have anyway; if it's
+  // dead, we free the profile and continue.
+  if (profileDir) {
+    sweepStalePensionLocks(profileDir);
+  }
   const launchOptions = {
     headless,
     defaultViewport: headless ? undefined : null,
@@ -432,9 +482,22 @@ export async function runPensionScrape(
       onProgress?.('Waiting for you to finish signing in…');
       const deadline = Date.now() + INTERACTIVE_LOGIN_TIMEOUT_MS;
       let accounts: NormalizedAccount[] = [];
+      // Login-URL hints by fund. Meitav lives at /v2/login/, Menora at
+      // /Login/. Anything else on the host counts as "past login" and we
+      // can read balances. A wrong-positive (user navigates to a help page)
+      // is harmless — the read returns 0 accounts and the loop keeps polling.
+      const onLoginPage = (url: string): boolean =>
+        /\/login\b|\/v2\/login\/|loginamit/i.test(url);
       while (Date.now() < deadline) {
         await delay(5000);
         if (page.isClosed()) break;
+        // Don't even attempt readBalances while the user is still on the
+        // login form — readMeitavBalances navigates the page to /lobbymanager
+        // and readMenoraBalances has similar moves. Calling them mid-sign-in
+        // yanks the user off the form they're typing into, which manifests
+        // as "the page keeps refreshing while I try to sign in." Wait for
+        // the post-login redirect to happen first.
+        if (onLoginPage(page.url())) continue;
         try {
           accounts = await readBalances(companyId, page, screenshotPath, extras);
         } catch {

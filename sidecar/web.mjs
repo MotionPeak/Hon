@@ -5,7 +5,8 @@
 // fresh token generated for this run.
 import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, openSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -93,8 +94,30 @@ if (headless) {
   console.log('Headless mode — open the URL above from another machine.');
 }
 
+// Tee the engine's stderr to a rotating-per-launch log file so a crashed
+// scrape leaves an inspectable trail without the user having to keep the
+// launch terminal open. The file lives under the OS-default Hon data dir
+// (same as the SQLite DB and debug screenshots) so it's easy to find.
+const dataDirForLog = process.env.HON_DATA_DIR ?? (
+  process.platform === 'darwin'
+    ? join(homedir(), 'Library', 'Application Support', 'Hon')
+    : process.platform === 'win32'
+      ? join(process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'), 'Hon')
+      : join(process.env.XDG_DATA_HOME || join(homedir(), '.local', 'share'), 'Hon')
+);
+let stderrTarget = 'inherit';
+try {
+  mkdirSync(dataDirForLog, { recursive: true });
+  const logPath = join(dataDirForLog, 'sidecar.log');
+  stderrTarget = openSync(logPath, 'w');
+  console.log(`Engine logs → ${logPath}`);
+} catch (err) {
+  // Fall back to the launching terminal if the log file can't be opened.
+  console.log(`(Could not open the engine log file: ${err.message}. Streaming to terminal instead.)`);
+}
+
 const server = spawn(process.execPath, ['--import', 'tsx', 'src/server.ts'], {
-  stdio: 'inherit',
-  env: { ...process.env, HON_PORT: port, HON_TOKEN: token },
+  stdio: ['inherit', 'inherit', stderrTarget],
+  env: { ...process.env, HON_PORT: port, HON_TOKEN: token, HON_LOG_DEBUG: '1' },
 });
 server.on('exit', (code) => process.exit(code ?? 0));
