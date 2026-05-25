@@ -21,7 +21,7 @@ import { dirname, join } from 'node:path';
 import puppeteerVanilla, { type Browser, type Frame, type Page } from 'puppeteer';
 import { addExtra } from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
-import type { CompanyInfo, NormalizedAccount, ScrapeOutcome } from './scrapers.js';
+import type { CompanyInfo, NormalizedAccount, NormalizedHolding, ScrapeOutcome } from './scrapers.js';
 import type { OtpCallback } from './otp.js';
 import { persistSession, restoreSession, type SessionHandle } from './session.js';
 import { makeLog } from './log.js';
@@ -1287,8 +1287,42 @@ async function readMeitavBalances(
       '/v3/api/Manager/GetHerkevTik',
       '/v3/api/Manager/GetHerkevDate',
       '/v3/api/Manager/GetMediniyutHashkaa',
+      '/v3/api/Manager/GetCalculatedHerkevNehasim',
     ]);
     const tikDump = dump.find((d) => d.url.endsWith('/Manager/GetTikInfo'));
+    // GetCalculatedHerkevNehasim returns Array[{ RowId, MisparTik, MisparNiar,
+    // TeurNiar, Shovi, AchuzMtik }] — one row per security in the portfolio.
+    // Attached to each portfolio account as holdings so the UI shows them the
+    // same way it does for SnapTrade brokerage positions.
+    const nehasimDump = dump.find((d) =>
+      d.url.toLowerCase().endsWith('/manager/getcalculatedherkevnehasim'),
+    );
+    const holdingsByTik = new Map<string, NormalizedHolding[]>();
+    if (nehasimDump && nehasimDump.body) {
+      const rows: any[] = Array.isArray(nehasimDump.body)
+        ? nehasimDump.body
+        : Array.isArray(nehasimDump.body?.t) ? nehasimDump.body.t : [];
+      for (const row of rows) {
+        const value = Number(row.Shovi);
+        if (!Number.isFinite(value)) continue;
+        const tikKey = row.MisparTik != null ? String(row.MisparTik) : '';
+        const symbol = row.MisparNiar != null ? String(row.MisparNiar) : '';
+        const description = (row.TeurNiar ?? '').toString().trim();
+        if (!symbol && !description) continue;
+        const list = holdingsByTik.get(tikKey) ?? [];
+        list.push({
+          symbol: symbol || description,
+          description: description || undefined,
+          // Meitav reports per-security value but no unit count for a
+          // discretionary portfolio (the manager rebalances). The UI uses
+          // `value` directly when present, so units stays at 0.
+          units: 0,
+          value: Math.round(value * 100) / 100,
+          currency: 'ILS',
+        });
+        holdingsByTik.set(tikKey, list);
+      }
+    }
     if (tikDump && typeof tikDump.body === 'object' && tikDump.body) {
       const data: any = tikDump.body;
       const t: any = data && data.t ? data.t : data;
@@ -1301,12 +1335,14 @@ async function readMeitavBalances(
         const host = (tik.NameHevra || tik.BankName || '').trim();
         // "תיק השקעות 40739" — fall back to "Meitav portfolio" if no number.
         const label = `תיק השקעות${num ? ` ${num}` : ''}${host ? ` · ${host}` : ''}`;
+        const holdings = holdingsByTik.get(num) ?? [];
         accounts.push({
           accountNumber: `meitav:portfolio:${num || label}`,
           label,
           balance: Math.round(balance * 100) / 100,
           currency: 'ILS',
           transactions: [],
+          holdings: holdings.length ? holdings : undefined,
         });
       }
     }
