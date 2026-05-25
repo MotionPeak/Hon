@@ -487,16 +487,25 @@ export async function runPensionScrape(
       // /lobbymanager and readMenoraBalances has similar moves, which would
       // yank the user off the form they're typing into ("the page keeps
       // refreshing while I try to sign in"). Match generously:
-      //   - any /login or /signin segment (Meitav: /v2/login/loginAmit,
-      //     Menora: /Login)
-      //   - any /auth / /otp / /verify / /sso step
+      //   - any segment containing login/signin/customer-login (Meitav:
+      //     /v2/login/loginAmit, Menora: /customer-login/, generic: /Login)
+      //   - any auth/otp/verify/sso step
       //   - hash-routed equivalents (#/login, #!/login)
       //   - the literal `loginamit` route name
-      // A false positive (user navigates to /login-help) just keeps the
-      // poll quiet for a few extra cycles — harmless. A false negative is
-      // what we're guarding against, so the bias is intentional.
+      // The login family uses `.includes`-style matching (no word boundary
+      // before) so portals that prefix the path with a noun like
+      // `customer-login` or `member-login` still match. A false positive
+      // (user navigates to /login-help) just keeps the poll quiet for a
+      // few extra cycles — harmless. A false negative is what we're
+      // guarding against, so the bias is intentional.
+      //
+      // Earlier version used `\b` before "login" which excluded
+      // `customer-login` (the hyphen isn't a word boundary in the regex
+      // engine's eyes when adjacent to a letter). Found by code review on
+      // 2026-05-26 — Menora users would have hit the original
+      // "page keeps refreshing while I sign in" bug despite the fix.
       const onLoginPage = (url: string): boolean =>
-        /[\/#](v\d+\/)?(login|signin|sign-in|auth|otp|verify|sso)\b|loginamit/i.test(url);
+        /[\/#](v\d+\/)?[a-z-]*(login|signin|sign-in)|[\/#](auth|otp|verify|sso)\b|loginamit/i.test(url);
       let lastReportedUrl = '';
       while (Date.now() < deadline) {
         await delay(5000);
