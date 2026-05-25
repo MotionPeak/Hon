@@ -6205,14 +6205,27 @@ function buildHoldingSeries(holdSnaps, symbol, accountIds, conv, currency) {
 //      non-trading days don't drop positions off the running total).
 //   3) Hon's own per-sync account_value_snapshots (sparse, one per sync).
 function buildEquitySeries(performance, snaps, holdSnaps, conv) {
-  // 1) SnapTrade performance — connection-scope, sums across all accounts.
+  // Earliest inception across the connections feeding any of these sources.
+  // Used to clip every branch below — the user pinned this as their actual
+  // start date, and the chart should respect it no matter which path renders.
+  const acctsByConn = {};
+  (state.accounts || []).forEach((a) => {
+    if (a.inceptionDate) {
+      acctsByConn[a.connectionId] = a.inceptionDate < (acctsByConn[a.connectionId] || '9999-12-31')
+        ? a.inceptionDate : acctsByConn[a.connectionId];
+    }
+  });
+  // 1) SnapTrade / Meitav performance — connection-scope, sums across
+  //    accounts of the same connection.
   let havePerformance = false;
   const fromPerf = {};
   performance.forEach((p) => {
     const pts = (p.data && p.data.totalEquity) || [];
     if (pts.length) havePerformance = true;
     const pcur = (p.data && p.data.currency) || "USD";
+    const inception = acctsByConn[p.connectionId] || null;
     pts.forEach((pt) => {
+      if (inception && pt.date < inception) return;
       const v = conv(pt.value, pt.currency || pcur);
       if (v == null) return;
       fromPerf[pt.date] = (fromPerf[pt.date] || 0) + v;
