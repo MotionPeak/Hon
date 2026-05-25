@@ -5853,8 +5853,18 @@ function buildEquitySeries(performance, snaps, holdSnaps, conv) {
   }
 
   // 2) Per-holding snapshots — forward-fill each (account, symbol) so a
-  //    missing day doesn't tank the running portfolio total.
+  //    missing day doesn't tank the running portfolio total. These come from
+  //    the price-history backfill (Yahoo Finance / Maya), which paints a
+  //    *hypothetical* "what if you'd always held these units" curve. To stop
+  //    ALL from showing 10 years of pretend history before the account
+  //    actually existed, cap the series to when Hon first saw the account
+  //    locally (the earliest entry in `snaps`). Sources with real provider-
+  //    reported history (SnapTrade reports, Meitav GetTsuot) take path (1)
+  //    above and aren't affected.
   if (holdSnaps && holdSnaps.length) {
+    const earliestRealSnap = snaps && snaps.length
+      ? snaps.reduce((min, s) => s.date < min ? s.date : min, snaps[0].date)
+      : null;
     const bySym = {};
     holdSnaps.forEach((s) => {
       const v = conv(s.value, s.currency);
@@ -5866,7 +5876,8 @@ function buildEquitySeries(performance, snaps, holdSnaps, conv) {
     keys.forEach((k) => bySym[k].sort((a, b) => a.date.localeCompare(b.date)));
     const dateSet = new Set();
     keys.forEach((k) => bySym[k].forEach((p) => dateSet.add(p.date)));
-    const dates = Array.from(dateSet).sort();
+    const dates = Array.from(dateSet).sort()
+      .filter((d) => earliestRealSnap == null || d >= earliestRealSnap);
     const cur = {};
     keys.forEach((k) => { cur[k] = 0; });
     const out = [];
