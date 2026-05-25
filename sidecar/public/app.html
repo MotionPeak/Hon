@@ -1913,7 +1913,9 @@ const TABS = [["overview", "Overview", "📊"], ["assets", "Assets", "🏦"],
   ["activity", "Activity", "🧾"], ["recurring", "Fixed bills", "📆"],
   ["income", "Income", "💼"],
   ["subscriptions", "Subscriptions", "🔁"],
-  ["piggy", "Piggy banks", "🐷"], ["insights", "Insights", "💡"],
+  ["piggy", "Piggy banks", "🐷"],
+  ["vouchers", "Vouchers", "🎟️"],
+  ["insights", "Insights", "💡"],
   ["settings", "Settings", "⚙️"]];
 
 // Icons offered when naming a piggy bank, and the preset "ready in N months"
@@ -1924,6 +1926,7 @@ const PIGGY_PLANS = [3, 6, 12, 24];
 
 const state = {
   companies: [], connections: [], accounts: [], transactions: [], assets: [],
+  vouchers: [],          // gift cards / prepaid vouchers — Shufersal, Pluxee, etc
   loans: [], rates: { prime: null, cpiNow: null },
   categories: [],         // user-editable spending categories, from /categories
   // Every refund→expense allocation. One refund may cover parts of several
@@ -2299,7 +2302,7 @@ function loanNote(t) {
 
 async function loadAll() {
   try {
-    const [companies, connections, accounts, transactions, assets, loansResp, categoriesResp,
+    const [companies, connections, accounts, transactions, assets, vouchersResp, loansResp, categoriesResp,
            summary, insights, llm, merchantFreq, brokerage, cancelledSubs,
            incomeOverrideResp, savingsResp, linksResp, splitsResp, catSplitsResp] =
       await Promise.all([
@@ -2308,6 +2311,7 @@ async function loadAll() {
         api("/accounts").then((r) => r.accounts),
         api("/transactions?limit=1000").then((r) => r.transactions),
         api("/assets").then((r) => r.assets),
+        api("/vouchers").catch(() => ({ vouchers: [] })),
         api("/loans").catch(() => ({ loans: [], rates: { prime: null, cpiNow: null } })),
         api("/categories").catch(() => ({ categories: [] })),
         api("/summary").then((r) => r.summary),
@@ -2324,6 +2328,7 @@ async function loadAll() {
       ]);
     Object.assign(state, {
       companies, connections, accounts, transactions, assets,
+      vouchers: vouchersResp.vouchers || [],
       loans: loansResp.loans || [], rates: loansResp.rates || { prime: null, cpiNow: null },
       categories: categoriesResp.categories || [],
       summary, insights, llm, merchantFreq, brokerage, cancelledSubs,
@@ -2364,7 +2369,7 @@ function render() {
   const tabChanged = state._renderedTab !== state.tab;
   state._renderedTab = state.tab;
 
-  if (!state.connections.length && !state.assets.length) {
+  if (!state.connections.length && !state.assets.length && !(state.vouchers || []).length) {
     content.innerHTML = emptyState();
   } else if (state.tab === "assets") {
     content.innerHTML = accountsView();
@@ -2378,6 +2383,8 @@ function render() {
     content.innerHTML = subscriptionsView();
   } else if (state.tab === "piggy") {
     content.innerHTML = piggyView();
+  } else if (state.tab === "vouchers") {
+    content.innerHTML = vouchersView();
   } else if (state.tab === "insights") {
     content.innerHTML = insightsView();
   } else if (state.tab === "settings") {
@@ -4528,6 +4535,249 @@ async function removePiggy(id) {
   } catch (e) {
     if (e instanceof VaultLocked) return showGate();
     toast(e.message, true);
+  }
+}
+
+/* --- Vouchers ------------------------------------------------------------ */
+// Gift cards and prepaid vouchers — Shufersal Tav Hazahav, Pluxee/Sodexo,
+// Cibus, employer gifts. Currently manual entry only; a future sync via
+// the Shufersal portal will upsert into the same table without affecting
+// rows the user typed in by hand.
+
+// Lightweight catalogue of common Israeli voucher providers. Picking one
+// pre-fills the provider field; "Other" lets the user type a custom label.
+const VOUCHER_PROVIDERS = [
+  { id: "shufersal", label: "Shufersal — תו הזהב", emoji: "🛒" },
+  { id: "pluxee",    label: "Pluxee / Sodexo",     emoji: "🍱" },
+  { id: "cibus",     label: "Cibus / 10bis",       emoji: "🍽️" },
+  { id: "buyme",     label: "BuyMe",               emoji: "🎁" },
+  { id: "behatzlacha", label: "תו הקנייה",          emoji: "🛍️" },
+  { id: "other",     label: "Other",                emoji: "🎟️" },
+];
+
+function voucherProviderMeta(provider) {
+  const text = String(provider || "").toLowerCase();
+  for (const p of VOUCHER_PROVIDERS) {
+    if (p.id === "other") continue;
+    if (text.indexOf(p.id) >= 0 || provider === p.label) return p;
+  }
+  return VOUCHER_PROVIDERS[VOUCHER_PROVIDERS.length - 1];
+}
+
+// Days until expiry, or null when no expiry is set. Used for the
+// "expires in N days" badge on each card. Negative = already expired.
+function daysUntil(iso) {
+  if (!iso) return null;
+  const target = new Date(iso + "T00:00:00");
+  if (isNaN(target.getTime())) return null;
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.round((target - today) / (24 * 60 * 60 * 1000));
+}
+
+function vouchersView() {
+  const vouchers = state.vouchers || [];
+  const head = '<div class="pgy-head"><div><h2>Vouchers &amp; gift cards</h2>'
+    + '<div class="pgy-sub">תלושים ותוים — Shufersal Tav Hazahav, Pluxee, '
+    + "Cibus, employer gifts. Track current balances here; they count toward "
+    + 'your net worth.</div></div><span class="spacer"></span>'
+    + '<button class="primary" data-action="new-voucher">+ Add voucher</button>'
+    + "</div>";
+
+  if (!vouchers.length) {
+    return head + '<div class="blank"><div class="be">🎟️</div>'
+      + "<h2>No vouchers yet</h2>"
+      + "<p>Add a voucher (תו הזהב, Pluxee, Cibus, a gift card you received) "
+      + "with its current balance — Hon will fold it into your net worth and "
+      + "remind you when it's about to expire.</p>"
+      + '<button class="primary" data-action="new-voucher">+ Add your first voucher</button></div>';
+  }
+
+  // A small per-currency total strip up top so the user can see at a glance
+  // how much voucher value they're carrying. Excluded vouchers don't count
+  // (matches the net-worth roll-up on the backend).
+  const totals = {};
+  for (const v of vouchers) {
+    if (v.excluded) continue;
+    totals[v.currency] = (totals[v.currency] || 0) + (Number(v.balance) || 0);
+  }
+  const totalStrip = Object.keys(totals).length
+    ? '<div class="pgy-headroom"><span>🎟️</span><span>'
+      + "Total balance: "
+      + Object.keys(totals).sort().map((cur) =>
+          '<b>' + money(totals[cur], cur) + '</b>'
+        ).join(" · ")
+      + "</span></div>"
+    : "";
+
+  return head + totalStrip + '<div class="pgy-grid">'
+    + vouchers.map(voucherCard).join("") + "</div>";
+}
+
+function voucherCard(v) {
+  const meta = voucherProviderMeta(v.provider);
+  const cur = v.currency || "ILS";
+  const days = daysUntil(v.expiresOn);
+
+  let expiryBadge = "";
+  if (days != null) {
+    if (days < 0) {
+      expiryBadge = '<div class="pgy-badge skipped"><span>⌛</span><span>'
+        + "Expired " + Math.abs(days) + (Math.abs(days) === 1 ? " day" : " days")
+        + " ago</span></div>";
+    } else if (days <= 30) {
+      expiryBadge = '<div class="pgy-badge skipped"><span>⌛</span><span>'
+        + "Expires in " + days + (days === 1 ? " day" : " days")
+        + " (" + v.expiresOn + ")</span></div>";
+    } else {
+      expiryBadge = '<div class="pgy-badge funded"><span>📅</span><span>'
+        + "Expires " + v.expiresOn + "</span></div>";
+    }
+  }
+
+  const notesLine = v.notes
+    ? '<div class="pgy-eta">' + esc(v.notes) + "</div>"
+    : "";
+  const excludedTag = v.excluded
+    ? ' <span class="pgy-tag">excluded</span>' : "";
+
+  return '<div class="pgy-card' + (v.excluded ? " onhold" : "") + '">'
+    + '<div class="pgy-card-top"><div class="pgy-emoji">' + meta.emoji
+    + '</div><div style="flex:1;min-width:0"><div class="pgy-name">'
+    + esc(v.name) + excludedTag + "</div>"
+    + '<div class="pgy-monthly">' + esc(v.provider) + "</div></div></div>"
+    + '<div class="pgy-body">'
+    + '<div class="pgy-figs"><div class="pgy-saved">'
+    + money(v.balance, cur) + "</div>"
+    + '<div class="pgy-target">current balance</div>'
+    + notesLine + "</div></div>"
+    + expiryBadge
+    + '<div class="pgy-actions">'
+    + '<button class="mini" data-action="edit-voucher" data-id="' + esc(v.id)
+    + '">Edit</button>'
+    + '<button class="mini" data-action="toggle-voucher-excluded" data-id="'
+    + esc(v.id) + '">'
+    + (v.excluded ? "Include in net worth" : "Exclude from net worth")
+    + "</button>"
+    + '<span class="spacer"></span>'
+    + '<button class="mini danger" data-action="remove-voucher" data-id="'
+    + esc(v.id) + '">Delete</button></div></div>';
+}
+
+function voucherModal(voucher) {
+  const editing = !!voucher;
+  openModal((modal) => {
+    const initial = voucher || {
+      name: "", provider: "", balance: 0, currency: "ILS",
+      expiresOn: "", notes: "",
+    };
+    const providerOptions = VOUCHER_PROVIDERS.map((p) =>
+      '<button type="button" class="pgy-em" data-provider="' + esc(p.label)
+      + '" title="' + esc(p.label) + '">' + p.emoji + "</button>").join("");
+
+    modal.innerHTML = "<h2>" + (editing ? "Edit voucher" : "New voucher") + "</h2>"
+      + '<div class="field"><label>Provider</label>'
+      + '<div class="pgy-em-row" id="vc-providers">' + providerOptions + "</div>"
+      + '<input id="vc-provider" type="text" placeholder="e.g. Shufersal — תו הזהב" '
+      + 'value="' + esc(initial.provider || "") + '"></div>'
+      + '<div class="field"><label>Card name / alias</label>'
+      + '<input id="vc-name" type="text" placeholder="e.g. Tav Hazahav (work gift)" '
+      + 'value="' + esc(initial.name || "") + '"></div>'
+      + '<div class="field row"><div style="flex:2"><label>Balance</label>'
+      + '<input id="vc-balance" type="number" step="0.01" min="0" value="'
+      + Number(initial.balance || 0) + '"></div>'
+      + '<div style="flex:1"><label>Currency</label>'
+      + '<input id="vc-currency" type="text" value="' + esc(initial.currency || "ILS")
+      + '" maxlength="3" style="text-transform:uppercase"></div></div>'
+      + '<div class="field"><label>Expires on <span class="hint">(optional)</span></label>'
+      + '<input id="vc-expires" type="date" value="' + esc(initial.expiresOn || "") + '"></div>'
+      + '<div class="field"><label>Notes <span class="hint">(optional)</span></label>'
+      + '<input id="vc-notes" type="text" placeholder="card number, source, anything" value="'
+      + esc(initial.notes || "") + '"></div>'
+      + '<div class="modal-actions"><button data-x="cancel">Cancel</button>'
+      + '<button class="primary" id="vc-save">'
+      + (editing ? "Save changes" : "Add voucher") + "</button></div>";
+
+    // Picking a provider chip fills the provider text field; clearing the
+    // field re-arms manual entry.
+    modal.querySelectorAll("[data-provider]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        modal.querySelector("#vc-provider").value = btn.dataset.provider;
+        modal.querySelectorAll("[data-provider]").forEach((b) => b.classList.remove("on"));
+        btn.classList.add("on");
+        // Default the card name to the provider label when adding new and
+        // the user hasn't typed one yet — saves a step for the common case.
+        const nameInput = modal.querySelector("#vc-name");
+        if (!editing && !nameInput.value.trim()) nameInput.value = btn.dataset.provider;
+      });
+    });
+
+    modal.querySelector('[data-x="cancel"]').addEventListener("click", closeOverlay);
+    modal.querySelector("#vc-save").addEventListener("click", async () => {
+      const name = modal.querySelector("#vc-name").value.trim();
+      const provider = modal.querySelector("#vc-provider").value.trim();
+      const balanceRaw = modal.querySelector("#vc-balance").value;
+      const balance = Number(balanceRaw);
+      const currency = (modal.querySelector("#vc-currency").value || "ILS")
+        .toUpperCase().slice(0, 3);
+      const expiresOn = modal.querySelector("#vc-expires").value || null;
+      const notes = modal.querySelector("#vc-notes").value.trim() || null;
+
+      if (!name) { toast("Give the voucher a name first.", true); return; }
+      if (!provider) { toast("Pick or type a provider.", true); return; }
+      if (!Number.isFinite(balance)) { toast("Balance must be a number.", true); return; }
+
+      try {
+        if (editing) {
+          await api("/vouchers/" + voucher.id, "PATCH", {
+            name, provider, balance, currency, expiresOn, notes,
+          });
+        } else {
+          await api("/vouchers", "POST", {
+            name, provider, balance, currency, expiresOn, notes,
+          });
+        }
+        const fresh = await api("/vouchers").catch(() => ({ vouchers: state.vouchers }));
+        state.vouchers = fresh.vouchers || [];
+        try { state.summary = (await api("/summary")).summary; } catch (e) {}
+        closeOverlay();
+        render();
+        toast(editing ? "Voucher updated." : "Voucher added.");
+      } catch (e) {
+        if (e instanceof VaultLocked) return showGate();
+        toast((e && e.message) || "Could not save the voucher.", true);
+      }
+    });
+  });
+}
+
+async function removeVoucher(id) {
+  const v = (state.vouchers || []).find((x) => x.id === id);
+  const label = v ? '"' + v.name + '"' : "this voucher";
+  if (!confirm("Delete " + label + "?")) return;
+  try {
+    await api("/vouchers/" + id, "DELETE");
+    state.vouchers = (state.vouchers || []).filter((x) => x.id !== id);
+    try { state.summary = (await api("/summary")).summary; } catch (e) {}
+    render();
+    toast("Voucher deleted.");
+  } catch (e) {
+    if (e instanceof VaultLocked) return showGate();
+    toast((e && e.message) || "Could not delete the voucher.", true);
+  }
+}
+
+async function toggleVoucherExcluded(id) {
+  const v = (state.vouchers || []).find((x) => x.id === id);
+  if (!v) return;
+  try {
+    await api("/vouchers/" + id, "PATCH", { excluded: !v.excluded });
+    v.excluded = !v.excluded;
+    try { state.summary = (await api("/summary")).summary; } catch (e) {}
+    render();
+  } catch (e) {
+    if (e instanceof VaultLocked) return showGate();
+    toast((e && e.message) || "Could not update the voucher.", true);
   }
 }
 
@@ -8715,6 +8965,14 @@ function handleAction(action, btn) {
     case "toggle-hold": if (id) togglePiggyHold(id); break;
     case "remove-piggy": if (id) removePiggy(id); break;
     case "mark-piggy-used": if (id) markPiggyUsed(id); break;
+    case "new-voucher": voucherModal(null); break;
+    case "edit-voucher": {
+      const v = id && (state.vouchers || []).find((x) => x.id === id);
+      if (v) voucherModal(v);
+      break;
+    }
+    case "remove-voucher": if (id) removeVoucher(id); break;
+    case "toggle-voucher-excluded": if (id) toggleVoucherExcluded(id); break;
     case "month-prev": shiftMonth(1); break;
     case "month-next": shiftMonth(-1); break;
     case "toggle-select":

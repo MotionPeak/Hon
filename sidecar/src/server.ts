@@ -973,6 +973,102 @@ app.delete('/assets/:id', async (req, reply) => {
   return { ok: true };
 });
 
+// --- Vouchers --------------------------------------------------------------
+// Gift cards and prepaid vouchers — Shufersal Tav Hazahav, Pluxee, Cibus,
+// employer gifts. Currently manual entry only; a future provider sync will
+// upsert through repo.createVoucher / updateVoucher with the connectionId
+// + externalId pair set.
+
+app.get('/vouchers', async (_req, reply) => {
+  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+  return { vouchers: repo.listVouchers() };
+});
+
+app.post('/vouchers', async (req, reply) => {
+  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+  const body = (req.body ?? {}) as {
+    name?: string;
+    provider?: string;
+    balance?: number;
+    currency?: string;
+    expiresOn?: string | null;
+    notes?: string | null;
+  };
+  const name = (body.name ?? '').trim();
+  if (!name) return reply.code(400).send({ error: 'a name is required' });
+  const provider = (body.provider ?? '').trim();
+  if (!provider) return reply.code(400).send({ error: 'a provider is required' });
+  const balance = Number(body.balance);
+  if (!Number.isFinite(balance)) {
+    return reply.code(400).send({ error: 'a numeric balance is required' });
+  }
+  const currency = (body.currency ?? 'ILS').toUpperCase();
+  let expiresOn: string | null = null;
+  if (body.expiresOn) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(body.expiresOn)) {
+      return reply.code(400).send({ error: 'expiresOn must be YYYY-MM-DD' });
+    }
+    expiresOn = body.expiresOn;
+  }
+  const notes = body.notes ? String(body.notes).trim() || null : null;
+  const voucher = repo.createVoucher({ name, provider, balance, currency, expiresOn, notes });
+  return { voucher };
+});
+
+app.patch('/vouchers/:id', async (req, reply) => {
+  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+  const { id } = req.params as { id: string };
+  if (!repo.getVoucher(id)) return reply.code(404).send({ error: 'voucher not found' });
+  const body = (req.body ?? {}) as {
+    name?: string;
+    provider?: string;
+    balance?: number;
+    currency?: string;
+    expiresOn?: string | null;
+    notes?: string | null;
+    excluded?: boolean;
+  };
+  const fields: Parameters<typeof repo.updateVoucher>[1] = {};
+  if (body.name !== undefined) {
+    const name = body.name.trim();
+    if (!name) return reply.code(400).send({ error: 'name cannot be empty' });
+    fields.name = name;
+  }
+  if (body.provider !== undefined) {
+    const provider = body.provider.trim();
+    if (!provider) return reply.code(400).send({ error: 'provider cannot be empty' });
+    fields.provider = provider;
+  }
+  if (body.balance !== undefined) {
+    const balance = Number(body.balance);
+    if (!Number.isFinite(balance)) {
+      return reply.code(400).send({ error: 'balance must be a number' });
+    }
+    fields.balance = balance;
+  }
+  if (body.currency !== undefined) fields.currency = body.currency.toUpperCase();
+  if (body.expiresOn !== undefined) {
+    if (body.expiresOn === null || body.expiresOn === '') {
+      fields.expiresOn = null;
+    } else if (!/^\d{4}-\d{2}-\d{2}$/.test(body.expiresOn)) {
+      return reply.code(400).send({ error: 'expiresOn must be YYYY-MM-DD' });
+    } else {
+      fields.expiresOn = body.expiresOn;
+    }
+  }
+  if (body.notes !== undefined) fields.notes = body.notes?.trim() || null;
+  if (body.excluded !== undefined) fields.excluded = body.excluded === true;
+  repo.updateVoucher(id, fields);
+  return { voucher: repo.getVoucher(id) };
+});
+
+app.delete('/vouchers/:id', async (req, reply) => {
+  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+  const { id } = req.params as { id: string };
+  repo.deleteVoucher(id);
+  return { ok: true };
+});
+
 // --- Loans ----------------------------------------------------------------
 // CRUD plus a "current state" computation: outstanding, monthly payment and
 // progress, recomputed at read time from the BOI prime + CBS CPI rates so

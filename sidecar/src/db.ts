@@ -596,6 +596,36 @@ const MIGRATIONS: { version: number; sql: string }[] = [
       ALTER TABLE loans ADD COLUMN name_overridden INTEGER NOT NULL DEFAULT 0;
     `,
   },
+  {
+    // Vouchers and gift cards — Shufersal Tav Hazahav, Pluxee/Sodexo, Cibus,
+    // and the like. Each row carries an explicit currency, an optional expiry
+    // (some employer cards roll over the year and reset), and an `excluded`
+    // toggle so vouchers can be dropped from the net-worth roll-up without
+    // deleting them. Like `loans`, the table supports both hand-entered rows
+    // (connection_id NULL) and rows synced from a provider (connection_id +
+    // external_id), so a future Shufersal scraper can upsert in place.
+    version: 31,
+    sql: `
+      CREATE TABLE vouchers (
+        id            TEXT PRIMARY KEY,
+        name          TEXT NOT NULL,
+        provider      TEXT NOT NULL,
+        balance       REAL NOT NULL,
+        currency      TEXT NOT NULL DEFAULT 'ILS',
+        expires_on    TEXT,
+        notes         TEXT,
+        excluded      INTEGER NOT NULL DEFAULT 0,
+        connection_id TEXT REFERENCES connections(id) ON DELETE CASCADE,
+        external_id   TEXT,
+        name_overridden INTEGER NOT NULL DEFAULT 0,
+        created_at    TEXT NOT NULL,
+        updated_at    TEXT NOT NULL
+      );
+      CREATE UNIQUE INDEX idx_vouchers_connection_external
+        ON vouchers(connection_id, external_id)
+        WHERE connection_id IS NOT NULL AND external_id IS NOT NULL;
+    `,
+  },
 ];
 
 /**

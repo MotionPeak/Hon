@@ -112,7 +112,50 @@ export interface Summary {
   connectionCount: number;
   accountCount: number;
   manualAssetCount: number;
+  voucherCount: number;
   byCurrency: { currency: string; total: number; accountCount: number }[];
+}
+
+/**
+ * A voucher or gift card the user holds — Shufersal Tav Hazahav, Pluxee /
+ * Sodexo, Cibus, employer holiday vouchers, etc. Contributes to net worth
+ * unless `excluded` is set. Like loans, the row supports both hand-entered
+ * vouchers (`connectionId` null) and rows synced from a provider portal in
+ * the future (`connectionId` + `externalId` keyed for upsert).
+ */
+export interface Voucher {
+  id: string;
+  name: string;
+  provider: string;
+  balance: number;
+  currency: string;
+  /** YYYY-MM-DD; null when the voucher does not expire (or is unknown). */
+  expiresOn: string | null;
+  notes: string | null;
+  /** When true, the voucher is left out of the net-worth total. */
+  excluded: boolean;
+  connectionId: string | null;
+  externalId: string | null;
+  /**
+   * True once the user has renamed the voucher in Hon. The provider sync
+   * (when added) will preserve `name` and `notes` instead of clobbering.
+   */
+  nameOverridden: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+type VoucherRow = Omit<Voucher, 'excluded' | 'nameOverridden'> & {
+  excluded: number;
+  nameOverridden: number;
+};
+
+function toVoucher(row: VoucherRow): Voucher {
+  return {
+    ...row,
+    excluded: row.excluded !== 0,
+    nameOverridden: row.nameOverridden !== 0,
+  };
 }
 
 export interface ManualAsset {
@@ -617,9 +660,15 @@ export class Repo {
          FROM manual_assets WHERE excluded = 0 GROUP BY currency`,
       )
       .all() as { currency: string; total: number; n: number }[];
+    const voucherTotals = this.db
+      .prepare(
+        `SELECT currency, COALESCE(SUM(balance), 0) AS total, COUNT(*) AS n
+         FROM vouchers WHERE excluded = 0 GROUP BY currency`,
+      )
+      .all() as { currency: string; total: number; n: number }[];
 
-    // Net worth spans both scraped accounts and manually-valued assets, so the
-    // per-currency totals merge the two before any FX conversion.
+    // Net worth spans scraped accounts, manually-valued assets, and vouchers,
+    // so the per-currency totals merge all three before any FX conversion.
     const totals = new Map<
       string,
       { currency: string; total: number; accountCount: number }
@@ -628,6 +677,12 @@ export class Repo {
       totals.set(row.currency, { ...row });
     }
     for (const row of assetTotals) {
+      const entry =
+        totals.get(row.currency) ?? { currency: row.currency, total: 0, accountCount: 0 };
+      entry.total += row.total;
+      totals.set(row.currency, entry);
+    }
+    for (const row of voucherTotals) {
       const entry =
         totals.get(row.currency) ?? { currency: row.currency, total: 0, accountCount: 0 };
       entry.total += row.total;
@@ -646,7 +701,10 @@ export class Repo {
     const manualAssetCount = (
       this.db.prepare('SELECT COUNT(*) AS n FROM manual_assets').get() as { n: number }
     ).n;
-    return { connectionCount, accountCount, manualAssetCount, byCurrency };
+    const voucherCount = (
+      this.db.prepare('SELECT COUNT(*) AS n FROM vouchers').get() as { n: number }
+    ).n;
+    return { connectionCount, accountCount, manualAssetCount, voucherCount, byCurrency };
   }
 
   /** Upserts every account + transaction from a scrape, in one transaction. */
@@ -898,6 +956,122 @@ export class Repo {
 
   deleteManualAsset(id: string): void {
     this.db.prepare('DELETE FROM manual_assets WHERE id = ?').run(id);
+  }
+
+  // --- Vouchers -------------------------------------------------------------
+  // Gift cards and prepaid vouchers — Shufersal Tav Hazahav, Pluxee/Sodexo,
+  // Cibus, employer gift sums. Each row holds a current balance that the
+  // user maintains; when a provider scraper lands the row carries a
+  // connection_id + external_id and updates upsert-in-place.
+
+  private static readonly VOUCHER_COLS =
+    'id, name, provider, balance, currency, ' +
+    'expires_on AS expiresOn, notes, excluded, ' +
+    'connection_id AS connectionId, external_id AS externalId, ' +
+    'name_overridden AS nameOverridden, ' +
+    'created_at AS createdAt, updated_at AS updatedAt';
+
+  listVouchers(): Voucher[] {
+    const rows = this.db
+      .prepare(`SELECT ${Repo.VOUCHER_COLS} FROM vouchers ORDER BY created_at`)
+      .all() as VoucherRow[];
+    return rows.map(toVoucher);
+  }
+
+  getVoucher(id: string): Voucher | undefined {
+    const row = this.db
+      .prepare(`SELECT ${Repo.VOUCHER_COLS} FROM vouchers WHERE id = ?`)
+      .get(id) as VoucherRow | undefined;
+    return row ? toVoucher(row) : undefined;
+  }
+
+  createVoucher(input: {
+    name: string;
+    provider: string;
+    balance: number;
+    currency: string;
+    expiresOn?: string | null;
+    notes?: string | null;
+    excluded?: boolean;
+    connectionId?: string | null;
+    externalId?: string | null;
+    nameOverridden?: boolean;
+  }): Voucher {
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO vouchers
+           (id, name, provider, balance, currency, expires_on, notes,
+            excluded, connection_id, external_id, name_overridden,
+            created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        id,
+        input.name,
+        input.provider,
+        input.balance,
+        input.currency,
+        input.expiresOn ?? null,
+        input.notes ?? null,
+        input.excluded ? 1 : 0,
+        input.connectionId ?? null,
+        input.externalId ?? null,
+        input.nameOverridden ? 1 : 0,
+        now,
+        now,
+      );
+    return this.getVoucher(id)!;
+  }
+
+  updateVoucher(
+    id: string,
+    fields: Partial<{
+      name: string;
+      provider: string;
+      balance: number;
+      currency: string;
+      expiresOn: string | null;
+      notes: string | null;
+      excluded: boolean;
+      nameOverridden: boolean;
+    }>,
+  ): void {
+    const sets: string[] = [];
+    const values: unknown[] = [];
+    if (fields.name !== undefined) {
+      sets.push('name = ?');
+      values.push(fields.name);
+      // A rename via this code path is a user edit; flip the override flag
+      // so a future provider sync leaves the new name alone. (Matches the
+      // loans semantics.)
+      if (fields.nameOverridden === undefined) {
+        sets.push('name_overridden = ?');
+        values.push(1);
+      }
+    }
+    if (fields.nameOverridden !== undefined) {
+      sets.push('name_overridden = ?');
+      values.push(fields.nameOverridden ? 1 : 0);
+    }
+    if (fields.provider !== undefined) { sets.push('provider = ?'); values.push(fields.provider); }
+    if (fields.balance !== undefined) { sets.push('balance = ?'); values.push(fields.balance); }
+    if (fields.currency !== undefined) { sets.push('currency = ?'); values.push(fields.currency); }
+    if (fields.expiresOn !== undefined) { sets.push('expires_on = ?'); values.push(fields.expiresOn); }
+    if (fields.notes !== undefined) { sets.push('notes = ?'); values.push(fields.notes); }
+    if (fields.excluded !== undefined) { sets.push('excluded = ?'); values.push(fields.excluded ? 1 : 0); }
+    if (sets.length === 0) return;
+    sets.push('updated_at = ?');
+    values.push(new Date().toISOString());
+    values.push(id);
+    this.db
+      .prepare(`UPDATE vouchers SET ${sets.join(', ')} WHERE id = ?`)
+      .run(...values);
+  }
+
+  deleteVoucher(id: string): void {
+    this.db.prepare('DELETE FROM vouchers WHERE id = ?').run(id);
   }
 
   // --- Piggy banks ----------------------------------------------------------
