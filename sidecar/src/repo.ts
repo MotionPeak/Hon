@@ -1074,6 +1074,76 @@ export class Repo {
     this.db.prepare('DELETE FROM vouchers WHERE id = ?').run(id);
   }
 
+  /**
+   * Upserts a voucher scraped from a provider portal. Looks up by
+   * (provider, externalId) so re-syncs update the same row even when no
+   * Hon connection is involved (Shufersal Tav Hazahav today). Preserves
+   * `excluded`, `notes`, and `name` when the user has overridden it — same
+   * semantics as bank-loan upsert.
+   */
+  upsertScrapedVoucher(input: {
+    name: string;
+    provider: string;
+    balance: number;
+    currency: string;
+    expiresOn?: string | null;
+    externalId: string;
+  }): Voucher {
+    const existing = this.db
+      .prepare(
+        `SELECT id, name_overridden AS nameOverridden FROM vouchers
+         WHERE provider = ? AND external_id = ?`,
+      )
+      .get(input.provider, input.externalId) as
+      | { id: string; nameOverridden: number }
+      | undefined;
+    const now = new Date().toISOString();
+    if (existing) {
+      if (existing.nameOverridden) {
+        // Keep the user-renamed `name`; everything else refreshes.
+        this.db
+          .prepare(
+            `UPDATE vouchers SET
+               balance = ?, currency = ?, expires_on = ?, updated_at = ?
+             WHERE id = ?`,
+          )
+          .run(
+            input.balance,
+            input.currency,
+            input.expiresOn ?? null,
+            now,
+            existing.id,
+          );
+      } else {
+        this.db
+          .prepare(
+            `UPDATE vouchers SET
+               name = ?, balance = ?, currency = ?, expires_on = ?, updated_at = ?
+             WHERE id = ?`,
+          )
+          .run(
+            input.name,
+            input.balance,
+            input.currency,
+            input.expiresOn ?? null,
+            now,
+            existing.id,
+          );
+      }
+      return this.getVoucher(existing.id)!;
+    }
+    return this.createVoucher({
+      name: input.name,
+      provider: input.provider,
+      balance: input.balance,
+      currency: input.currency,
+      expiresOn: input.expiresOn ?? null,
+      notes: null,
+      excluded: false,
+      externalId: input.externalId,
+    });
+  }
+
   // --- Piggy banks ----------------------------------------------------------
 
   private static readonly PIGGY_COLS =

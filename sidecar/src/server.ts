@@ -1,11 +1,12 @@
 import Fastify from 'fastify';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openDatabase, type DbHandle } from './db.js';
 import { Repo } from './repo.js';
 import { ScrapeRunner } from './runner.js';
+import { scrapeShufersalGiftCards } from './voucherScrapers.js';
 import { companyCatalog, isSupportedCompany } from './scrapers.js';
 import { createPortalLink, listBrokerages, describeSnapError } from './snaptrade.js';
 import { migrateLegacySnapTradeUsers } from './snaptradeUser.js';
@@ -1068,6 +1069,157 @@ app.delete('/vouchers/:id', async (req, reply) => {
   repo.deleteVoucher(id);
   return { ok: true };
 });
+
+// --- Voucher sync: Shufersal Tav Hazahav -----------------------------------
+// One-off sync flow (not a persistent connection): start a scrape with a
+// phone number, the portal SMSs a code, the UI surfaces an OTP prompt, the
+// user posts the code, and the scrape finishes with the updated voucher
+// list. State for an in-flight sync lives in-memory only; a sidecar restart
+// loses any pending sync. The phone number is encrypted in the vault so a
+// re-sync skips re-typing it.
+
+interface ShufersalSync {
+  status: 'signing-in' | 'awaiting-otp' | 'syncing' | 'success' | 'error';
+  message?: string;
+  error?: string;
+  vouchers?: { id: string; name: string; balance: number; currency: string }[];
+  resolveOtp?: (code: string) => void;
+  rejectOtp?: (err: Error) => void;
+  finished?: boolean;
+}
+
+const shufersalSyncs = new Map<string, ShufersalSync>();
+const SHUFERSAL_PROVIDER_LABEL = 'Shufersal — תו הזהב';
+const SHUFERSAL_PHONE_VAULT_KEY = 'shufersal:phone';
+
+function shortId(): string {
+  return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+}
+
+app.get('/vouchers/sync/shufersal/saved-phone', async (_req, reply) => {
+  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+  if (!vault || !vault.unlocked) return { phone: null };
+  try {
+    const phone = vault.loadSecret(SHUFERSAL_PHONE_VAULT_KEY) ?? null;
+    return { phone };
+  } catch (err) {
+    // Vault locked or no value — surface as "no saved phone" without erroring.
+    return { phone: null };
+  }
+});
+
+app.post('/vouchers/sync/shufersal/start', async (req, reply) => {
+  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+  const body = (req.body ?? {}) as { phone?: string; remember?: boolean };
+  const phone = String(body.phone || '').trim();
+  if (!phone) return reply.code(400).send({ error: 'a phone number is required' });
+
+  const syncId = shortId();
+  const state: ShufersalSync = { status: 'signing-in', message: 'Opening Shufersal…' };
+  shufersalSyncs.set(syncId, state);
+
+  // Best-effort save of the phone for re-sync convenience; never blocks the
+  // scrape if the vault is locked.
+  if (body.remember && vault && vault.unlocked) {
+    try { vault.saveSecret(SHUFERSAL_PHONE_VAULT_KEY, phone); }
+    catch { /* fine, just won't be remembered */ }
+  }
+
+  const onOtpNeeded = () =>
+    new Promise<string>((resolve, reject) => {
+      // The scrape has reached the OTP screen — flip status so the UI's
+      // poller knows to render the code-entry step.
+      state.status = 'awaiting-otp';
+      state.message = 'Enter the code that was SMSed to your phone.';
+      state.resolveOtp = (code) => { state.status = 'syncing'; state.message = 'Verifying with Shufersal…'; resolve(code); };
+      state.rejectOtp = (err) => reject(err);
+    });
+
+  // Fire-and-forget; the HTTP handler returns immediately and the client
+  // polls `/status` until OTP is needed and again until completion.
+  const debugDir = join(dataDir, 'debug');
+  try { mkdirSync(debugDir, { recursive: true }); } catch { /* best effort */ }
+  void (async () => {
+    try {
+      const cards = await scrapeShufersalGiftCards(phone, onOtpNeeded, {
+        debugDumpPath: join(debugDir, 'shufersal-dashboard.html'),
+      });
+      // Upsert each scraped card and gather the resulting voucher rows.
+      const created: { id: string; name: string; balance: number; currency: string }[] = [];
+      for (const card of cards) {
+        const name = card.last4
+          ? `${card.brand} ****${card.last4}`
+          : card.brand;
+        const v = repo!.upsertScrapedVoucher({
+          name,
+          provider: SHUFERSAL_PROVIDER_LABEL,
+          balance: card.balance,
+          currency: card.currency,
+          expiresOn: card.expiresOn,
+          externalId: card.externalId,
+        });
+        created.push({ id: v.id, name: v.name, balance: v.balance, currency: v.currency });
+      }
+      state.status = 'success';
+      state.message = `Synced ${cards.length} card${cards.length === 1 ? '' : 's'}.`;
+      state.vouchers = created;
+      state.finished = true;
+    } catch (err) {
+      state.status = 'error';
+      state.error = err instanceof Error ? err.message : String(err);
+      state.message = state.error;
+      state.finished = true;
+    }
+  })();
+
+  return { syncId };
+});
+
+app.get('/vouchers/sync/shufersal/status/:id', async (req, reply) => {
+  const { id } = req.params as { id: string };
+  const state = shufersalSyncs.get(id);
+  if (!state) return reply.code(404).send({ error: 'sync not found' });
+  return {
+    status: state.status,
+    message: state.message ?? null,
+    error: state.error ?? null,
+    vouchers: state.vouchers ?? null,
+    finished: !!state.finished,
+  };
+});
+
+app.post('/vouchers/sync/shufersal/otp', async (req, reply) => {
+  const body = (req.body ?? {}) as { syncId?: string; code?: string };
+  const syncId = String(body.syncId || '');
+  const code = String(body.code || '').trim();
+  if (!syncId || !code) return reply.code(400).send({ error: 'syncId and code are required' });
+  const state = shufersalSyncs.get(syncId);
+  if (!state || !state.resolveOtp) return reply.code(404).send({ error: 'no sync waiting for OTP' });
+  state.resolveOtp(code);
+  state.resolveOtp = undefined;
+  state.rejectOtp = undefined;
+  return { ok: true };
+});
+
+app.post('/vouchers/sync/shufersal/cancel', async (req, reply) => {
+  const body = (req.body ?? {}) as { syncId?: string };
+  const syncId = String(body.syncId || '');
+  const state = shufersalSyncs.get(syncId);
+  if (!state) return reply.code(404).send({ error: 'sync not found' });
+  if (state.rejectOtp) state.rejectOtp(new Error('Sync cancelled.'));
+  state.status = 'error';
+  state.error = 'Cancelled.';
+  state.finished = true;
+  return { ok: true };
+});
+
+// Best-effort cleanup so completed syncs don't pile up across long sessions.
+// Hourly is fine: a sync object is a few hundred bytes.
+setInterval(() => {
+  for (const [id, state] of shufersalSyncs) {
+    if (state.finished) shufersalSyncs.delete(id);
+  }
+}, 60 * 60 * 1000).unref?.();
 
 // --- Loans ----------------------------------------------------------------
 // CRUD plus a "current state" computation: outstanding, monthly payment and
