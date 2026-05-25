@@ -1,0 +1,15 @@
+# Default: let Git decide. Windows checkouts get CRLF for text files, which is
+# fine almost everywhere — except the files below, which MUST stay LF.
+* text=auto
+
+# patch-package compares hunks byte-for-byte against node_modules. CRLF flips
+# every line and the patch fails to apply with "patch failed to apply" on
+# Windows. Lock these to LF on every platform.
+*.patch text eol=lf
+
+# Shell scripts (`web.sh`, etc.) refuse to run with CRLF — `\r` ends up in
+# the shebang and the kernel can't find the interpreter.
+*.sh text eol=lf
+
+# Cross-platform Node launcher — kept LF for the same reason as shell scripts.
+*.mjs text eol=lf
