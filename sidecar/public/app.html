@@ -5906,7 +5906,17 @@ function sliceRange(series, range) {
     cutoff.setMonth(cutoff.getMonth() - months);
   }
   const iso = cutoff.toISOString().slice(0, 10);
-  return series.filter((p) => p.date >= iso);
+  const inside = series.filter((p) => p.date >= iso);
+  // When the in-window slice has < 2 points (Meitav's monthly cadence in 1M /
+  // 3M, a freshly-linked SnapTrade with one snapshot, etc.) the chart shows
+  // "only one data point so far". Anchor it to the last point *before* the
+  // window so the line draws from a known starting position. The since-start
+  // diff stays meaningful — `first` becomes that anchor.
+  if (inside.length >= 2) return inside;
+  const before = series.filter((p) => p.date < iso);
+  if (!before.length) return inside;
+  const anchor = before[before.length - 1];
+  return [anchor, ...inside];
 }
 
 // SVG line + area chart with hover crosshair and tooltip. The line draws

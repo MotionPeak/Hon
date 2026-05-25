@@ -381,10 +381,23 @@ export class ScrapeRunner {
       status.message = `Backfilling price history for ${h.symbol}…`;
       const history = await fetchHistoryForSymbol(h.symbol, 365 * 10);
       if (!history.length) continue;
+      // Snapshot value is `units × price`. Israeli mutual funds (Meitav
+      // portfolio holdings, etc.) come back from the scraper with units=0
+      // because the provider only reports value, not a share count — that
+      // would store every historical snapshot as 0 and the sparkline draws
+      // nothing. Derive a pseudo-unit count from `current value / latest
+      // price` so historical price ratios scale to a meaningful per-day
+      // value. SnapTrade holdings keep their real units untouched.
+      const latestPrice = history[history.length - 1]?.close ?? 0;
+      const units = h.units !== 0
+        ? h.units
+        : (h.value != null && latestPrice > 0)
+          ? h.value / latestPrice
+          : 0;
       const inserted = this.repo.backfillHoldingHistory(
         h.accountId,
         h.symbol,
-        h.units,
+        units,
         history.map((p) => ({ date: p.date, price: p.close, currency: p.currency })),
       );
       if (inserted > 0) touched += 1;
