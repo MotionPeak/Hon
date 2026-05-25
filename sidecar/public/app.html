@@ -5486,9 +5486,18 @@ function brokerageView() {
   // history even when SnapTrade returns no performance report.
   const holdSnapsScoped = acctFilter === "all"
     ? holdSnaps : holdSnaps.filter((s) => s.accountId === acctFilter);
+  // Performance reports are stored per *connection*, not per account. When
+  // the user narrows to a single account we still want any report whose
+  // connection owns that account — for the Meitav portfolio (where one
+  // connection holds one tracked account) that's exactly what makes the
+  // chart light up instead of falling back to local-snapshot-only mode.
+  const filteredPerf = acctFilter === "all"
+    ? performance
+    : performance.filter((p) => state.accounts.some((a) =>
+        a.id === acctFilter && a.connectionId === p.connectionId));
   const fullSeries = acctFilter === "all"
     ? buildEquitySeries(performance, snaps, holdSnaps, conv)
-    : buildEquitySeries([], snapsScoped, holdSnapsScoped, conv);
+    : buildEquitySeries(filteredPerf, snapsScoped, holdSnapsScoped, conv);
   const range = state.brkRange || "1Y";
   const series = sliceRange(fullSeries, range);
   const first = series.length ? series[0].value : null;
@@ -5499,25 +5508,26 @@ function brokerageView() {
   // Reporting stats — picked from the timeframe the user selected at the top
   // of the chart. SnapTrade caches every range on each sync (1M/3M/YTD/1Y/
   // ALL) into `byRange`, so flipping a pill is instant. Falls back to the
-  // top-level fields when an older cache pre-dates the per-range fetch.
+  // top-level fields when an older cache pre-dates the per-range fetch. Uses
+  // the same filteredPerf as the chart so the tile reflects the picked
+  // account / connection (otherwise the Meitav portfolio's rate-of-return
+  // disappears whenever the user narrows to that account).
   let dividend = 0, haveDividend = false;
   let rateSum = 0, rateCount = 0;
-  if (acctFilter === "all") {
-    performance.forEach((p) => {
-      const d = p.data || {};
-      const window = (d.byRange && d.byRange[range]) || {
-        rateOfReturn: d.rateOfReturn ?? null,
-        dividendIncome: d.dividendIncome ?? null,
-      };
-      if (typeof window.dividendIncome === "number") {
-        const v = conv(window.dividendIncome, d.currency);
-        if (v != null) { dividend += v; haveDividend = true; }
-      }
-      if (typeof window.rateOfReturn === "number") {
-        rateSum += window.rateOfReturn; rateCount += 1;
-      }
-    });
-  }
+  filteredPerf.forEach((p) => {
+    const d = p.data || {};
+    const window = (d.byRange && d.byRange[range]) || {
+      rateOfReturn: d.rateOfReturn ?? null,
+      dividendIncome: d.dividendIncome ?? null,
+    };
+    if (typeof window.dividendIncome === "number") {
+      const v = conv(window.dividendIncome, d.currency);
+      if (v != null) { dividend += v; haveDividend = true; }
+    }
+    if (typeof window.rateOfReturn === "number") {
+      rateSum += window.rateOfReturn; rateCount += 1;
+    }
+  });
   const rateOfReturn = rateCount ? (rateSum / rateCount) * 100 : null;
 
   // Period-aware gain tile — value + percent computed off the equity-series
