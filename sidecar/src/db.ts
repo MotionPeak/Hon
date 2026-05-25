@@ -582,6 +582,20 @@ const MIGRATIONS: { version: number; sql: string }[] = [
       ALTER TABLE holdings ADD COLUMN value REAL;
     `,
   },
+  {
+    // Tracks whether the user has edited a loan's name in Hon. Bank-loan
+    // upserts overwrite every other column on each sync — that's right for
+    // principal, rate, term, etc. (the bank is the source of truth) — but
+    // wrong for the name, which the user may have cleaned up (e.g. Hapoalim
+    // truncates "ירושלים" to "ים"). When this flag is 1 the name column is
+    // preserved across scrapes; PATCH /loans/:id sets it whenever a rename
+    // comes in. Hand-entered loans never have it flipped, so renaming them
+    // is a no-op for sync semantics.
+    version: 30,
+    sql: `
+      ALTER TABLE loans ADD COLUMN name_overridden INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
 ];
 
 /**

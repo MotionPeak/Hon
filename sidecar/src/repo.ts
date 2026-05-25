@@ -1530,6 +1530,7 @@ export class Repo {
     'is_prime AS isPrime, is_cpi_linked AS isCpiLinked, rate_value AS rateValue, ' +
     'cpi_start AS cpiStart, currency, excluded, notes, ' +
     'connection_id AS connectionId, external_id AS externalId, ' +
+    'name_overridden AS nameOverridden, ' +
     'created_at AS createdAt, updated_at AS updatedAt';
 
   listLoans(): Loan[] {
@@ -1547,8 +1548,8 @@ export class Repo {
   }
 
   createLoan(
-    input: Omit<Loan, 'id' | 'createdAt' | 'updatedAt' | 'connectionId' | 'externalId'>
-      & { connectionId?: string | null; externalId?: string | null },
+    input: Omit<Loan, 'id' | 'createdAt' | 'updatedAt' | 'connectionId' | 'externalId' | 'nameOverridden'>
+      & { connectionId?: string | null; externalId?: string | null; nameOverridden?: boolean },
   ): Loan {
     const id = randomUUID();
     const now = new Date().toISOString();
@@ -1557,8 +1558,8 @@ export class Repo {
         `INSERT INTO loans
            (id, name, principal, start_date, term_months, is_prime, is_cpi_linked,
             rate_value, cpi_start, currency, excluded, notes,
-            connection_id, external_id, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            connection_id, external_id, name_overridden, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -1575,6 +1576,7 @@ export class Repo {
         input.notes,
         input.connectionId ?? null,
         input.externalId ?? null,
+        input.nameOverridden ? 1 : 0,
         now,
         now,
       );
@@ -1584,41 +1586,71 @@ export class Repo {
   /**
    * Upserts a loan scraped from a bank's loans page, keyed by the connection
    * + bank-side loan id. Re-syncs update the same row instead of inserting.
-   * The `excluded` and `notes` columns are preserved across syncs so the
-   * user's choices are not clobbered by the scraper.
+   * The `excluded`, `notes`, and (when `name_overridden=1`) `name` columns
+   * are preserved across syncs so the user's edits are not clobbered by the
+   * scraper. Every other field — principal, rate, term — is overwritten
+   * because the bank is the source of truth for those.
    */
   upsertBankLoan(
     connectionId: string,
     input: Omit<Loan, 'id' | 'connectionId' | 'createdAt' | 'updatedAt' |
-      'excluded' | 'notes' | 'cpiStart'> & { cpiStart?: number | null },
+      'excluded' | 'notes' | 'cpiStart' | 'nameOverridden'> & { cpiStart?: number | null },
   ): Loan {
     const existing = this.db
       .prepare(
-        `SELECT id FROM loans WHERE connection_id = ? AND external_id = ?`,
+        `SELECT id, name_overridden AS nameOverridden FROM loans
+         WHERE connection_id = ? AND external_id = ?`,
       )
-      .get(connectionId, input.externalId) as { id: string } | undefined;
+      .get(connectionId, input.externalId) as
+      | { id: string; nameOverridden: number }
+      | undefined;
     const now = new Date().toISOString();
     if (existing) {
-      this.db
-        .prepare(
-          `UPDATE loans SET
-             name = ?, principal = ?, start_date = ?, term_months = ?,
-             is_prime = ?, is_cpi_linked = ?, rate_value = ?,
-             currency = ?, updated_at = ?
-           WHERE id = ?`,
-        )
-        .run(
-          input.name,
-          input.principal,
-          input.startDate,
-          input.termMonths,
-          input.isPrime ? 1 : 0,
-          input.isCpiLinked ? 1 : 0,
-          input.rateValue,
-          input.currency,
-          now,
-          existing.id,
-        );
+      // Renames the user made via the UI live in the same column the scraper
+      // would otherwise overwrite. Skip the name set when the override flag
+      // is on so a re-sync does not blow the rename away.
+      if (existing.nameOverridden) {
+        this.db
+          .prepare(
+            `UPDATE loans SET
+               principal = ?, start_date = ?, term_months = ?,
+               is_prime = ?, is_cpi_linked = ?, rate_value = ?,
+               currency = ?, updated_at = ?
+             WHERE id = ?`,
+          )
+          .run(
+            input.principal,
+            input.startDate,
+            input.termMonths,
+            input.isPrime ? 1 : 0,
+            input.isCpiLinked ? 1 : 0,
+            input.rateValue,
+            input.currency,
+            now,
+            existing.id,
+          );
+      } else {
+        this.db
+          .prepare(
+            `UPDATE loans SET
+               name = ?, principal = ?, start_date = ?, term_months = ?,
+               is_prime = ?, is_cpi_linked = ?, rate_value = ?,
+               currency = ?, updated_at = ?
+             WHERE id = ?`,
+          )
+          .run(
+            input.name,
+            input.principal,
+            input.startDate,
+            input.termMonths,
+            input.isPrime ? 1 : 0,
+            input.isCpiLinked ? 1 : 0,
+            input.rateValue,
+            input.currency,
+            now,
+            existing.id,
+          );
+      }
       return this.getLoan(existing.id)!;
     }
     return this.createLoan({
@@ -1627,6 +1659,7 @@ export class Repo {
       cpiStart: input.cpiStart ?? null,
       excluded: false,
       notes: null,
+      nameOverridden: false,
     });
   }
 
@@ -1636,7 +1669,22 @@ export class Repo {
   ): void {
     const sets: string[] = [];
     const values: unknown[] = [];
-    if (fields.name !== undefined) { sets.push('name = ?'); values.push(fields.name); }
+    if (fields.name !== undefined) {
+      sets.push('name = ?');
+      values.push(fields.name);
+      // Any rename through this code path is a user-driven edit; flip the
+      // override flag so the next bank-loan upsert leaves the new name alone.
+      // Callers that need a non-overriding update (e.g. the scraper) go
+      // through `upsertBankLoan`, not here.
+      if (fields.nameOverridden === undefined) {
+        sets.push('name_overridden = ?');
+        values.push(1);
+      }
+    }
+    if (fields.nameOverridden !== undefined) {
+      sets.push('name_overridden = ?');
+      values.push(fields.nameOverridden ? 1 : 0);
+    }
     if (fields.principal !== undefined) { sets.push('principal = ?'); values.push(fields.principal); }
     if (fields.startDate !== undefined) { sets.push('start_date = ?'); values.push(fields.startDate); }
     if (fields.termMonths !== undefined) { sets.push('term_months = ?'); values.push(fields.termMonths); }
@@ -1839,6 +1887,7 @@ interface LoanRow {
   notes: string | null;
   connectionId: string | null;
   externalId: string | null;
+  nameOverridden: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -1849,5 +1898,6 @@ function toLoan(row: LoanRow): Loan {
     isPrime: row.isPrime !== 0,
     isCpiLinked: row.isCpiLinked !== 0,
     excluded: row.excluded !== 0,
+    nameOverridden: row.nameOverridden !== 0,
   };
 }

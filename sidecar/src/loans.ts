@@ -47,6 +47,12 @@ export interface Loan {
   connectionId: string | null;
   /** Bank-side stable id when scraped (e.g. FIBI's "108-416"); null otherwise. */
   externalId: string | null;
+  /**
+   * True once the user has renamed the loan in Hon's UI; the next bank-loan
+   * upsert will preserve `name` instead of clobbering it with the bank's
+   * (often truncated) label. Always false for hand-entered loans.
+   */
+  nameOverridden: boolean;
   createdAt: string;
   updatedAt: string;
 }
