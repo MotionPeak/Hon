@@ -379,7 +379,14 @@ export class ScrapeRunner {
       const bounds = this.repo.holdingSnapshotBounds(h.accountId, h.symbol);
       if (bounds.count >= 120) continue; // already well-populated
       status.message = `Backfilling price history for ${h.symbol}…`;
+      const t0 = Date.now();
+      runnerLog.debug('history.backfill.start', { symbol: h.symbol });
       const history = await fetchHistoryForSymbol(h.symbol, 365 * 10);
+      runnerLog.debug('history.backfill.done', {
+        symbol: h.symbol,
+        elapsedMs: Date.now() - t0,
+        points: history.length,
+      });
       if (!history.length) continue;
       // Snapshot value is `units × price`. Israeli mutual funds (Meitav
       // portfolio holdings, etc.) come back from the scraper with units=0

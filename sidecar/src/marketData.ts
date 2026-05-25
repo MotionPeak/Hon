@@ -16,6 +16,22 @@ export interface HistoricalClose {
 }
 
 /**
+ * fetch() with a hard timeout — without one, a stalled remote (Yahoo
+ * rate-limit, Maya bot-wall, intermittent DNS) blocks the backfill loop
+ * forever. Aborts the request when the deadline lapses and lets the caller
+ * fall back to an empty result.
+ */
+async function fetchWithTimeout(url: string, init: RequestInit, ms: number): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Pulls daily close prices for a ticker over the past `days` days. Returns an
  * empty array on any failure (Yahoo rate-limits, unknown symbols, transient
  * network errors) so the caller can keep going. Currency reflects what the
@@ -31,12 +47,12 @@ export async function fetchYahooHistory(
     `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}` +
     `?period1=${start}&period2=${end}&interval=1d`;
   try {
-    const res = await fetch(url, {
+    const res = await fetchWithTimeout(url, {
       // Yahoo blocks calls without a UA; a generic browser UA is enough.
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Hon/0.2; +https://github.com)' },
-    });
+    }, 15_000);
     if (!res.ok) {
-      process.stdout.write(
+      process.stderr.write(
         `yahoo history ${symbol}: HTTP ${res.status}\n`,
       );
       return [];
@@ -52,7 +68,7 @@ export async function fetchYahooHistory(
       };
     };
     if (data.chart?.error) {
-      process.stdout.write(
+      process.stderr.write(
         `yahoo history ${symbol}: ${data.chart.error.description ?? 'error'}\n`,
       );
       return [];
@@ -74,7 +90,7 @@ export async function fetchYahooHistory(
     }
     return out;
   } catch (err) {
-    process.stdout.write(
+    process.stderr.write(
       `yahoo history ${symbol} threw: ${(err as Error).message}\n`,
     );
     return [];
@@ -112,16 +128,16 @@ export async function fetchMayaHistory(
     'User-Agent': 'Mozilla/5.0 (compatible; Hon/0.3; +https://github.com)',
   };
   try {
-    const res = await fetch(url, { headers });
+    const res = await fetchWithTimeout(url, { headers }, 15_000);
     if (!res.ok) {
-      process.stdout.write(`maya history ${misparNiar}: HTTP ${res.status}\n`);
+      process.stderr.write(`maya history ${misparNiar}: HTTP ${res.status}\n`);
       return [];
     }
     const data: any = await res.json();
     // The NAV fields come back in agorot — divide by 100 for NIS.
     const navAgorot = Number(data.redemptionPrice ?? data.purchasePrice);
     if (!Number.isFinite(navAgorot)) {
-      process.stdout.write(`maya history ${misparNiar}: no usable NAV in response\n`);
+      process.stderr.write(`maya history ${misparNiar}: no usable NAV in response\n`);
       return [];
     }
     const today = navAgorot / 100;
@@ -150,8 +166,11 @@ export async function fetchMayaHistory(
     }
     return points.sort((a, b) => a.date.localeCompare(b.date));
   } catch (err) {
-    process.stdout.write(
-      `maya history ${misparNiar} threw: ${(err as Error).message}\n`,
+    const msg = (err as Error).message || String(err);
+    process.stderr.write(
+      `maya history ${misparNiar} threw: ${msg}`
+      + (msg.includes('abort') ? ' (timeout — Maya stalled or rate-limited)' : '')
+      + '\n',
     );
     return [];
   }
