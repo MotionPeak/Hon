@@ -317,13 +317,18 @@ export async function runSnapTradeSync(
       const amount = account.balance?.total?.amount;
       const accountId = account.id;
       onProgress?.(`Fetching holdings for ${accountLabel(account)}…`);
+      const [holdings, inceptionDate] = await Promise.all([
+        fetchHoldings(snaptrade, userId, userSecret, accountId),
+        fetchEarliestActivityDate(snaptrade, userId, userSecret, accountId),
+      ]);
       accounts.push({
         accountNumber: account.number || account.id,
         label: accountLabel(account),
         balance: typeof amount === 'number' ? amount : undefined,
         currency: account.balance?.total?.currency ?? 'USD',
         transactions: [],
-        holdings: await fetchHoldings(snaptrade, userId, userSecret, accountId),
+        holdings,
+        inceptionDate,
       });
     }
 
@@ -517,6 +522,59 @@ function mapPoints(arr: unknown): PerformancePoint[] {
  * brokerage still doing its initial sync, an unsupported account type) must
  * not sink the whole sync — the error is logged and the list returns empty.
  */
+/**
+ * Earliest activity date SnapTrade has for the account — the user's first
+ * trade / deposit / transfer. The Insights chart uses it as the brokerage
+ * "inception date" so ALL means "since I started", not 10 years of Yahoo
+ * pretend-history. Returns undefined when there are no activities yet, the
+ * dates can't be parsed, or the call errors (in which case the rest of the
+ * sync keeps working).
+ */
+async function fetchEarliestActivityDate(
+  snaptrade: Snaptrade,
+  userId: string,
+  userSecret: string,
+  accountId: string,
+): Promise<string | undefined> {
+  try {
+    // Wide window — SnapTrade caps internally per their plan, but 25 years
+    // is well past any realistic brokerage account age.
+    const end = new Date();
+    const start = new Date(end);
+    start.setFullYear(start.getFullYear() - 25);
+    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+    const res = await snaptrade.transactionsAndReporting.getActivities({
+      userId,
+      userSecret,
+      accounts: accountId,
+      startDate: fmt(start),
+      endDate: fmt(end),
+    });
+    const rows = Array.isArray(res.data) ? res.data : [];
+    let earliest: string | undefined;
+    for (const r of rows) {
+      // The library types `trade_date` and `settlement_date` as string |
+      // Date | undefined. Trade date is the canonical "when this happened"
+      // for portfolio history; settlement is the bookkeeping date. Prefer
+      // trade_date; fall back to settlement_date for activities without it.
+      const raw = (r as any).trade_date ?? (r as any).settlement_date;
+      const iso = typeof raw === 'string'
+        ? raw.slice(0, 10)
+        : raw instanceof Date && !Number.isNaN(raw.valueOf())
+          ? raw.toISOString().slice(0, 10)
+          : null;
+      if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) continue;
+      if (!earliest || iso < earliest) earliest = iso;
+    }
+    return earliest;
+  } catch (err) {
+    process.stdout.write(
+      `snaptrade activities ${accountId}: ${describeSnapError(err)}\n`,
+    );
+    return undefined;
+  }
+}
+
 async function fetchHoldings(
   snaptrade: Snaptrade,
   userId: string,

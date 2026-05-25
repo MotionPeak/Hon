@@ -80,6 +80,12 @@ export interface NormalizedAccount {
   transactions: NormalizedTransaction[];
   /** Set for brokerage accounts — the securities held in the account. */
   holdings?: NormalizedHolding[];
+  /** Provider-discovered "when this account was first active" date
+   *  (YYYY-MM-DD). SnapTrade computes it from the earliest activity in
+   *  getActivities; other connectors can fill it as they learn it. The repo
+   *  saves it only when the account has no user-set inception date yet — a
+   *  manual override always wins. */
+  inceptionDate?: string;
 }
 
 /** A daily equity point on a brokerage's historical chart. */

@@ -776,6 +776,14 @@ export class Repo {
     const now = new Date().toISOString();
     const today = now.slice(0, 10);
 
+    // Sets the provider-discovered inception date only when the account
+    // doesn't already have one (SET ... WHERE inception_date IS NULL). A
+    // user-set override always wins.
+    const fillInception = this.db.prepare(
+      'UPDATE accounts SET inception_date = ? '
+      + 'WHERE id = ? AND inception_date IS NULL',
+    );
+
     this.db.transaction(() => {
       for (const account of accounts) {
         const row = upsertAccount.get({
@@ -787,6 +795,14 @@ export class Repo {
           currency: account.currency,
           updatedAt: now,
         }) as { id: string };
+
+        // Provider-reported "first activity" date — SnapTrade fills this
+        // from getActivities; other connectors can supply it too. Only
+        // populates the column when the user hasn't already pinned a date
+        // themselves.
+        if (account.inceptionDate) {
+          fillInception.run(account.inceptionDate, row.id);
+        }
 
         // Brokerage accounts carry a holdings list — replace the prior
         // positions wholesale, and record today's value for trend graphs.
