@@ -4,11 +4,14 @@ import { ActivityView } from './activity/ActivityView';
 import { api, ApiError, hasToken } from './api';
 import { LoansView } from './loans/LoansView';
 import { PiggyView } from './piggy/PiggyView';
+import { RecurringView } from './recurring/RecurringView';
 import { SettingsProvider } from './settings/useSettings';
 import { SettingsView } from './settings/SettingsView';
 import { VouchersView } from './vouchers/VouchersView';
 
-type Tab = 'accounts' | 'activity' | 'piggy' | 'vouchers' | 'loans' | 'settings';
+type Tab =
+  | 'accounts' | 'activity' | 'recurring' | 'piggy'
+  | 'vouchers' | 'loans' | 'settings';
 
 interface TabDef {
   id: Tab;
@@ -19,6 +22,7 @@ interface TabDef {
 const TABS: TabDef[] = [
   { id: 'accounts',  label: 'Assets',      emoji: '🏦' },
   { id: 'activity',  label: 'Activity',    emoji: '🧾' },
+  { id: 'recurring', label: 'Fixed bills', emoji: '📆' },
   { id: 'piggy',     label: 'Piggy banks', emoji: '🐷' },
   { id: 'loans',     label: 'Loans',       emoji: '📉' },
   { id: 'vouchers',  label: 'Vouchers',    emoji: '🎟️' },
@@ -119,6 +123,7 @@ export function App() {
           <div className="app-content" role="tabpanel">
             {tab === 'accounts' && <AccountsView />}
             {tab === 'activity' && <ActivityView />}
+            {tab === 'recurring' && <RecurringView />}
             {tab === 'piggy' && <PiggyView />}
             {tab === 'vouchers' && <VouchersView />}
             {tab === 'loans' && <LoansView />}
