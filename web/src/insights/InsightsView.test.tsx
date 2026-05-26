@@ -101,7 +101,7 @@ describe('InsightsView — Spending sub-tab', () => {
     expect(screen.queryByText('Groceries')).not.toBeInTheDocument();
   });
 
-  it('shows a "spent" total at the top of the month detail card', async () => {
+  it('shows a Spent stat tile totalling the month\'s expenses', async () => {
     installFetchMock({
       'GET /api/transactions': () => ({
         transactions: [
@@ -113,7 +113,119 @@ describe('InsightsView — Spending sub-tab', () => {
     });
     renderView();
     const detail = await screen.findByTestId('month-detail');
-    expect(within(detail).getByText(/370/)).toBeInTheDocument();
+    const spentTile = within(detail).getAllByTestId('md-tile')[0]!;
+    expect(within(spentTile).getByText(/Spent/i)).toBeInTheDocument();
+    expect(within(spentTile).getByText(/370/)).toBeInTheDocument();
+  });
+
+  it('the month detail card has 4 stat tiles: Spent / Income / Saved or Overspent / Transactions', async () => {
+    installFetchMock({
+      'GET /api/transactions': () => ({
+        transactions: [
+          tx({ id: 't1', amount: -250, category: 'Groceries', date: `${month(0)}-10` }),
+          tx({ id: 't2', amount: 5000, category: 'Salary', date: `${month(0)}-01` }),
+          tx({ id: 't3', amount: -1000, category: 'Dining', date: `${month(0)}-15` }),
+        ],
+      }),
+      'GET /api/categories': () => CATEGORIES,
+    });
+    renderView();
+    const detail = await screen.findByTestId('month-detail');
+    const tiles = within(detail).getAllByTestId('md-tile');
+    expect(tiles).toHaveLength(4);
+    // Spent
+    expect(within(tiles[0]!).getByText(/Spent/i)).toBeInTheDocument();
+    expect(within(tiles[0]!).getByText(/1,?250/)).toBeInTheDocument();
+    // Income
+    expect(within(tiles[1]!).getByText(/Income/i)).toBeInTheDocument();
+    expect(within(tiles[1]!).getByText(/5,?000/)).toBeInTheDocument();
+    // Saved (net positive)
+    expect(within(tiles[2]!).getByText(/Saved/i)).toBeInTheDocument();
+    expect(within(tiles[2]!).getByText(/3,?750/)).toBeInTheDocument();
+    // Transactions count
+    expect(within(tiles[3]!).getByText(/Transactions?/i)).toBeInTheDocument();
+    expect(within(tiles[3]!).getByText(/^3$/)).toBeInTheDocument();
+  });
+
+  it('shows vs-previous-month and vs-avg trend pills on the detail header', async () => {
+    installFetchMock({
+      'GET /api/transactions': () => ({
+        transactions: [
+          // Two months back: 2000 spent.
+          tx({ id: 'pa', amount: -2000, category: 'Groceries', date: `${month(-2)}-10` }),
+          // Last month: 1000 spent.
+          tx({ id: 'pb', amount: -1000, category: 'Groceries', date: `${month(-1)}-10` }),
+          // This month: 500 spent (50% less than 1000 → ↓50% vs last).
+          tx({ id: 'pc', amount: -500, category: 'Groceries', date: `${month(0)}-10` }),
+        ],
+      }),
+      'GET /api/categories': () => CATEGORIES,
+    });
+    renderView();
+    const detail = await screen.findByTestId('month-detail');
+    // ↓ 50% vs last month — the trend pill (not the per-category chip).
+    expect(within(detail).getByText(/↓\s*50%/)).toBeInTheDocument();
+    // "vs avg" labels appear both on the header trend pill and on each
+    // category's delta chip — at least one exists.
+    expect(within(detail).getAllByText(/vs avg/i).length).toBeGreaterThan(0);
+  });
+
+  it('renders a "Where it went" label and per-category delta chips vs last + vs avg', async () => {
+    installFetchMock({
+      'GET /api/transactions': () => ({
+        transactions: [
+          // Last month: Groceries 600.
+          tx({ id: 'p1', amount: -600, category: 'Groceries', date: `${month(-1)}-10` }),
+          // Two months back: Groceries 400.
+          tx({ id: 'p2', amount: -400, category: 'Groceries', date: `${month(-2)}-10` }),
+          // This month: Groceries 200 (↓400 vs last 600).
+          tx({ id: 'p3', amount: -200, category: 'Groceries', date: `${month(0)}-10` }),
+        ],
+      }),
+      'GET /api/categories': () => CATEGORIES,
+    });
+    renderView();
+    const detail = await screen.findByTestId('month-detail');
+    expect(within(detail).getByText(/where it went/i)).toBeInTheDocument();
+    // Delta chips for Groceries.
+    expect(within(detail).getByText(/vs last/i)).toBeInTheDocument();
+    expect(within(detail).getAllByText(/vs avg/i).length).toBeGreaterThan(0);
+  });
+
+  it('shows a Biggest expense card pointing at the largest single charge', async () => {
+    installFetchMock({
+      'GET /api/transactions': () => ({
+        transactions: [
+          tx({ id: 'b1', amount: -250, category: 'Groceries', description: 'Aroma Coffee', date: `${month(0)}-05` }),
+          tx({ id: 'b2', amount: -3750, category: 'Groceries', description: 'משיכת שיק', date: `${month(0)}-10` }),
+          tx({ id: 'b3', amount: -100, category: 'Dining', description: 'Cafe', date: `${month(0)}-12` }),
+        ],
+      }),
+      'GET /api/categories': () => CATEGORIES,
+    });
+    renderView();
+    const detail = await screen.findByTestId('month-detail');
+    const big = within(detail).getByTestId('biggest-expense');
+    expect(within(big).getByText(/biggest expense/i)).toBeInTheDocument();
+    expect(within(big).getByText('משיכת שיק')).toBeInTheDocument();
+    expect(within(big).getByText(/3,?750/)).toBeInTheDocument();
+  });
+
+  it('shows Overspent when commitments outrun income', async () => {
+    installFetchMock({
+      'GET /api/transactions': () => ({
+        transactions: [
+          tx({ id: 't1', amount: -3000, category: 'Groceries', date: `${month(0)}-10` }),
+          tx({ id: 't2', amount: 1000, category: 'Salary', date: `${month(0)}-01` }),
+        ],
+      }),
+      'GET /api/categories': () => CATEGORIES,
+    });
+    renderView();
+    const detail = await screen.findByTestId('month-detail');
+    const tiles = within(detail).getAllByTestId('md-tile');
+    expect(within(tiles[2]!).getByText(/Overspent/i)).toBeInTheDocument();
+    expect(within(tiles[2]!).getByText(/2,?000/)).toBeInTheDocument();
   });
 });
 
