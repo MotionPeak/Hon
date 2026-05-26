@@ -421,6 +421,103 @@ describe('ActivityView — refund linking', () => {
     expect(put.mock.calls[0]?.[0]).toEqual({ refundId: 't-r1' });
   });
 
+  it('shows a Select button in the activity head', async () => {
+    installFetchMock(FULL_REFUND);
+    renderView();
+    expect(await screen.findByRole('button', { name: /^select$/i })).toBeInTheDocument();
+  });
+
+  it('clicking Select reveals a batch toolbar and flips Select to Cancel', async () => {
+    installFetchMock(FULL_REFUND);
+    const user = userEvent.setup();
+    renderView();
+    await user.click(await screen.findByRole('button', { name: /^select$/i }));
+    expect(screen.getByTestId('batch-bar')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^cancel$/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^select$/i })).not.toBeInTheDocument();
+  });
+
+  it('picking a category in the bulk dialog PATCHes every selected txn and exits batch mode', async () => {
+    const user = userEvent.setup();
+    const patchT1 = vi.fn((_body: unknown) => ({ ok: true }));
+    const patchT2 = vi.fn((_body: unknown) => ({ ok: true }));
+    const get = vi.fn(() => REFUND_TXNS);
+    installFetchMock({
+      ...FULL_REFUND,
+      'GET /api/transactions': get,
+      'PATCH /api/transactions/t-1/category': patchT1,
+      'PATCH /api/transactions/t-2/category': patchT2,
+    });
+    renderView();
+    await user.click(await screen.findByRole('button', { name: /^select$/i }));
+    await user.click(screen.getByText('Aroma Coffee')); // t-1
+    await user.click(screen.getByText('Shufersal'));     // t-2
+    await user.click(screen.getByRole('button', { name: /^move to category/i }));
+    const dialog = await screen.findByRole('dialog', { name: /move .* to category/i });
+    await user.click(within(dialog).getByText('Groceries'));
+    await waitFor(() => expect(patchT1).toHaveBeenCalled());
+    await waitFor(() => expect(patchT2).toHaveBeenCalled());
+    expect(patchT1.mock.calls[0]?.[0]).toEqual({ category: 'Groceries' });
+    expect(patchT2.mock.calls[0]?.[0]).toEqual({ category: 'Groceries' });
+    // Refreshed and exited batch mode.
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+    expect(screen.queryByTestId('batch-bar')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^select$/i })).toBeInTheDocument();
+  });
+
+  it('clicking Move-to-category opens a bulk-move dialog with category tiles', async () => {
+    installFetchMock(FULL_REFUND);
+    const user = userEvent.setup();
+    renderView();
+    await user.click(await screen.findByRole('button', { name: /^select$/i }));
+    await user.click(screen.getByText('Aroma Coffee'));
+    await user.click(screen.getByRole('button', { name: /^move to category/i }));
+    const dialog = await screen.findByRole('dialog', { name: /move .* to category/i });
+    expect(within(dialog).getByText(/^Groceries$/)).toBeInTheDocument();
+    // Header reflects how many are being moved.
+    expect(within(dialog).getByText(/1 transaction/i)).toBeInTheDocument();
+  });
+
+  it('the batch toolbar has a Move-to-category button (disabled until something is selected)', async () => {
+    installFetchMock(FULL_REFUND);
+    const user = userEvent.setup();
+    renderView();
+    await user.click(await screen.findByRole('button', { name: /^select$/i }));
+    const moveBtn = screen.getByRole('button', { name: /^move to category/i });
+    expect(moveBtn).toBeDisabled();
+    await user.click(screen.getByText('Aroma Coffee'));
+    expect(screen.getByRole('button', { name: /^move to category/i })).toBeEnabled();
+  });
+
+  it('a selected row carries a .selected class', async () => {
+    installFetchMock(FULL_REFUND);
+    const user = userEvent.setup();
+    renderView();
+    await user.click(await screen.findByRole('button', { name: /^select$/i }));
+    const row = screen.getByText('Aroma Coffee').closest('.txn')!;
+    expect(row.className).not.toMatch(/selected/);
+    await user.click(row as HTMLElement);
+    expect(row.className).toMatch(/selected/);
+  });
+
+  it('clicking a transaction in batch mode toggles selection (no sidebar)', async () => {
+    installFetchMock(FULL_REFUND);
+    const user = userEvent.setup();
+    renderView();
+    await user.click(await screen.findByRole('button', { name: /^select$/i }));
+    await user.click(screen.getByText('Aroma Coffee'));
+    // Sidebar must NOT open.
+    expect(screen.queryByRole('dialog', { name: /move to category/i }))
+      .not.toBeInTheDocument();
+    // Toolbar shows 1 selected.
+    expect(within(screen.getByTestId('batch-bar')).getByText(/1 selected/i))
+      .toBeInTheDocument();
+    // Click again to deselect.
+    await user.click(screen.getByText('Aroma Coffee'));
+    expect(within(screen.getByTestId('batch-bar')).getByText(/tap rows to select/i))
+      .toBeInTheDocument();
+  });
+
   it('Unlink DELETEs /transactions/:id/link and refetches', async () => {
     const linkedTxns = {
       transactions: REFUND_TXNS.transactions.map((t) =>

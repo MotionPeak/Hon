@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import * as Dialog from '@radix-ui/react-dialog';
 import { api, ApiError } from '../api';
 import { cycleKey, cycleLabel, currentCycleKey } from '../cycle';
 import { money } from '../format';
@@ -47,6 +48,22 @@ export function ActivityView() {
   const [month, setMonth] = useState<string | null>(null);
   const [moving, setMoving] = useState<Transaction | null>(null);
   const [search, setSearch] = useState('');
+  const [batchMode, setBatchMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkPickOpen, setBulkPickOpen] = useState(false);
+
+  const pickTxn = (t: Transaction): void => {
+    if (batchMode) {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(t.id)) next.delete(t.id);
+        else next.add(t.id);
+        return next;
+      });
+    } else {
+      setMoving(t);
+    }
+  };
 
   const refresh = useCallback(async () => {
     try {
@@ -189,7 +206,53 @@ export function ActivityView() {
             ? `${searchResults.length} match${searchResults.length === 1 ? '' : 'es'}`
             : `${monthTxns.length} transaction${monthTxns.length === 1 ? '' : 's'}`}
         </span>
+        {batchMode ? (
+          <button
+            type="button"
+            className="act-select-btn"
+            onClick={() => { setBatchMode(false); setSelectedIds(new Set()); }}
+          >Cancel</button>
+        ) : (
+          <button
+            type="button"
+            className="act-select-btn"
+            onClick={() => setBatchMode(true)}
+          >Select</button>
+        )}
       </div>
+      {batchMode && (
+        <div className="batch-bar" data-testid="batch-bar">
+          <span className="batch-n">
+            {selectedIds.size > 0
+              ? `${selectedIds.size} selected`
+              : 'Tap rows to select'}
+          </span>
+          <span className="spacer" />
+          <button
+            type="button"
+            className="primary"
+            disabled={selectedIds.size === 0}
+            onClick={() => setBulkPickOpen(true)}
+          >Move to category…</button>
+        </div>
+      )}
+      <BulkCategoryDialog
+        open={bulkPickOpen}
+        count={selectedIds.size}
+        categories={categories}
+        onClose={() => setBulkPickOpen(false)}
+        onPick={async (cat) => {
+          await Promise.all(
+            Array.from(selectedIds).map((id) =>
+              api(`/transactions/${encodeURIComponent(id)}/category`, 'PATCH', { category: cat }),
+            ),
+          );
+          setBulkPickOpen(false);
+          setBatchMode(false);
+          setSelectedIds(new Set());
+          await refresh();
+        }}
+      />
       {inSearchMode ? (
         searchResults.length === 0 ? (
           <p className="blank">No matching transactions.</p>
@@ -206,11 +269,11 @@ export function ActivityView() {
                     className="txn"
                     role="button"
                     tabIndex={0}
-                    onClick={() => setMoving(t)}
+                    onClick={() => pickTxn(t)}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') {
                         e.preventDefault();
-                        setMoving(t);
+                        pickTxn(t);
                       }
                     }}
                   >
@@ -257,7 +320,8 @@ export function ActivityView() {
           grouped={grouped}
           categoryByName={categoryByName}
           accountById={accountById}
-          onPickTxn={setMoving}
+          onPickTxn={pickTxn}
+          selectedIds={selectedIds}
         />
       )}
       {moving && (
@@ -311,6 +375,7 @@ interface UmbrellaSectionsProps {
   categoryByName: Map<string, Category>;
   accountById: Map<string, Account>;
   onPickTxn: (t: Transaction) => void;
+  selectedIds: Set<string>;
 }
 
 const GROUP_ORDER: Category['catGroup'][] = ['income', 'essential', 'fixed', 'variable'];
@@ -322,7 +387,7 @@ const GROUP_LABEL: Record<Category['catGroup'], string> = {
 };
 
 function UmbrellaSections({
-  orderedCats, grouped, categoryByName, accountById, onPickTxn,
+  orderedCats, grouped, categoryByName, accountById, onPickTxn, selectedIds,
 }: UmbrellaSectionsProps) {
   const groupOf = (catName: string): Category['catGroup'] => {
     return categoryByName.get(catName)?.catGroup ?? 'variable';
@@ -366,6 +431,7 @@ function UmbrellaSections({
                   rows={grouped.get(catName) ?? []}
                   accountById={accountById}
                   onPickTxn={onPickTxn}
+                  selectedIds={selectedIds}
                 />
               ))}
             </div>
@@ -382,9 +448,12 @@ interface CatCardProps {
   rows: Transaction[];
   accountById: Map<string, Account>;
   onPickTxn: (t: Transaction) => void;
+  selectedIds: Set<string>;
 }
 
-function CatCard({ catName, cat, rows, accountById, onPickTxn }: CatCardProps) {
+function CatCard({
+  catName, cat, rows, accountById, onPickTxn, selectedIds,
+}: CatCardProps) {
   let total = 0;
   let cur = 'ILS';
   for (const t of rows) { total += t.amount; cur = t.currency; }
@@ -407,12 +476,14 @@ function CatCard({ catName, cat, rows, accountById, onPickTxn }: CatCardProps) {
         {rows.map((t) => {
           const acct = accountById.get(t.accountId);
           const pos = t.amount > 0;
+          const sel = selectedIds.has(t.id);
           return (
             <li
               key={t.id}
-              className="txn"
+              className={`txn${sel ? ' selected' : ''}`}
               role="button"
               tabIndex={0}
+              aria-pressed={sel}
               onClick={() => onPickTxn(t)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
@@ -602,6 +673,79 @@ interface RefundSectionProps {
   allTransactions: Transaction[];
   onOpenPicker: () => void;
   onUnlinkRefund: () => void | Promise<void>;
+}
+
+interface BulkCategoryDialogProps {
+  open: boolean;
+  count: number;
+  categories: Category[];
+  onClose: () => void;
+  onPick: (category: string) => void | Promise<void>;
+}
+
+function BulkCategoryDialog({
+  open, count, categories, onClose, onPick,
+}: BulkCategoryDialogProps) {
+  const [busy, setBusy] = useState(false);
+  const groupOrder: Category['catGroup'][] = ['income', 'essential', 'fixed', 'variable'];
+  const grouped: Record<Category['catGroup'], Category[]> = {
+    income: [], essential: [], fixed: [], variable: [],
+  };
+  for (const c of categories) grouped[c.catGroup].push(c);
+  for (const g of groupOrder) {
+    grouped[g].sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
+  }
+
+  return (
+    <Dialog.Root open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="rx-overlay" />
+        <Dialog.Content
+          className="rx-dialog"
+          aria-label={`Move ${count} transactions to category`}
+        >
+          <Dialog.Title>
+            Move {count} transaction{count === 1 ? '' : 's'} to category
+          </Dialog.Title>
+          <Dialog.Description className="rx-dialog-desc">
+            Pick a category — the chosen tag is applied to every selected
+            transaction in one go.
+          </Dialog.Description>
+          <div className="cat-pick-stack">
+            {groupOrder.map((g) => grouped[g].length === 0 ? null : (
+              <div key={g} className="cat-pick-section">
+                <div className="cat-pick-head">{g}</div>
+                <div className="cat-pick-grid">
+                  {grouped[g].map((c) => (
+                    <button
+                      key={c.name}
+                      type="button"
+                      className="cat-pick-tile"
+                      style={{ '--cat-color': c.color } as React.CSSProperties}
+                      disabled={busy}
+                      onClick={async () => {
+                        setBusy(true);
+                        try { await onPick(c.name); }
+                        finally { setBusy(false); }
+                      }}
+                    >
+                      <span className="cat-pick-emoji">{c.emoji}</span>
+                      <span className="cat-pick-name">{c.name}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="form-actions">
+            <Dialog.Close asChild>
+              <button type="button" className="btn-ghost">Cancel</button>
+            </Dialog.Close>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
 }
 
 function RefundSection({
