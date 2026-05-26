@@ -9,10 +9,12 @@ export interface MatchableTxn {
 }
 
 // הלואה (one vav) is the common abbreviated / bank-printed form of הלוואה.
-// No word-boundary anchors: Hebrew letters are not \w, so \b behaves
-// unexpectedly next to Hebrew. A plain substring test is sufficient.
-const LOAN_STOPWORD = /הלוואה|הלואה|halvaa|loan/iu;
-const LOAN_STOPWORD_STRIP = /הלוואה|הלואה|halvaa|loan/giu;
+// Hebrew alternatives use bare substring matching because \b is \w-anchored
+// and Hebrew chars are not \w — so \b behaves unexpectedly next to Hebrew.
+// Latin alternatives (halvaa, loan) use \b…\b so "loanshark" doesn't trigger.
+const STOPWORD_ALTS = 'הלוואה|הלואה|\\b(halvaa|loan)\\b';
+const LOAN_STOPWORD = new RegExp(STOPWORD_ALTS, 'iu');
+const LOAN_STOPWORD_STRIP = new RegExp(STOPWORD_ALTS, 'giu');
 
 /** Tokens of length ≥3 from a loan name after removing the literal
  *  "הלוואה" / "halvaa" / "loan" stopword. Lowercase Latin; Hebrew

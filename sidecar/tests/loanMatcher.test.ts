@@ -71,6 +71,33 @@ describe('matchPaymentToLoan', () => {
     ).toBe('A');
   });
 
+  it('returns null when the single loan is named exactly "הלוואה" (no discriminator tokens)', () => {
+    // Defensive: a bank-named loan that's just the stopword has no
+    // discriminator after Rule 2 strips the stopword. Rule 3's guard
+    // (loan name must not contain the stopword) then prevents a
+    // single-loan fallback. Net: only Rule 1 (externalId) can match.
+    const loans = [baseLoan({ id: 'A', externalId: '99', name: 'הלוואה' })];
+    expect(
+      matchPaymentToLoan({ description: 'הלוואה תשלום מאי', amount: -1500 }, loans),
+    ).toBe(null);
+  });
+
+  it('still matches via externalId even when the loan is named exactly "הלוואה"', () => {
+    const loans = [baseLoan({ id: 'A', externalId: '12345678', name: 'הלוואה' })];
+    expect(
+      matchPaymentToLoan({ description: 'הלוואה 12345678', amount: -1500 }, loans),
+    ).toBe('A');
+  });
+
+  it('does NOT trigger the stopword on Latin words that merely contain "loan"', () => {
+    // E.g. "loanshark" — would have falsely matched with a bare-substring
+    // regex; the \b…\b boundary on Latin alternatives prevents this.
+    const loans = [baseLoan({ id: 'A', externalId: '99', name: 'Personal' })];
+    expect(
+      matchPaymentToLoan({ description: 'loanshark monthly fee', amount: -50 }, loans),
+    ).toBe(null);
+  });
+
   it('returns null on a multi-loan tie at the same rule', () => {
     const loans = [
       baseLoan({ id: 'A', externalId: '111', name: 'משכנתא' }),
