@@ -1263,6 +1263,16 @@ interface BuyMeSync {
   resolveOtp?: (code: string) => void;
   rejectOtp?: (err: Error) => void;
   finished?: boolean;
+  /** True once the user (or the cleanup interval) has cancelled the
+   *  sync. Gate the post-scrape upsert against this so a slow-completing
+   *  scrape can't write a voucher the user said no to. Same shape as
+   *  HtzSync.cancelled. */
+  cancelled?: boolean;
+  /** Browser handle retained for /cancel — closing it interrupts any
+   *  in-flight Puppeteer op AND the visible Chrome window. Cleared in
+   *  the IIFE's finally so the cleanup interval can GC the whole entry
+   *  without holding a dead Browser. */
+  browser?: import('puppeteer').Browser;
 }
 
 const buymeSyncs = new Map<string, BuyMeSync>();
@@ -1316,7 +1326,15 @@ app.post('/vouchers/sync/buyme/start', async (req, reply) => {
       const cards = await scrapeBuyMeGiftCards(email, onOtpNeeded, {
         debugDumpPath: join(debugDir, 'buyme-dashboard.html'),
         userDataDir: buymeProfileDir,
+        // Stash the browser so /cancel can close it AND interrupt any
+        // Puppeteer op (every op throws after browser.close).
+        onBrowserReady: (browser) => { state.browser = browser; },
       });
+      // The cancel may have arrived after the scrape's success branch
+      // completed its main work but before we got here (e.g. during the
+      // fastpath that has no rejectOtp to bounce off). Skip the upsert
+      // and DON'T overwrite the 'Cancelled.' state already in place.
+      if (state.cancelled) return;
       const created: { id: string; name: string; balance: number; currency: string }[] = [];
       for (const card of cards) {
         // BuyMe's scraper packs the gift's display title into `brand`
@@ -1338,10 +1356,15 @@ app.post('/vouchers/sync/buyme/start', async (req, reply) => {
       state.vouchers = created;
       state.finished = true;
     } catch (err) {
+      // Mirror the HTZ pattern: don't mask the user-visible "Cancelled."
+      // with the resulting Puppeteer "Target closed" exception.
+      if (state.cancelled) return;
       state.status = 'error';
       state.error = err instanceof Error ? err.message : String(err);
       state.message = state.error;
       state.finished = true;
+    } finally {
+      state.browser = undefined;
     }
   })();
 
@@ -1379,10 +1402,25 @@ app.post('/vouchers/sync/buyme/cancel', async (req, reply) => {
   const syncId = String(body.syncId || '');
   const state = buymeSyncs.get(syncId);
   if (!state) return reply.code(404).send({ error: 'sync not found' });
-  if (state.rejectOtp) state.rejectOtp(new Error('Sync cancelled.'));
+  // Set the final state FIRST. cancelled is the gate the IIFE checks
+  // before persisting / overwriting state in its catch.
   state.status = 'error';
   state.error = 'Cancelled.';
   state.finished = true;
+  state.cancelled = true;
+  // Reject the OTP promise if the scrape is waiting on one — covers the
+  // "user clicked cancel while we asked for the 6-digit email code" path.
+  if (state.rejectOtp) state.rejectOtp(new Error('Sync cancelled.'));
+  // Close the browser. Covers the fastpath case (cached session, no OTP
+  // wait) where rejectOtp was never defined — without this, the scrape
+  // would run to completion and the IIFE's `if (state.cancelled) return`
+  // would protect against the upsert but the visible Chrome window would
+  // still be sitting on the user's desktop until the harvest naturally
+  // finishes.
+  if (state.browser) {
+    state.browser.close().catch(() => { /* already closing */ });
+    state.browser = undefined;
+  }
   return { ok: true };
 });
 

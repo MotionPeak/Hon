@@ -653,6 +653,12 @@ export interface BuyMeScrapeOptions {
    * `<dataDir>/browser-profiles/buyme`.
    */
   userDataDir?: string;
+  /** Fired once Puppeteer's browser has launched, so the caller can
+   *  retain a handle for cancellation. Calling `browser.close()` from
+   *  the caller is the signal that aborts the scrape — every Puppeteer
+   *  op after that throws and the function returns through its catch.
+   *  Mirrors HitechZoneScrapeOptions.onBrowserReady. */
+  onBrowserReady?: (browser: Browser) => void;
 }
 
 export async function scrapeBuyMeGiftCards(
@@ -680,6 +686,10 @@ export async function scrapeBuyMeGiftCards(
     args: process.env.HON_BROWSER_NO_SANDBOX === '1'
       ? ['--no-sandbox', '--disable-setuid-sandbox'] : [],
   });
+  // See HitechZoneScrapeOptions.onBrowserReady — closing the browser is
+  // the cancellation signal; every Puppeteer op then throws and the
+  // scrape's catch returns cleanly.
+  try { options.onBrowserReady?.(browser); } catch { /* never let a caller's bookkeeping break the scrape */ }
   let page: Page | undefined;
   try {
     page = await browser.newPage();
