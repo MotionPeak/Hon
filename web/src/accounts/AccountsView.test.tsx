@@ -592,3 +592,103 @@ describe('AccountsView — assets + loans', () => {
     expect(await screen.findByText('Mortgage')).toBeInTheDocument();
   });
 });
+
+describe('AccountsView — asset edit + remove', () => {
+  it('opens an edit modal pre-filled with the asset name and value', async () => {
+    const user = userEvent.setup();
+    installFetchMock(FULL);
+    render(<AccountsView />);
+    const mazda = await screen.findByText('2018 Mazda 3');
+    await user.click(within(mazda.closest('.asset-card') as HTMLElement)
+      .getByRole('button', { name: /^edit$/i }));
+    const dialog = screen.getByRole('dialog');
+    expect((within(dialog).getByLabelText(/name/i) as HTMLInputElement).value).toBe('2018 Mazda 3');
+    expect((within(dialog).getByLabelText(/value/i) as HTMLInputElement).value).toBe('45000');
+  });
+
+  it('save PUTs /assets/:id with the changed fields and refetches', async () => {
+    const user = userEvent.setup();
+    const put = vi.fn((_body: unknown) => ({ asset: { id: 'as-1' } }));
+    const get = vi.fn(() => ASSETS);
+    installFetchMock({ ...FULL, 'GET /api/assets': get, 'PUT /api/assets/as-1': put });
+    render(<AccountsView />);
+    const mazda = await screen.findByText('2018 Mazda 3');
+    await user.click(within(mazda.closest('.asset-card') as HTMLElement)
+      .getByRole('button', { name: /^edit$/i }));
+    const dialog = screen.getByRole('dialog');
+    const valueInput = within(dialog).getByLabelText(/value/i);
+    await user.clear(valueInput);
+    await user.type(valueInput, '48000');
+    await user.click(within(dialog).getByRole('button', { name: /save/i }));
+    await waitFor(() => expect(put).toHaveBeenCalledTimes(1));
+    expect(put.mock.calls[0]?.[0]).toMatchObject({ name: '2018 Mazda 3', value: 48000 });
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+  });
+
+  it('remove opens a confirmation; confirm DELETEs and refetches', async () => {
+    const user = userEvent.setup();
+    const del = vi.fn(() => ({ ok: true }));
+    const get = vi.fn(() => ASSETS);
+    installFetchMock({ ...FULL, 'GET /api/assets': get, 'DELETE /api/assets/as-1': del });
+    render(<AccountsView />);
+    const mazda = await screen.findByText('2018 Mazda 3');
+    await user.click(within(mazda.closest('.asset-card') as HTMLElement)
+      .getByRole('button', { name: /^remove$/i }));
+    await user.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: /confirm remove/i }),
+    );
+    await waitFor(() => expect(del).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe('AccountsView — loan edit + remove', () => {
+  it('opens an edit modal pre-filled with the loan fields', async () => {
+    const user = userEvent.setup();
+    installFetchMock(FULL);
+    render(<AccountsView />);
+    const mortgage = await screen.findByText('Mortgage');
+    await user.click(within(mortgage.closest('.loan-card') as HTMLElement)
+      .getByRole('button', { name: /^edit$/i }));
+    const dialog = screen.getByRole('dialog');
+    expect((within(dialog).getByLabelText(/name/i) as HTMLInputElement).value).toBe('Mortgage');
+    expect((within(dialog).getByLabelText(/principal/i) as HTMLInputElement).value).toBe('800000');
+    expect((within(dialog).getByLabelText(/term/i) as HTMLInputElement).value).toBe('240');
+    expect((within(dialog).getByLabelText(/rate/i) as HTMLInputElement).value).toBe('3.5');
+  });
+
+  it('save PUTs /loans/:id with the changed fields and refetches', async () => {
+    const user = userEvent.setup();
+    const put = vi.fn((_body: unknown) => ({ loan: { id: 'l-1' } }));
+    const get = vi.fn(() => LOANS);
+    installFetchMock({ ...FULL, 'GET /api/loans': get, 'PUT /api/loans/l-1': put });
+    render(<AccountsView />);
+    const mortgage = await screen.findByText('Mortgage');
+    await user.click(within(mortgage.closest('.loan-card') as HTMLElement)
+      .getByRole('button', { name: /^edit$/i }));
+    const dialog = screen.getByRole('dialog');
+    const rateInput = within(dialog).getByLabelText(/rate/i);
+    await user.clear(rateInput);
+    await user.type(rateInput, '4');
+    await user.click(within(dialog).getByRole('button', { name: /save/i }));
+    await waitFor(() => expect(put).toHaveBeenCalledTimes(1));
+    expect(put.mock.calls[0]?.[0]).toMatchObject({ name: 'Mortgage', rateValue: 4 });
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+  });
+
+  it('remove opens a confirmation; confirm DELETEs and refetches', async () => {
+    const user = userEvent.setup();
+    const del = vi.fn(() => ({ ok: true }));
+    const get = vi.fn(() => LOANS);
+    installFetchMock({ ...FULL, 'GET /api/loans': get, 'DELETE /api/loans/l-1': del });
+    render(<AccountsView />);
+    const mortgage = await screen.findByText('Mortgage');
+    await user.click(within(mortgage.closest('.loan-card') as HTMLElement)
+      .getByRole('button', { name: /^remove$/i }));
+    await user.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: /confirm remove/i }),
+    );
+    await waitFor(() => expect(del).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+  });
+});

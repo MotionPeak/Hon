@@ -96,6 +96,10 @@ export function AccountsView() {
   const [editingCredentials, setEditingCredentials] = useState<Connection | null>(null);
   const [syncStates, setSyncStates] = useState<Record<string, SyncState>>({});
   const [expandedHoldings, setExpandedHoldings] = useState<Record<string, boolean>>({});
+  const [editingAsset, setEditingAsset] = useState<ManualAsset | null>(null);
+  const [removingAsset, setRemovingAsset] = useState<ManualAsset | null>(null);
+  const [editingLoan, setEditingLoan] = useState<Loan | null>(null);
+  const [removingLoan, setRemovingLoan] = useState<Loan | null>(null);
 
   const toggleHoldings = useCallback((accountId: string) => {
     setExpandedHoldings((prev) => ({ ...prev, [accountId]: !prev[accountId] }));
@@ -271,6 +275,10 @@ export function AccountsView() {
                   onSetCredentials: setEditingCredentials,
                   onSync: startSync,
                   onToggleHoldings: toggleHoldings,
+                  onEditAsset: setEditingAsset,
+                  onRemoveAsset: setRemovingAsset,
+                  onEditLoan: setEditingLoan,
+                  onRemoveLoan: setRemovingLoan,
                   syncStates,
                   holdings: data.holdings,
                   expandedHoldings,
@@ -300,6 +308,44 @@ export function AccountsView() {
           company={data.companies.find((c) => c.id === editingCredentials.companyId)}
           onClose={() => setEditingCredentials(null)}
           onSaved={async () => { setEditingCredentials(null); await refresh(); }}
+        />
+      )}
+      {editingAsset && (
+        <AssetEditModal
+          asset={editingAsset}
+          onClose={() => setEditingAsset(null)}
+          onSaved={async () => { setEditingAsset(null); await refresh(); }}
+        />
+      )}
+      {removingAsset && (
+        <ConfirmRemoveDialog
+          title={removingAsset.name}
+          body="Remove this asset. Manual entries elsewhere are unaffected. This cannot be undone."
+          onClose={() => setRemovingAsset(null)}
+          onConfirmed={async () => {
+            await api(`/assets/${encodeURIComponent(removingAsset.id)}`, 'DELETE');
+            setRemovingAsset(null);
+            await refresh();
+          }}
+        />
+      )}
+      {editingLoan && (
+        <LoanEditModal
+          loan={editingLoan}
+          onClose={() => setEditingLoan(null)}
+          onSaved={async () => { setEditingLoan(null); await refresh(); }}
+        />
+      )}
+      {removingLoan && (
+        <ConfirmRemoveDialog
+          title={removingLoan.name}
+          body="Remove this loan. The amortisation schedule and any computed payoff projections will go with it."
+          onClose={() => setRemovingLoan(null)}
+          onConfirmed={async () => {
+            await api(`/loans/${encodeURIComponent(removingLoan.id)}`, 'DELETE');
+            setRemovingLoan(null);
+            await refresh();
+          }}
         />
       )}
       {(() => {
@@ -334,6 +380,10 @@ interface RowCallbacks {
   onSetCredentials: (connection: Connection) => void;
   onSync: (connection: Connection) => void;
   onToggleHoldings: (accountId: string) => void;
+  onEditAsset: (asset: ManualAsset) => void;
+  onRemoveAsset: (asset: ManualAsset) => void;
+  onEditLoan: (loan: Loan) => void;
+  onRemoveLoan: (loan: Loan) => void;
   syncStates: Record<string, SyncState>;
   holdings: Holding[];
   expandedHoldings: Record<string, boolean>;
@@ -550,6 +600,10 @@ function AssetCard({ asset, callbacks }: { asset: ManualAsset; callbacks: RowCal
       </div>
       <div className="asset-meta">{asset.kind}</div>
       <div className="amount">{money(asset.value, asset.currency)}</div>
+      <div className="conn-buttons" style={{ marginTop: 10 }}>
+        <button type="button" className="mini" onClick={() => callbacks.onEditAsset(asset)}>Edit</button>
+        <button type="button" className="mini danger" onClick={() => callbacks.onRemoveAsset(asset)}>Remove</button>
+      </div>
     </article>
   );
 }
@@ -567,6 +621,10 @@ function LoanCard({ loan, callbacks }: { loan: Loan; callbacks: RowCallbacks }) 
         />
       </div>
       <div className="amount neg">{money(loan.principal, loan.currency)}</div>
+      <div className="conn-buttons" style={{ marginTop: 10 }}>
+        <button type="button" className="mini" onClick={() => callbacks.onEditLoan(loan)}>Edit</button>
+        <button type="button" className="mini danger" onClick={() => callbacks.onRemoveLoan(loan)}>Remove</button>
+      </div>
     </article>
   );
 }
@@ -665,6 +723,186 @@ function CredentialsModal({ connection, company, onClose, onSaved }: Credentials
           <div className="modal-actions">
             <button type="button" onClick={onClose}>Cancel</button>
             <button type="button" className="primary" onClick={submit}>Save</button>
+          </div>
+        </div>
+      </div>
+    </ModalPortal>
+  );
+}
+
+interface AssetEditModalProps {
+  asset: ManualAsset;
+  onClose: () => void;
+  onSaved: () => void | Promise<void>;
+}
+
+function AssetEditModal({ asset, onClose, onSaved }: AssetEditModalProps) {
+  const [name, setName] = useState(asset.name);
+  const [value, setValue] = useState(String(asset.value));
+  const [error, setError] = useState<string | null>(null);
+  const submit = async () => {
+    setError(null);
+    if (!name.trim()) { setError('Name is required.'); return; }
+    const n = Number(value);
+    if (!Number.isFinite(n)) { setError('Value must be a number.'); return; }
+    try {
+      await api(`/assets/${encodeURIComponent(asset.id)}`, 'PUT', {
+        name: name.trim(), value: n,
+      });
+      await onSaved();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e));
+    }
+  };
+  return (
+    <ModalPortal>
+      <div className="overlay">
+        <div role="dialog" aria-label={`Edit ${asset.name}`} className="modal">
+          <h2>Edit asset</h2>
+          <label className="field">
+            <span>Name</span>
+            <input type="text" value={name} onChange={(e) => setName(e.target.value)} />
+          </label>
+          <label className="field">
+            <span>Value ({asset.currency})</span>
+            <input
+              type="number"
+              step="0.01"
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+            />
+          </label>
+          {error && <div className="modal-err">{error}</div>}
+          <div className="modal-actions">
+            <button type="button" onClick={onClose}>Cancel</button>
+            <button type="button" className="primary" onClick={submit}>Save</button>
+          </div>
+        </div>
+      </div>
+    </ModalPortal>
+  );
+}
+
+interface LoanEditModalProps {
+  loan: Loan;
+  onClose: () => void;
+  onSaved: () => void | Promise<void>;
+}
+
+function LoanEditModal({ loan, onClose, onSaved }: LoanEditModalProps) {
+  const [name, setName] = useState(loan.name);
+  const [principal, setPrincipal] = useState(String(loan.principal));
+  const [termMonths, setTermMonths] = useState(String(loan.termMonths));
+  const [rateValue, setRateValue] = useState(String(loan.rateValue));
+  const [notes, setNotes] = useState(loan.notes ?? '');
+  const [error, setError] = useState<string | null>(null);
+  const submit = async () => {
+    setError(null);
+    if (!name.trim()) { setError('Name is required.'); return; }
+    const p = Number(principal);
+    const t = Number(termMonths);
+    const r = Number(rateValue);
+    if (!Number.isFinite(p) || p <= 0) { setError('Principal must be a positive number.'); return; }
+    if (!Number.isFinite(t) || t <= 0) { setError('Term must be a positive integer.'); return; }
+    if (!Number.isFinite(r)) { setError('Rate must be a number.'); return; }
+    try {
+      // Track type stays fixed — switching prime/CPI invalidates the CPI snapshot.
+      // To switch tracks the user can remove and re-add the loan.
+      await api(`/loans/${encodeURIComponent(loan.id)}`, 'PUT', {
+        name: name.trim(),
+        principal: p,
+        termMonths: Math.round(t),
+        rateValue: r,
+        notes: notes.trim() || null,
+      });
+      await onSaved();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e));
+    }
+  };
+  return (
+    <ModalPortal>
+      <div className="overlay">
+        <div role="dialog" aria-label={`Edit ${loan.name}`} className="modal">
+          <h2>Edit loan</h2>
+          <label className="field">
+            <span>Name</span>
+            <input type="text" value={name} onChange={(e) => setName(e.target.value)} />
+          </label>
+          <label className="field">
+            <span>Principal ({loan.currency})</span>
+            <input
+              type="number"
+              step="0.01"
+              value={principal}
+              onChange={(e) => setPrincipal(e.target.value)}
+            />
+          </label>
+          <label className="field">
+            <span>Term (months)</span>
+            <input
+              type="number"
+              step="1"
+              value={termMonths}
+              onChange={(e) => setTermMonths(e.target.value)}
+            />
+          </label>
+          <label className="field">
+            <span>Rate (% annual)</span>
+            <input
+              type="number"
+              step="0.01"
+              value={rateValue}
+              onChange={(e) => setRateValue(e.target.value)}
+            />
+          </label>
+          <label className="field">
+            <span>Notes</span>
+            <input
+              type="text"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Optional"
+            />
+          </label>
+          {error && <div className="modal-err">{error}</div>}
+          <div className="modal-actions">
+            <button type="button" onClick={onClose}>Cancel</button>
+            <button type="button" className="primary" onClick={submit}>Save</button>
+          </div>
+        </div>
+      </div>
+    </ModalPortal>
+  );
+}
+
+interface ConfirmRemoveDialogProps {
+  title: string;
+  body: string;
+  onClose: () => void;
+  onConfirmed: () => void | Promise<void>;
+}
+
+function ConfirmRemoveDialog({ title, body, onClose, onConfirmed }: ConfirmRemoveDialogProps) {
+  const [error, setError] = useState<string | null>(null);
+  const confirm = async () => {
+    setError(null);
+    try {
+      await onConfirmed();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e));
+    }
+  };
+  return (
+    <ModalPortal>
+      <div className="overlay">
+        <div role="dialog" aria-label={`Remove ${title}`} className="modal">
+          <h2>{title}</h2>
+          <p>{body}</p>
+          {error && <div className="modal-err">{error}</div>}
+          <div className="modal-actions">
+            <button type="button" onClick={onClose}>Cancel</button>
+            <button type="button" className="danger" onClick={confirm}>Confirm remove</button>
           </div>
         </div>
       </div>
