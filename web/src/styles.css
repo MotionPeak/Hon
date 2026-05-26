@@ -1635,6 +1635,77 @@ button.mini { padding: 5px 11px; font-size: 12px; }
   font-size: 11px; color: var(--faint); margin: 6px 0 0;
 }
 
+/* --- Voucher source picker + provider sync dialog ------------------- */
+.vc-pick-list {
+  list-style: none; padding: 0; margin: 0;
+  display: flex; flex-direction: column; gap: 8px;
+  max-height: 56vh; overflow-y: auto;
+}
+.vc-pick-row {
+  width: 100%; display: flex; align-items: center; gap: 12px;
+  padding: 11px 13px; border-radius: 12px;
+  background: var(--bg-elev); border: 1px solid var(--hairline-2);
+  color: var(--text); text-align: left; cursor: pointer;
+  transition: border-color .15s ease, transform .12s ease,
+              background-color .15s ease;
+}
+.vc-pick-row:hover:not(:disabled) {
+  border-color: var(--accent); transform: translateY(-1px);
+  background: var(--card);
+}
+.vc-pick-row.disabled, .vc-pick-row:disabled {
+  opacity: .55; cursor: not-allowed;
+}
+.vc-pick-emoji {
+  width: 40px; height: 40px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 22px; border-radius: 10px;
+  background: var(--card-hi);
+}
+.vc-pick-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.vc-pick-name {
+  font-weight: 600; font-size: 14px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.vc-pick-sub {
+  font-size: 11.5px; color: var(--muted); font-weight: 500;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.vc-pick-soon {
+  margin-left: auto; flex: none; font-size: 10px;
+  font-weight: 700; padding: 3px 8px; border-radius: 999px;
+  white-space: nowrap; color: var(--faint);
+  background: var(--hairline);
+}
+.vc-pick-note {
+  margin: 4px 4px 0; padding: 8px 10px;
+  font-size: 11.5px; color: var(--muted);
+  background: var(--card-hi); border-radius: 8px;
+}
+/* Remember-this-credential checkbox + provider sync progress states. */
+.vc-remember {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 12.5px; color: var(--muted); cursor: pointer;
+  margin: -4px 0 2px;
+}
+.vc-sync-step {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 14px; padding: 18px 6px 4px;
+}
+.vc-sync-spinner {
+  width: 36px; height: 36px; border-radius: 50%;
+  border: 3px solid var(--card-hi);
+  border-top-color: var(--accent);
+  animation: vc-spin 1s linear infinite;
+}
+@keyframes vc-spin { to { transform: rotate(360deg); } }
+.vc-sync-msg {
+  font-size: 13px; color: var(--text); text-align: center;
+  margin: 0; line-height: 1.5;
+}
+.vc-sync-ok  { color: var(--green); font-weight: 700; }
+.vc-sync-err { color: var(--red); font-weight: 700; }
+
 /* --- Activity batch select + bulk move ------------------------------- */
 .act-select-btn {
   background: var(--card-hi); border: 1px solid var(--hairline);

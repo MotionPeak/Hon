@@ -81,12 +81,130 @@ describe('VouchersView — CRUD', () => {
     expect(await screen.findByRole('button', { name: /add voucher/i })).toBeInTheDocument();
   });
 
-  it('clicking Add opens a form with the manual-add fields', async () => {
+  it('clicking Add opens a source picker with Custom + provider tiles', async () => {
     const user = userEvent.setup();
     installFetchMock({ 'GET /api/vouchers': () => fixture() });
     render(<VouchersView />);
     await user.click(await screen.findByRole('button', { name: /add voucher/i }));
-    const dialog = screen.getByRole('dialog', { name: /add a voucher/i });
+    const picker = await screen.findByRole('dialog', { name: /add a voucher/i });
+    expect(within(picker).getByRole('button', { name: /shufersal/i })).toBeInTheDocument();
+    expect(within(picker).getByRole('button', { name: /buyme/i })).toBeInTheDocument();
+    expect(within(picker).getByRole('button', { name: /hi-?tech zone/i })).toBeInTheDocument();
+    expect(within(picker).getByRole('button', { name: /custom voucher/i })).toBeInTheDocument();
+  });
+
+  it('Shufersal sync POSTs /start with the phone + remember', async () => {
+    const user = userEvent.setup();
+    const post = vi.fn((_body: unknown) => ({ syncId: 'sync-1' }));
+    installFetchMock({
+      'GET /api/vouchers': () => fixture(),
+      'GET /api/vouchers/sync/shufersal/saved-phone': () => ({ phone: null }),
+      'POST /api/vouchers/sync/shufersal/start': post,
+      'GET /api/vouchers/sync/shufersal/status/sync-1': () => ({
+        status: 'signing-in', message: 'Opening…', error: null,
+        vouchers: null, finished: false,
+      }),
+    });
+    render(<VouchersView />);
+    await user.click(await screen.findByRole('button', { name: /add voucher/i }));
+    await user.click(await screen.findByRole('button', { name: /^Shufersal/i }));
+    const dialog = await screen.findByRole('dialog', { name: /sync shufersal/i });
+    await user.type(within(dialog).getByLabelText(/phone/i), '0501234567');
+    await user.click(within(dialog).getByRole('button', { name: /^sync$/i }));
+    await waitFor(() => expect(post).toHaveBeenCalled());
+    const body = post.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(body.phone).toBe('0501234567');
+    expect(body.remember).toBe(true);
+    // After start, the dialog moves to the progress step.
+    expect(await within(dialog).findByText(/opening/i)).toBeInTheDocument();
+  });
+
+  it('Shufersal awaiting-otp status transitions the dialog to the code-entry step', async () => {
+    const user = userEvent.setup();
+    let statusCalls = 0;
+    installFetchMock({
+      'GET /api/vouchers': () => fixture(),
+      'GET /api/vouchers/sync/shufersal/saved-phone': () => ({ phone: null }),
+      'POST /api/vouchers/sync/shufersal/start': () => ({ syncId: 'sync-2' }),
+      'GET /api/vouchers/sync/shufersal/status/sync-2': () => {
+        statusCalls += 1;
+        // First poll: still signing in. After: awaiting OTP.
+        if (statusCalls <= 1) {
+          return { status: 'signing-in', message: 'Opening…', error: null,
+            vouchers: null, finished: false };
+        }
+        return { status: 'awaiting-otp',
+          message: 'Enter the code that was SMSed to your phone.',
+          error: null, vouchers: null, finished: false };
+      },
+      'POST /api/vouchers/sync/shufersal/otp': () => ({ ok: true }),
+    });
+    render(<VouchersView />);
+    await user.click(await screen.findByRole('button', { name: /add voucher/i }));
+    await user.click(await screen.findByRole('button', { name: /^Shufersal/i }));
+    const dialog = await screen.findByRole('dialog', { name: /sync shufersal/i });
+    await user.type(within(dialog).getByLabelText(/phone/i), '0501234567');
+    await user.click(within(dialog).getByRole('button', { name: /^sync$/i }));
+    // Poll picks up the awaiting-otp status (default poll interval 1500ms).
+    expect(
+      await within(dialog).findByLabelText(/verification code/i, {}, { timeout: 4000 }),
+    ).toBeInTheDocument();
+  });
+
+  it('picking Shufersal opens the Shufersal sync dialog with a phone input', async () => {
+    const user = userEvent.setup();
+    installFetchMock({
+      'GET /api/vouchers': () => fixture(),
+      'GET /api/vouchers/sync/shufersal/saved-phone': () => ({ phone: null }),
+    });
+    render(<VouchersView />);
+    await user.click(await screen.findByRole('button', { name: /add voucher/i }));
+    await user.click(await screen.findByRole('button', { name: /^Shufersal/i }));
+    const dialog = await screen.findByRole('dialog', { name: /sync shufersal/i });
+    expect(within(dialog).getByLabelText(/phone/i)).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: /^sync$/i })).toBeInTheDocument();
+  });
+
+  it('Shufersal sync dialog pre-fills the phone from the vault when one is saved', async () => {
+    const user = userEvent.setup();
+    installFetchMock({
+      'GET /api/vouchers': () => fixture(),
+      'GET /api/vouchers/sync/shufersal/saved-phone': () => ({ phone: '0501234567' }),
+    });
+    render(<VouchersView />);
+    await user.click(await screen.findByRole('button', { name: /add voucher/i }));
+    await user.click(await screen.findByRole('button', { name: /^Shufersal/i }));
+    const dialog = await screen.findByRole('dialog', { name: /sync shufersal/i });
+    const input = await within(dialog).findByLabelText(/phone/i) as HTMLInputElement;
+    await waitFor(() => expect(input.value).toBe('0501234567'));
+  });
+
+  it('Hi-Tech Zone sync validates the 8–9 digit code before POSTing', async () => {
+    const user = userEvent.setup();
+    const post = vi.fn(() => ({ syncId: 'sync-h' }));
+    installFetchMock({
+      'GET /api/vouchers': () => fixture(),
+      'GET /api/vouchers/sync/htzone/saved-code': () => ({ code: null }),
+      'POST /api/vouchers/sync/htzone/start': post,
+    });
+    render(<VouchersView />);
+    await user.click(await screen.findByRole('button', { name: /add voucher/i }));
+    await user.click(await screen.findByRole('button', { name: /hi-?tech zone/i }));
+    const dialog = await screen.findByRole('dialog', { name: /sync hi-?tech zone/i });
+    await user.type(within(dialog).getByLabelText(/digital code/i), '1234');
+    await user.click(within(dialog).getByRole('button', { name: /^sync$/i }));
+    // Inline validation error shows in .form-error.
+    expect(within(dialog).getByText(/code must be 8.{1,3}9/i)).toBeInTheDocument();
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it('picking "Custom voucher" opens the manual-entry form', async () => {
+    const user = userEvent.setup();
+    installFetchMock({ 'GET /api/vouchers': () => fixture() });
+    render(<VouchersView />);
+    await user.click(await screen.findByRole('button', { name: /add voucher/i }));
+    await user.click(await screen.findByRole('button', { name: /custom voucher/i }));
+    const dialog = await screen.findByRole('dialog', { name: /custom voucher/i });
     expect(within(dialog).getByLabelText(/provider/i)).toBeInTheDocument();
     expect(within(dialog).getByLabelText('Name')).toBeInTheDocument();
     expect(within(dialog).getByLabelText(/balance/i)).toBeInTheDocument();
@@ -103,7 +221,8 @@ describe('VouchersView — CRUD', () => {
     });
     render(<VouchersView />);
     await user.click(await screen.findByRole('button', { name: /add voucher/i }));
-    const dialog = screen.getByRole('dialog', { name: /add a voucher/i });
+    await user.click(await screen.findByRole('button', { name: /custom voucher/i }));
+    const dialog = await screen.findByRole('dialog', { name: /custom voucher/i });
     await user.type(within(dialog).getByLabelText(/provider/i), 'Shufersal');
     await user.type(within(dialog).getByLabelText('Name'), 'Birthday gift');
     await user.type(within(dialog).getByLabelText(/balance/i), '500');

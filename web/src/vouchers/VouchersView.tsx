@@ -1,8 +1,51 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import * as Dialog from '@radix-ui/react-dialog';
 import { api, ApiError } from '../api';
 import { money } from '../format';
 import type { Voucher } from './types';
+
+type AddMode =
+  | { kind: 'closed' }
+  | { kind: 'picker' }
+  | { kind: 'custom' }
+  | { kind: 'shufersal' }
+  | { kind: 'buyme' }
+  | { kind: 'htzone' };
+
+interface VoucherProvider {
+  id: 'shufersal' | 'buyme' | 'htzone' | 'pluxee' | 'cibus';
+  label: string;
+  sub: string;
+  emoji: string;
+  available: boolean;
+  note?: string;
+}
+
+const VOUCHER_SOURCES: VoucherProvider[] = [
+  { id: 'shufersal', emoji: '🛒',
+    label: 'Shufersal — תו הזהב / GiftCard',
+    sub: 'Tav Hazahav and GiftCard balances',
+    available: true },
+  { id: 'buyme', emoji: '🎁',
+    label: 'BuyMe',
+    sub: 'Digital gift cards from BuyMe',
+    available: true },
+  { id: 'htzone', emoji: '💎',
+    label: 'Hi-Tech Zone — היי טק זון',
+    sub: 'Balance lookup by your 8–9 digit digital code',
+    available: true },
+  { id: 'pluxee', emoji: '🍱',
+    label: 'Pluxee / Sodexo',
+    sub: 'Food vouchers loaded by your employer',
+    available: false,
+    note: 'Coming soon — check the Pluxee app for the live balance.' },
+  { id: 'cibus', emoji: '🍽️',
+    label: 'Cibus / 10bis',
+    sub: 'Restaurant credit',
+    available: false,
+    note: 'Coming soon — Cibus loads the daily allowance, no card to track.' },
+];
 
 function ModalPortal({ children }: { children: ReactNode }) {
   return createPortal(children, document.body);
@@ -37,9 +80,11 @@ function PROVIDER_EMOJI(provider: string): string {
 
 export function VouchersView() {
   const [vouchers, setVouchers] = useState<Voucher[] | null>(null);
-  const [adding, setAdding] = useState(false);
+  const [addMode, setAddMode] = useState<AddMode>({ kind: 'closed' });
   const [editing, setEditing] = useState<Voucher | null>(null);
   const [deleting, setDeleting] = useState<Voucher | null>(null);
+  const openAdd = (): void => setAddMode({ kind: 'picker' });
+  const closeAdd = (): void => setAddMode({ kind: 'closed' });
 
   const refresh = useCallback(async () => {
     try {
@@ -68,7 +113,7 @@ export function VouchersView() {
       <div className="vouchers-view">
         <div className="vouchers-head">
           <h1>Vouchers &amp; gift cards</h1>
-          <button type="button" className="mini primary" onClick={() => setAdding(true)}>
+          <button type="button" className="mini primary" onClick={openAdd}>
             + Add voucher
           </button>
         </div>
@@ -76,12 +121,12 @@ export function VouchersView() {
           🎟️ No vouchers yet. Sync directly from a provider — Shufersal Tav HaZahav,
           BuyMe and more — or add one by hand.
         </p>
-        {adding && (
-          <VoucherFormModal
-            onClose={() => setAdding(false)}
-            onSaved={async () => { setAdding(false); await refresh(); }}
-          />
-        )}
+        <AddVoucherFlow
+          mode={addMode}
+          setMode={setAddMode}
+          onClose={closeAdd}
+          onSaved={async () => { closeAdd(); await refresh(); }}
+        />
       </div>
     );
   }
@@ -98,7 +143,7 @@ export function VouchersView() {
     <div className="vouchers-view">
       <div className="vouchers-head">
         <h1>Vouchers &amp; gift cards</h1>
-        <button type="button" className="mini primary" onClick={() => setAdding(true)}>
+        <button type="button" className="mini primary" onClick={openAdd}>
           + Add voucher
         </button>
       </div>
@@ -129,12 +174,12 @@ export function VouchersView() {
           />
         ))}
       </div>
-      {adding && (
-        <VoucherFormModal
-          onClose={() => setAdding(false)}
-          onSaved={async () => { setAdding(false); await refresh(); }}
-        />
-      )}
+      <AddVoucherFlow
+        mode={addMode}
+        setMode={setAddMode}
+        onClose={closeAdd}
+        onSaved={async () => { closeAdd(); await refresh(); }}
+      />
       {editing && (
         <VoucherFormModal
           voucher={editing}
@@ -243,6 +288,401 @@ function VoucherCard({ voucher, onEdit, onToggleExcluded, onDelete }: VoucherCar
   );
 }
 
+interface AddVoucherFlowProps {
+  mode: AddMode;
+  setMode: (m: AddMode) => void;
+  onClose: () => void;
+  onSaved: () => void | Promise<void>;
+}
+
+function AddVoucherFlow({
+  mode, setMode, onClose, onSaved,
+}: AddVoucherFlowProps) {
+  return (
+    <>
+      <SourcePicker
+        open={mode.kind === 'picker'}
+        onClose={onClose}
+        onPick={(id) => setMode({ kind: id })}
+      />
+      {mode.kind === 'custom' && (
+        <VoucherFormModal onClose={onClose} onSaved={onSaved} />
+      )}
+      {mode.kind === 'shufersal' && (
+        <ShufersalSyncDialog onClose={onClose} onSaved={onSaved} />
+      )}
+      {mode.kind === 'buyme' && (
+        <BuyMeSyncDialog onClose={onClose} onSaved={onSaved} />
+      )}
+      {mode.kind === 'htzone' && (
+        <HtzoneSyncDialog onClose={onClose} onSaved={onSaved} />
+      )}
+    </>
+  );
+}
+
+function SourcePicker({
+  open, onClose, onPick,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onPick: (id: 'custom' | 'shufersal' | 'buyme' | 'htzone') => void;
+}) {
+  const [comingSoonId, setComingSoonId] = useState<string | null>(null);
+  return (
+    <Dialog.Root open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="rx-overlay" />
+        <Dialog.Content className="rx-dialog">
+          <Dialog.Title>Add a voucher</Dialog.Title>
+          <Dialog.Description className="rx-dialog-desc">
+            Pick a provider to sync your active gift cards, or enter one by
+            hand. Coming-soon providers are a reminder to check those services
+            manually until Hon can read them.
+          </Dialog.Description>
+          <ul className="vc-pick-list">
+            {VOUCHER_SOURCES.map((p) => (
+              <li key={p.id}>
+                <button
+                  type="button"
+                  className={`vc-pick-row${p.available ? '' : ' disabled'}`}
+                  aria-label={p.label}
+                  disabled={!p.available}
+                  onClick={() => {
+                    if (!p.available) { setComingSoonId(p.id); return; }
+                    onPick(p.id as 'shufersal' | 'buyme' | 'htzone');
+                  }}
+                >
+                  <span className="vc-pick-emoji">{p.emoji}</span>
+                  <span className="vc-pick-meta">
+                    <span className="vc-pick-name">{p.label}</span>
+                    <span className="vc-pick-sub">{p.sub}</span>
+                  </span>
+                  {!p.available && (
+                    <span className="vc-pick-soon">Coming soon</span>
+                  )}
+                </button>
+                {!p.available && comingSoonId === p.id && p.note && (
+                  <div className="vc-pick-note">{p.note}</div>
+                )}
+              </li>
+            ))}
+            <li>
+              <button
+                type="button"
+                className="vc-pick-row"
+                aria-label="Custom voucher"
+                onClick={() => onPick('custom')}
+              >
+                <span className="vc-pick-emoji">✏️</span>
+                <span className="vc-pick-meta">
+                  <span className="vc-pick-name">Custom voucher</span>
+                  <span className="vc-pick-sub">
+                    Type in a voucher Hon doesn't sync — a gift card you
+                    received, an employer holiday sum, anything.
+                  </span>
+                </span>
+              </button>
+            </li>
+          </ul>
+          <div className="form-actions">
+            <Dialog.Close asChild>
+              <button type="button" className="btn-ghost">Close</button>
+            </Dialog.Close>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
+interface SyncStatus {
+  status: string;
+  message: string | null;
+  error: string | null;
+  vouchers: { id: string; name: string; balance: number; currency: string }[] | null;
+  finished: boolean;
+}
+
+interface ProviderConfig {
+  id: 'shufersal' | 'buyme' | 'htzone';
+  title: string;
+  /** Field label and input type for the start step. */
+  credentialLabel: string;
+  credentialType: 'tel' | 'email' | 'text';
+  /** Body key the engine expects on start. */
+  credentialKey: 'phone' | 'email' | 'code';
+  /** GET path returning { [credentialKey]: string | null }. */
+  savedPath: string;
+  /** Validation — returns null when ok, error string otherwise. */
+  validate: (value: string) => string | null;
+  /** True for OTP-based flows (Shufersal, BuyMe). */
+  hasOtp: boolean;
+}
+
+const PROVIDER_CONFIGS: Record<'shufersal' | 'buyme' | 'htzone', ProviderConfig> = {
+  shufersal: {
+    id: 'shufersal',
+    title: 'Sync Shufersal',
+    credentialLabel: 'Phone number',
+    credentialType: 'tel',
+    credentialKey: 'phone',
+    savedPath: '/vouchers/sync/shufersal/saved-phone',
+    validate: (v) => /^[0-9\-+\s]{9,15}$/.test(v) ? null : 'Enter a phone number.',
+    hasOtp: true,
+  },
+  buyme: {
+    id: 'buyme',
+    title: 'Sync BuyMe',
+    credentialLabel: 'Email address',
+    credentialType: 'email',
+    credentialKey: 'email',
+    savedPath: '/vouchers/sync/buyme/saved-email',
+    validate: (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? null : 'Enter a valid email.',
+    hasOtp: true,
+  },
+  htzone: {
+    id: 'htzone',
+    title: 'Sync Hi-Tech Zone',
+    credentialLabel: 'Digital code (8–9 digits)',
+    credentialType: 'text',
+    credentialKey: 'code',
+    savedPath: '/vouchers/sync/htzone/saved-code',
+    validate: (v) => /^\d{8,9}$/.test(v.replace(/\D/g, '')) ? null : 'Code must be 8–9 digits.',
+    hasOtp: false,
+  },
+};
+
+function ShufersalSyncDialog(p: { onClose: () => void; onSaved: () => void | Promise<void> }) {
+  return <ProviderSyncDialog cfg={PROVIDER_CONFIGS.shufersal} {...p} />;
+}
+function BuyMeSyncDialog(p: { onClose: () => void; onSaved: () => void | Promise<void> }) {
+  return <ProviderSyncDialog cfg={PROVIDER_CONFIGS.buyme} {...p} />;
+}
+function HtzoneSyncDialog(p: { onClose: () => void; onSaved: () => void | Promise<void> }) {
+  return <ProviderSyncDialog cfg={PROVIDER_CONFIGS.htzone} {...p} />;
+}
+
+function ProviderSyncDialog({
+  cfg, onClose, onSaved,
+}: {
+  cfg: ProviderConfig;
+  onClose: () => void;
+  onSaved: () => void | Promise<void>;
+}) {
+  const [credential, setCredential] = useState('');
+  const [remember, setRemember] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [syncId, setSyncId] = useState<string | null>(null);
+  const [status, setStatus] = useState<SyncStatus | null>(null);
+  const [otp, setOtp] = useState('');
+  const [otpSubmitting, setOtpSubmitting] = useState(false);
+
+  // Best-effort pre-fill of the credential from the vault.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const r = await api<Record<string, string | null>>(cfg.savedPath);
+        if (!cancelled) {
+          const saved = r[cfg.credentialKey];
+          if (saved) setCredential(saved);
+        }
+      } catch { /* fine — no saved value */ }
+    })();
+    return () => { cancelled = true; };
+  }, [cfg.savedPath, cfg.credentialKey]);
+
+  // Poll status while a sync is running.
+  useEffect(() => {
+    if (!syncId) return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const s = await api<SyncStatus>(`/vouchers/sync/${cfg.id}/status/${syncId}`);
+        if (cancelled) return;
+        setStatus(s);
+        if (s.finished) return;
+      } catch { /* keep polling */ }
+    };
+    void tick();
+    const handle = setInterval(() => { void tick(); }, 1500);
+    return () => { cancelled = true; clearInterval(handle); };
+  }, [syncId, cfg.id]);
+
+  const start = async (): Promise<void> => {
+    setError(null);
+    const vErr = cfg.validate(credential);
+    if (vErr) { setError(vErr); return; }
+    try {
+      const body: Record<string, unknown> = { remember };
+      body[cfg.credentialKey] = credential.trim();
+      const r = await api<{ syncId: string }>(
+        `/vouchers/sync/${cfg.id}/start`, 'POST', body,
+      );
+      setSyncId(r.syncId);
+      setStatus({
+        status: cfg.hasOtp ? 'signing-in' : 'awaiting-user-action',
+        message: cfg.hasOtp
+          ? 'Opening…'
+          : 'A browser window opened — tick the reCAPTCHA and click שלח.',
+        error: null,
+        vouchers: null,
+        finished: false,
+      });
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e));
+    }
+  };
+
+  const submitOtp = async (): Promise<void> => {
+    if (!syncId) return;
+    setOtpSubmitting(true);
+    try {
+      await api(`/vouchers/sync/${cfg.id}/otp`, 'POST', { syncId, code: otp.trim() });
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e));
+    } finally {
+      setOtpSubmitting(false);
+    }
+  };
+
+  const cancel = async (): Promise<void> => {
+    if (syncId) {
+      try { await api(`/vouchers/sync/${cfg.id}/cancel`, 'POST', { syncId }); }
+      catch { /* best effort */ }
+    }
+    onClose();
+  };
+
+  const showOtpStep = cfg.hasOtp && status?.status === 'awaiting-otp';
+  const showSuccess = status?.status === 'success';
+  const showError = status?.status === 'error';
+  const showProgress = !!status && !showOtpStep && !showSuccess && !showError;
+
+  return (
+    <Dialog.Root open onOpenChange={(o) => { if (!o) void cancel(); }}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="rx-overlay" />
+        <Dialog.Content className="rx-dialog" aria-label={cfg.title}>
+          <Dialog.Title>{cfg.title}</Dialog.Title>
+          <Dialog.Description className="rx-dialog-desc">
+            Hon opens a private browser window in the background, signs in
+            with your {cfg.credentialLabel.toLowerCase()}, and reads the
+            balance — nothing is shared with anyone but you.
+          </Dialog.Description>
+
+          {!syncId && (
+            <form
+              className="piggy-form"
+              onSubmit={(e) => { e.preventDefault(); void start(); }}
+            >
+              <label htmlFor={`vc-${cfg.id}-cred`} className="fld-lbl">
+                {cfg.credentialLabel}
+              </label>
+              <input
+                id={`vc-${cfg.id}-cred`}
+                type={cfg.credentialType}
+                value={credential}
+                onChange={(e) => setCredential(e.target.value)}
+                autoFocus
+              />
+              <label className="vc-remember">
+                <input
+                  type="checkbox"
+                  checked={remember}
+                  onChange={(e) => setRemember(e.target.checked)}
+                />
+                Remember this for next time
+              </label>
+              {error && <p className="form-error">{error}</p>}
+              <div className="form-actions">
+                <Dialog.Close asChild>
+                  <button type="button" className="btn-ghost">Cancel</button>
+                </Dialog.Close>
+                <button type="submit" className="btn-primary">Sync</button>
+              </div>
+            </form>
+          )}
+
+          {showProgress && (
+            <div className="vc-sync-step">
+              <div className="vc-sync-spinner" aria-hidden="true" />
+              <p className="vc-sync-msg">{status?.message ?? 'Working…'}</p>
+              <div className="form-actions">
+                <button type="button" className="btn-ghost" onClick={cancel}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          {showOtpStep && (
+            <form
+              className="piggy-form"
+              onSubmit={(e) => { e.preventDefault(); void submitOtp(); }}
+            >
+              <p className="vc-sync-msg">{status?.message}</p>
+              <label htmlFor={`vc-${cfg.id}-otp`} className="fld-lbl">
+                Verification code
+              </label>
+              <input
+                id={`vc-${cfg.id}-otp`}
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                autoComplete="one-time-code"
+                value={otp}
+                onChange={(e) => setOtp(e.target.value)}
+                autoFocus
+              />
+              {error && <p className="form-error">{error}</p>}
+              <div className="form-actions">
+                <button type="button" className="btn-ghost" onClick={cancel}>
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn-primary"
+                  disabled={otpSubmitting || otp.trim().length < 3}
+                >Verify</button>
+              </div>
+            </form>
+          )}
+
+          {showSuccess && (
+            <div className="vc-sync-step">
+              <p className="vc-sync-msg vc-sync-ok">
+                ✓ {status?.message ?? 'Done.'}
+              </p>
+              <div className="form-actions">
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={() => void onSaved()}
+                >Done</button>
+              </div>
+            </div>
+          )}
+
+          {showError && (
+            <div className="vc-sync-step">
+              <p className="vc-sync-msg vc-sync-err">
+                ✗ {status?.error ?? 'Sync failed.'}
+              </p>
+              <div className="form-actions">
+                <button type="button" className="btn-ghost" onClick={onClose}>
+                  Close
+                </button>
+              </div>
+            </div>
+          )}
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
 interface VoucherFormModalProps {
   voucher?: Voucher;
   onClose: () => void;
@@ -290,7 +730,7 @@ function VoucherFormModal({ voucher, onClose, onSaved }: VoucherFormModalProps) 
       <div className="overlay">
         <div
           role="dialog"
-          aria-label={isEdit ? 'Edit voucher' : 'Add a voucher'}
+          aria-label={isEdit ? 'Edit voucher' : 'Custom voucher'}
           className="modal"
         >
           <h2>{isEdit ? 'Edit voucher' : 'Add a voucher'}</h2>
