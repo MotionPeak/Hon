@@ -663,6 +663,58 @@ describe('AccountsView — add connection (picker + bank/card form)', () => {
     expect(within(dialog).getByLabelText(/password/i)).toBeInTheDocument();
   });
 
+  it('the picker has a "Manual asset" option (car/property/cash/etc)', async () => {
+    const user = userEvent.setup();
+    installFetchMock({ ...FULL, 'GET /api/companies': () => COMPANIES_FULL });
+    render(<AccountsView />);
+    await user.click(await screen.findByRole('button', { name: /add asset/i }));
+    const dialog = screen.getByRole('dialog', { name: /add an asset/i });
+    expect(within(dialog).getByText(/manual asset/i)).toBeInTheDocument();
+  });
+
+  it('picking manual asset opens a form with kind / name / value / currency', async () => {
+    const user = userEvent.setup();
+    installFetchMock({ ...FULL, 'GET /api/companies': () => COMPANIES_FULL });
+    render(<AccountsView />);
+    await user.click(await screen.findByRole('button', { name: /add asset/i }));
+    const picker = screen.getByRole('dialog', { name: /add an asset/i });
+    await user.click(within(picker).getByText(/manual asset/i));
+    const form = screen.getByRole('dialog', { name: /add a manual asset/i });
+    expect(within(form).getByLabelText(/kind/i)).toBeInTheDocument();
+    expect(within(form).getByLabelText(/name/i)).toBeInTheDocument();
+    expect(within(form).getByLabelText(/value/i)).toBeInTheDocument();
+    expect(within(form).getByLabelText(/currency/i)).toBeInTheDocument();
+  });
+
+  it('save POSTs /assets with kind/name/value/currency and refetches', async () => {
+    const user = userEvent.setup();
+    const post = vi.fn((_body: unknown) => ({ asset: {
+      id: 'new-as', kind: 'cash', name: 'Emergency fund', value: 50000,
+      currency: 'ILS', details: null, createdAt: 'now', updatedAt: 'now', excluded: false,
+    } }));
+    const get = vi.fn(() => ASSETS);
+    installFetchMock({
+      ...FULL,
+      'GET /api/companies': () => COMPANIES_FULL,
+      'GET /api/assets': get,
+      'POST /api/assets': post,
+    });
+    render(<AccountsView />);
+    await user.click(await screen.findByRole('button', { name: /add asset/i }));
+    const picker = screen.getByRole('dialog', { name: /add an asset/i });
+    await user.click(within(picker).getByText(/manual asset/i));
+    const form = screen.getByRole('dialog', { name: /add a manual asset/i });
+    await user.selectOptions(within(form).getByLabelText(/kind/i), 'cash');
+    await user.type(within(form).getByLabelText(/name/i), 'Emergency fund');
+    await user.type(within(form).getByLabelText(/value/i), '50000');
+    await user.click(within(form).getByRole('button', { name: /add$/i }));
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+    expect(post.mock.calls[0]?.[0]).toMatchObject({
+      kind: 'cash', name: 'Emergency fund', value: 50000, currency: 'ILS',
+    });
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+  });
+
   it('save POSTs /connections with companyId + displayName + credentials, then refetches', async () => {
     const user = userEvent.setup();
     const post = vi.fn((_body: unknown) => ({ connection: {

@@ -100,9 +100,12 @@ export function AccountsView() {
   const [removingAsset, setRemovingAsset] = useState<ManualAsset | null>(null);
   const [editingLoan, setEditingLoan] = useState<Loan | null>(null);
   const [removingLoan, setRemovingLoan] = useState<Loan | null>(null);
-  // Add-connection flow: null = closed; 'picker' = list of companies;
-  // a Company = chosen, showing the credential form for that company.
-  const [addFlow, setAddFlow] = useState<null | 'picker' | Company>(null);
+  // Add-asset flow:
+  //   null         — closed
+  //   'picker'     — list of companies + a "Manual asset" row
+  //   Company      — credential form for a bank/card provider
+  //   'manual'     — form for a hand-entered asset (car/property/cash/etc)
+  const [addFlow, setAddFlow] = useState<null | 'picker' | 'manual' | Company>(null);
 
   const toggleHoldings = useCallback((accountId: string) => {
     setExpandedHoldings((prev) => ({ ...prev, [accountId]: !prev[accountId] }));
@@ -359,11 +362,18 @@ export function AccountsView() {
       {addFlow === 'picker' && (
         <AddConnectionPicker
           companies={data.companies}
-          onPick={(c) => setAddFlow(c)}
+          onPickCompany={(c) => setAddFlow(c)}
+          onPickManual={() => setAddFlow('manual')}
           onClose={() => setAddFlow(null)}
         />
       )}
-      {addFlow !== null && addFlow !== 'picker' && (
+      {addFlow === 'manual' && (
+        <AddManualAssetForm
+          onClose={() => setAddFlow(null)}
+          onSaved={async () => { setAddFlow(null); await refresh(); }}
+        />
+      )}
+      {addFlow !== null && addFlow !== 'picker' && addFlow !== 'manual' && (
         <AddConnectionForm
           company={addFlow}
           onClose={() => setAddFlow(null)}
@@ -934,24 +944,29 @@ function ConfirmRemoveDialog({ title, body, onClose, onConfirmed }: ConfirmRemov
 
 interface AddConnectionPickerProps {
   companies: Company[];
-  onPick: (company: Company) => void;
+  onPickCompany: (company: Company) => void;
+  onPickManual: () => void;
   onClose: () => void;
 }
 
-function AddConnectionPicker({ companies, onPick, onClose }: AddConnectionPickerProps) {
+function AddConnectionPicker(
+  { companies, onPickCompany, onPickManual, onClose }: AddConnectionPickerProps,
+) {
   const [query, setQuery] = useState('');
   // Only bank + card flows are handled here; brokerage (SnapTrade) and
   // pension have their own multi-step flows that land in later sessions.
   const supported = companies.filter((c) => c.type === 'bank' || c.type === 'card');
-  const filtered = supported.filter((c) =>
-    c.name.toLowerCase().includes(query.toLowerCase()),
-  );
+  const q = query.toLowerCase();
+  const filtered = supported.filter((c) => c.name.toLowerCase().includes(q));
+  // Show the manual-asset row when the query matches "manual" / "asset" /
+  // empty, so the search filter doesn't hide it confusingly.
+  const showManual = q === '' || 'manual asset'.includes(q);
   return (
     <ModalPortal>
       <div className="overlay">
         <div role="dialog" aria-label="Add an asset" className="modal">
           <h2>Add an asset</h2>
-          <p>Pick a bank or credit-card provider.</p>
+          <p>Pick a provider, or add a hand-entered asset.</p>
           <label className="field">
             <span>Search</span>
             <input
@@ -965,7 +980,11 @@ function AddConnectionPicker({ companies, onPick, onClose }: AddConnectionPicker
           <ul className="add-picker">
             {filtered.map((c) => (
               <li key={c.id}>
-                <button type="button" className="add-picker-row" onClick={() => onPick(c)}>
+                <button
+                  type="button"
+                  className="add-picker-row"
+                  onClick={() => onPickCompany(c)}
+                >
                   <span className="add-picker-emoji">
                     {c.type === 'card' ? '💳' : '🏦'}
                   </span>
@@ -973,12 +992,114 @@ function AddConnectionPicker({ companies, onPick, onClose }: AddConnectionPicker
                 </button>
               </li>
             ))}
-            {filtered.length === 0 && (
+            {showManual && (
+              <li>
+                <button
+                  type="button"
+                  className="add-picker-row"
+                  onClick={onPickManual}
+                >
+                  <span className="add-picker-emoji">💎</span>
+                  <span className="add-picker-name">Manual asset</span>
+                  <span className="add-picker-sub">car · property · cash · crypto · other</span>
+                </button>
+              </li>
+            )}
+            {filtered.length === 0 && !showManual && (
               <li className="add-picker-empty">No providers match.</li>
             )}
           </ul>
           <div className="modal-actions">
             <button type="button" onClick={onClose}>Cancel</button>
+          </div>
+        </div>
+      </div>
+    </ModalPortal>
+  );
+}
+
+const ASSET_KINDS: Array<[string, string]> = [
+  ['cash', 'Cash / savings'],
+  ['property', 'Property'],
+  ['car', 'Car'],
+  ['crypto', 'Crypto'],
+  ['pension', 'Pension'],
+  ['other', 'Other'],
+];
+
+interface AddManualAssetFormProps {
+  onClose: () => void;
+  onSaved: () => void | Promise<void>;
+}
+
+function AddManualAssetForm({ onClose, onSaved }: AddManualAssetFormProps) {
+  const [kind, setKind] = useState('cash');
+  const [name, setName] = useState('');
+  const [value, setValue] = useState('');
+  const [currency, setCurrency] = useState('ILS');
+  const [error, setError] = useState<string | null>(null);
+  const submit = async () => {
+    setError(null);
+    if (!name.trim()) { setError('Name is required.'); return; }
+    const n = Number(value);
+    if (!Number.isFinite(n) || n <= 0) { setError('Enter a positive value.'); return; }
+    try {
+      await api('/assets', 'POST', {
+        kind, name: name.trim(), value: n, currency,
+      });
+      await onSaved();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e));
+    }
+  };
+  return (
+    <ModalPortal>
+      <div className="overlay">
+        <div role="dialog" aria-label="Add a manual asset" className="modal">
+          <h2>Add a manual asset</h2>
+          <p>
+            Anything you own with a value — counts toward your net worth.
+          </p>
+          <label className="field">
+            <span>Kind</span>
+            <select value={kind} onChange={(e) => setKind(e.target.value)}>
+              {ASSET_KINDS.map(([id, label]) => (
+                <option key={id} value={id}>{label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>Name</span>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Apartment, emergency fund…"
+              autoComplete="off"
+            />
+          </label>
+          <label className="field">
+            <span>Value</span>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              placeholder="0"
+            />
+          </label>
+          <label className="field">
+            <span>Currency</span>
+            <select value={currency} onChange={(e) => setCurrency(e.target.value)}>
+              <option>ILS</option><option>USD</option>
+              <option>EUR</option><option>GBP</option>
+            </select>
+          </label>
+          {error && <div className="modal-err">{error}</div>}
+          <div className="modal-actions">
+            <button type="button" onClick={onClose}>Cancel</button>
+            <button type="button" className="primary" onClick={submit}>Add</button>
           </div>
         </div>
       </div>
