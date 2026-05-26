@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AccountsView } from './accounts/AccountsView';
 import { ActivityView } from './activity/ActivityView';
 import { api, ApiError, hasToken } from './api';
@@ -48,6 +48,17 @@ export function App() {
   const [tab, setTab] = useState<Tab>('overview');
   const [health, setHealth] = useState<Health | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
+  // The amber pill that slides behind the active tab. Measured from the
+  // selected button after every tab change so it tracks any layout shift.
+  const navRef = useRef<HTMLElement | null>(null);
+  const [pill, setPill] = useState<{ top: number; height: number } | null>(null);
+  useLayoutEffect(() => {
+    const nav = navRef.current;
+    if (!nav) return;
+    const active = nav.querySelector<HTMLElement>('[aria-selected="true"]');
+    if (!active) return;
+    setPill({ top: active.offsetTop, height: active.offsetHeight });
+  }, [tab]);
 
   useEffect(() => {
     if (!hasToken()) return;
@@ -111,7 +122,22 @@ export function App() {
           >☀</button>
         </header>
         <div className="shell">
-          <nav className="app-nav" role="tablist" aria-orientation="vertical">
+          <nav
+            ref={navRef}
+            className="app-nav"
+            role="tablist"
+            aria-orientation="vertical"
+          >
+            {pill && (
+              <span
+                className="nav-pill"
+                aria-hidden="true"
+                style={{
+                  transform: `translateY(${pill.top}px)`,
+                  height: `${pill.height}px`,
+                }}
+              />
+            )}
             {TABS.map((t) => (
               <button
                 key={t.id}
@@ -127,16 +153,20 @@ export function App() {
             ))}
           </nav>
           <div className="app-content" role="tabpanel">
-            {tab === 'overview' && <OverviewView />}
-            {tab === 'accounts' && <AccountsView />}
-            {tab === 'activity' && <ActivityView />}
-            {tab === 'recurring' && <RecurringView />}
-            {tab === 'subscriptions' && <SubscriptionsView />}
-            {tab === 'piggy' && <PiggyView />}
-            {tab === 'vouchers' && <VouchersView />}
-            {tab === 'loans' && <LoansView />}
-            {tab === 'insights' && <InsightsView />}
-            {tab === 'settings' && <SettingsView />}
+            {/* The keyed wrapper remounts on tab change, which re-triggers
+                the .app-tab-view fade-up CSS animation. */}
+            <div key={tab} className="app-tab-view">
+              {tab === 'overview' && <OverviewView />}
+              {tab === 'accounts' && <AccountsView />}
+              {tab === 'activity' && <ActivityView />}
+              {tab === 'recurring' && <RecurringView />}
+              {tab === 'subscriptions' && <SubscriptionsView />}
+              {tab === 'piggy' && <PiggyView />}
+              {tab === 'vouchers' && <VouchersView />}
+              {tab === 'loans' && <LoansView />}
+              {tab === 'insights' && <InsightsView />}
+              {tab === 'settings' && <SettingsView />}
+            </div>
           </div>
         </div>
       </main>

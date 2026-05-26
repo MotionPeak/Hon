@@ -91,11 +91,36 @@ code, pre {
   display: flex; flex-direction: column; gap: 5px;
   position: sticky; top: 78px;
 }
+/* Sliding amber pill that follows the active tab. Position + height
+   are measured in App.tsx and applied as inline styles; the spring
+   cubic-bezier on transform + height gives a satisfying overshoot. */
+.app-nav .nav-pill {
+  position: absolute; left: 0; right: 0; top: 0;
+  border-radius: 12px;
+  background: linear-gradient(135deg, var(--accent), #d4831a);
+  box-shadow: 0 8px 20px var(--accent-soft),
+              0 0 0 1px rgba(255,255,255,0.04) inset;
+  pointer-events: none; z-index: 0;
+  transition:
+    transform .42s cubic-bezier(.34, 1.4, .56, 1),
+    height    .42s cubic-bezier(.34, 1.4, .56, 1);
+}
+.app-nav .nav-pill::after {
+  /* Soft amber halo around the pill so the active row has a glow. */
+  content: ""; position: absolute; inset: -2px;
+  border-radius: 14px;
+  background: radial-gradient(60% 80% at 30% 50%,
+              rgba(245,159,36,0.32), transparent 75%);
+  z-index: -1; filter: blur(8px);
+  opacity: .8;
+}
 .app-nav .nav-btn {
   display: flex; align-items: center; gap: 11px; width: 100%;
   padding: 11px 13px; border-radius: 12px; text-align: left;
   background: transparent; border: 1px solid transparent;
   color: var(--muted); font-size: 14px; font-weight: 600; position: relative;
+  /* Sit ABOVE the sliding pill so the icon + label stay readable. */
+  z-index: 1;
   transition: color .2s ease, background-color .2s ease, border-color .2s ease,
     transform .16s ease, box-shadow .2s ease;
 }
@@ -116,12 +141,16 @@ code, pre {
 .app-nav .nav-btn:hover .rn-ico { transform: scale(1.22) rotate(-7deg); }
 .app-nav .nav-btn:hover::before { height: 54%; }
 .app-nav .nav-btn.active {
+  /* The pill carries the amber fill; the button itself is now just a
+     transparent layer above so its hover transform doesn't snap. */
   color: #fff; transform: none; border-color: transparent;
-  background: linear-gradient(135deg, var(--accent), #d4831a);
-  box-shadow: 0 8px 20px var(--accent-soft);
+  background: transparent; box-shadow: none;
 }
 .app-nav .nav-btn.active::before { height: 0; }
 .app-nav .nav-btn.active .rn-ico { transform: scale(1.08); }
+.app-nav .nav-btn.active:hover {
+  background: transparent; transform: none;
+}
 
 .app-content { min-width: 0; }
 
@@ -1359,29 +1388,78 @@ button.mini { padding: 5px 11px; font-size: 12px; }
   font-size: 11px; color: var(--faint); margin: 6px 0 0;
 }
 
-/* Refund-link picker — list of positive-amount candidate transactions
-   shown when the user clicks "+ Link a refund or reimbursement". */
-.rf-pick {
+/* Refund-link picker — full sidebar takeover when the user clicks
+   "+ Link a refund or reimbursement". Mirrors the legacy app's panel:
+   Back button, hint paragraph, list of refund candidates as .rf-opt
+   rows with category icon + name/date on the left and ±₪amount on
+   the right. Flex-1 + min-height:0 lets the inner list scroll while
+   the sidebar's outer overflow-y is suppressed for this view. */
+.rf-picker {
+  display: flex; flex-direction: column; gap: 12px;
+  flex: 1; min-height: 0;
+  padding-top: 4px;
+}
+.rf-back {
+  align-self: flex-start;
+  background: transparent; border: 0; padding: 4px 0;
+  font-size: 13px; font-weight: 600; color: var(--muted);
+  cursor: pointer;
+}
+.rf-back:hover { color: var(--text); }
+.rf-hint {
+  font-size: 12px; color: var(--muted); line-height: 1.5; margin: 0;
+}
+.rf-list {
+  list-style: none; padding: 0; margin: 0;
+  display: flex; flex-direction: column; gap: 12px;
+  flex: 1; min-height: 0; overflow-y: auto;
+}
+/* Search input above the picker list. Inherits the dark-elev input
+   styling but with a slightly tighter radius to match the rows. */
+.rf-search input {
+  width: 100%;
+  background: var(--bg-elev); border: 1px solid var(--hairline);
+  border-radius: 10px; padding: 8px 12px; font-size: 13px;
+  color: var(--text);
+}
+.rf-search input::placeholder { color: var(--faint); }
+/* Per-category grouping inside the candidate list. */
+.rf-group { display: flex; flex-direction: column; gap: 4px; }
+.rf-group-head {
+  display: flex; align-items: center; gap: 7px;
+  margin: 0; padding: 0 2px;
+  font-size: 10px; font-weight: 700; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--muted);
+}
+.rf-group-emoji { font-size: 12px; }
+.rf-group-count {
+  margin-left: auto; font-variant-numeric: tabular-nums;
+  color: var(--faint); font-weight: 600;
+}
+.rf-group-list {
   list-style: none; padding: 0; margin: 0;
   display: flex; flex-direction: column; gap: 6px;
-  max-height: 260px; overflow-y: auto;
 }
-.rf-pick-row {
-  width: 100%; display: flex; flex-direction: column; gap: 2px;
-  padding: 9px 11px; border-radius: 10px;
-  background: var(--card-hi); border: 1px solid var(--hairline);
+.rf-opt {
+  width: 100%; display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; border-radius: 12px;
+  background: var(--card-hi); border: 1px solid transparent;
   color: var(--text); text-align: left; cursor: pointer;
-  transition: border-color .15s ease, transform .12s ease;
+  transition: border-color .15s ease, transform .12s ease,
+              background-color .15s ease;
 }
-.rf-pick-row:hover {
+.rf-opt:hover {
   border-color: var(--accent); transform: translateY(-1px);
+  background: var(--card);
 }
-.rf-pick-row:disabled { opacity: .6; cursor: not-allowed; }
-.rf-pick-name { font-size: 13px; font-weight: 600; }
-.rf-pick-meta {
-  font-size: 11.5px; color: var(--muted);
-  font-variant-numeric: tabular-nums;
-}
+.rf-opt:disabled { opacity: .6; cursor: not-allowed; }
+.rf-opt .txn-icon.sm { width: 28px; height: 28px; font-size: 14px; }
+/* The .txn-name + .txn-sub spans need to stack — they're inline by
+   default, which is why date+description were running on one line. */
+.rf-opt .txn-main { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.rf-opt .txn-name { font-size: 13px; display: block; }
+.rf-opt .txn-sub { font-size: 11px; display: block; }
+.rf-opt .txn-amt { font-size: 14px; }
 
 /* Linked-refund summary card (shown when transaction.refundId is set). */
 .rf-linked {
@@ -1416,16 +1494,19 @@ button.mini { padding: 5px 11px; font-size: 12px; }
   font-size: 10px; font-weight: 700; letter-spacing: 0.08em;
   text-transform: uppercase; color: var(--muted); margin-bottom: 7px;
 }
+/* Compact tiles — left-aligned emoji + name on a single row so the
+   list reads down the sidebar instead of taking 3-4 grid rows. */
 .cat-pick-grid {
-  display: grid; gap: 8px;
-  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  display: grid; gap: 5px;
+  grid-template-columns: 1fr 1fr;
 }
 .cat-pick-tile {
-  display: flex; flex-direction: column; align-items: center; gap: 5px;
-  padding: 11px 6px 9px; border-radius: 12px;
+  display: flex; flex-direction: row; align-items: center; gap: 7px;
+  padding: 7px 9px; border-radius: 9px;
   background: var(--card-hi); border: 1px solid transparent;
-  border-top: 3px solid var(--cat-color, var(--hairline-2));
+  border-left: 3px solid var(--cat-color, var(--hairline-2));
   color: var(--text); cursor: pointer; user-select: none;
+  text-align: left;
   transition: border-color .14s, transform .14s, background-color .14s;
 }
 .cat-pick-tile:hover {
@@ -1436,15 +1517,15 @@ button.mini { padding: 5px 11px; font-size: 12px; }
   border-color: var(--indigo); background: var(--indigo-soft);
 }
 .cat-pick-emoji {
-  width: 32px; height: 32px; border-radius: 50%;
+  width: 22px; height: 22px; flex: none; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
   background: color-mix(in srgb, var(--cat-color) 18%, transparent);
-  font-size: 17px; line-height: 1;
+  font-size: 13px; line-height: 1;
 }
 .cat-pick-name {
-  font-size: 11.5px; font-weight: 600; text-align: center;
+  font-size: 12.5px; font-weight: 600;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  max-width: 100%;
+  min-width: 0;
 }
 
 /* --- Loans view ------------------------------------------------------- */
@@ -1720,3 +1801,106 @@ button.mini { padding: 5px 11px; font-size: 12px; }
 @keyframes fade { from { opacity: 0; } }
 @keyframes pop { from { opacity: 0; transform: scale(.95); } }
 @keyframes fade-up { from { opacity: 0; transform: translateY(12px); } }
+@keyframes slide-in-left {
+  from { opacity: 0; transform: translateX(-12px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes slide-in-right-soft {
+  from { opacity: 0; transform: translateX(14px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+/* Tab content fade-up — keyed wrapper in App.tsx so each tab switch
+   remounts this node and the animation re-runs. The wrapper itself
+   eases in; its first-generation children then *stagger* for the
+   polished Linear/Vercel-style reveal. */
+.app-tab-view {
+  animation: fade-up .32s cubic-bezier(.2,.8,.2,1) both;
+}
+/* Stagger the cards/sections that live directly inside each view's
+   root container. We use universal nth-child up to the 10th — enough
+   for any current view; later children just inherit the last delay. */
+.app-tab-view > * > *,
+.app-tab-view .set-grid > *,
+.app-tab-view .piggy-grid > *,
+.app-tab-view .assets-grid > *,
+.app-tab-view .recurring-sections > *,
+.app-tab-view .ov-stack > * {
+  animation: stagger-in .48s cubic-bezier(.2,.8,.2,1) both;
+}
+.app-tab-view > * > *:nth-child(1),
+.app-tab-view .set-grid > *:nth-child(1),
+.app-tab-view .piggy-grid > *:nth-child(1),
+.app-tab-view .assets-grid > *:nth-child(1),
+.app-tab-view .recurring-sections > *:nth-child(1),
+.app-tab-view .ov-stack > *:nth-child(1) { animation-delay: 0ms; }
+.app-tab-view > * > *:nth-child(2),
+.app-tab-view .set-grid > *:nth-child(2),
+.app-tab-view .piggy-grid > *:nth-child(2),
+.app-tab-view .assets-grid > *:nth-child(2),
+.app-tab-view .recurring-sections > *:nth-child(2),
+.app-tab-view .ov-stack > *:nth-child(2) { animation-delay: 50ms; }
+.app-tab-view > * > *:nth-child(3),
+.app-tab-view .set-grid > *:nth-child(3),
+.app-tab-view .piggy-grid > *:nth-child(3),
+.app-tab-view .assets-grid > *:nth-child(3),
+.app-tab-view .recurring-sections > *:nth-child(3),
+.app-tab-view .ov-stack > *:nth-child(3) { animation-delay: 95ms; }
+.app-tab-view > * > *:nth-child(4),
+.app-tab-view .set-grid > *:nth-child(4),
+.app-tab-view .piggy-grid > *:nth-child(4),
+.app-tab-view .assets-grid > *:nth-child(4),
+.app-tab-view .recurring-sections > *:nth-child(4),
+.app-tab-view .ov-stack > *:nth-child(4) { animation-delay: 135ms; }
+.app-tab-view > * > *:nth-child(5),
+.app-tab-view .set-grid > *:nth-child(5),
+.app-tab-view .piggy-grid > *:nth-child(5),
+.app-tab-view .assets-grid > *:nth-child(5),
+.app-tab-view .recurring-sections > *:nth-child(5),
+.app-tab-view .ov-stack > *:nth-child(5) { animation-delay: 170ms; }
+.app-tab-view > * > *:nth-child(n+6),
+.app-tab-view .set-grid > *:nth-child(n+6),
+.app-tab-view .piggy-grid > *:nth-child(n+6),
+.app-tab-view .assets-grid > *:nth-child(n+6),
+.app-tab-view .recurring-sections > *:nth-child(n+6),
+.app-tab-view .ov-stack > *:nth-child(n+6) { animation-delay: 200ms; }
+
+/* Sidebar view swap (Activity transaction sidebar: category ↔ refund
+   picker). Each branch carries its own key so React remounts on flip;
+   the picker arrives with a small overshoot, category eases back. */
+.sb-view-anim {
+  animation: sb-swap-in .34s cubic-bezier(.2,.8,.2,1) both;
+}
+.rf-picker {
+  animation: sb-swap-spring .42s cubic-bezier(.34, 1.4, .56, 1) both;
+  transform-origin: top right;
+}
+@keyframes stagger-in {
+  from { opacity: 0; transform: translateY(14px) scale(.985); }
+  to   { opacity: 1; transform: translateY(0)    scale(1); }
+}
+@keyframes sb-swap-in {
+  from { opacity: 0; transform: translateX(-14px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes sb-swap-spring {
+  0%   { opacity: 0; transform: translateX(22px) scale(.96); }
+  60%  { opacity: 1; }
+  100% { opacity: 1; transform: translateX(0)    scale(1); }
+}
+
+/* Respect users who prefer reduced motion — collapse the animations
+   to a near-instant cross-fade and skip the stagger delays. */
+@media (prefers-reduced-motion: reduce) {
+  .app-tab-view,
+  .app-tab-view > * > *,
+  .app-tab-view .set-grid > *, .app-tab-view .piggy-grid > *,
+  .app-tab-view .assets-grid > *, .app-tab-view .recurring-sections > *,
+  .app-tab-view .ov-stack > *,
+  .sb-view-anim, .rf-picker {
+    animation-duration: .08s;
+    animation-timing-function: linear;
+    animation-delay: 0ms;
+  }
+  .app-nav .nav-pill { transition-duration: .08s; }
+}

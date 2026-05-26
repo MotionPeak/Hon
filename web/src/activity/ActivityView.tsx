@@ -275,15 +275,24 @@ export function ActivityView() {
             setMoving(null);
             await refresh();
           }}
-          onLinkRefund={async (refundId) => {
+          onLinkRefund={async (otherId) => {
+            // The API always takes the EXPENSE id in the URL and the
+            // REFUND id in the body. When the open transaction is an
+            // expense (amount < 0) we target it; when it's a refund
+            // (amount > 0), the "other side" is the expense we link to.
+            const isRefund = moving.amount > 0;
+            const expenseId = isRefund ? otherId : moving.id;
+            const refundId  = isRefund ? moving.id : otherId;
             await api(
-              `/transactions/${encodeURIComponent(moving.id)}/link`,
+              `/transactions/${encodeURIComponent(expenseId)}/link`,
               'PUT',
               { refundId },
             );
             await refresh();
           }}
           onUnlinkRefund={async () => {
+            // Only ever called from the expense side (where transaction.refundId
+            // is set) — so the URL is always the expense.
             await api(
               `/transactions/${encodeURIComponent(moving.id)}/link`,
               'DELETE',
@@ -461,6 +470,7 @@ function CategoryPickerSidebar(
   const [picked, setPicked] = useState<string>(current);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [view, setView] = useState<'category' | 'refund-picker'>('category');
 
   // Group by catGroup; render in income → essential → fixed → variable order.
   const groupOrder: Category['catGroup'][] = ['income', 'essential', 'fixed', 'variable'];
@@ -514,59 +524,74 @@ function CategoryPickerSidebar(
           </div>
         </div>
 
-        <div className="txn-sidebar-section">
-          <div className="label">Category</div>
-          {groupOrder.map((g) => grouped[g].length === 0 ? null : (
-            <div key={g} className="cat-pick-section">
-              <div className="cat-pick-head">{g}</div>
-              <div className="cat-pick-grid">
-                {grouped[g].map((c) => {
-                  const selected = c.name === picked;
-                  return (
-                    <button
-                      key={c.name}
-                      type="button"
-                      className={`cat-pick-tile${selected ? ' on' : ''}`}
-                      aria-pressed={selected}
-                      style={{ '--cat-color': c.color } as React.CSSProperties}
-                      onClick={() => setPicked(c.name)}
-                      disabled={busy}
-                    >
-                      <span className="cat-pick-emoji">{c.emoji}</span>
-                      <span className="cat-pick-name">{c.name}</span>
-                    </button>
-                  );
-                })}
-              </div>
+        {view === 'refund-picker' ? (
+          <RefundPicker
+            key="refund-picker"
+            transaction={transaction}
+            allTransactions={allTransactions}
+            categories={categories}
+            onBack={() => setView('category')}
+            onPick={async (refundId) => {
+              await onLinkRefund(refundId);
+              setView('category');
+            }}
+          />
+        ) : (
+          <div key="category-view" className="sb-view-anim">
+            <div className="txn-sidebar-section">
+              <div className="label">Category</div>
+              {groupOrder.map((g) => grouped[g].length === 0 ? null : (
+                <div key={g} className="cat-pick-section">
+                  <div className="cat-pick-head">{g}</div>
+                  <div className="cat-pick-grid">
+                    {grouped[g].map((c) => {
+                      const selected = c.name === picked;
+                      return (
+                        <button
+                          key={c.name}
+                          type="button"
+                          className={`cat-pick-tile${selected ? ' on' : ''}`}
+                          aria-pressed={selected}
+                          style={{ '--cat-color': c.color } as React.CSSProperties}
+                          onClick={() => setPicked(c.name)}
+                          disabled={busy}
+                        >
+                          <span className="cat-pick-emoji">{c.emoji}</span>
+                          <span className="cat-pick-name">{c.name}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
 
-        <RefundSection
-          transaction={transaction}
-          allTransactions={allTransactions}
-          onLinkRefund={onLinkRefund}
-          onUnlinkRefund={onUnlinkRefund}
-        />
+            <RefundSection
+              transaction={transaction}
+              allTransactions={allTransactions}
+              onOpenPicker={() => setView('refund-picker')}
+              onUnlinkRefund={onUnlinkRefund}
+            />
 
+            <div className="txn-sidebar-section">
+              <div className="label">Splitwise</div>
+              <button type="button" className="txn-sidebar-action" disabled>
+                + Split on Splitwise
+              </button>
+              <p className="txn-sidebar-hint">Coming soon.</p>
+            </div>
 
-        <div className="txn-sidebar-section">
-          <div className="label">Splitwise</div>
-          <button type="button" className="txn-sidebar-action" disabled>
-            + Split on Splitwise
-          </button>
-          <p className="txn-sidebar-hint">Coming soon.</p>
-        </div>
-
-        {error && <div className="modal-err">{error}</div>}
-        <button
-          type="button"
-          className="primary txn-sidebar-save"
-          onClick={() => void save()}
-          disabled={busy || picked === current}
-        >
-          Save
-        </button>
+            {error && <div className="modal-err">{error}</div>}
+            <button
+              type="button"
+              className="primary txn-sidebar-save"
+              onClick={() => void save()}
+              disabled={busy || picked === current}
+            >
+              Save
+            </button>
+          </div>
+        )}
       </aside>
     </ModalPortal>
   );
@@ -575,31 +600,21 @@ function CategoryPickerSidebar(
 interface RefundSectionProps {
   transaction: Transaction;
   allTransactions: Transaction[];
-  onLinkRefund: (refundId: string) => void | Promise<void>;
+  onOpenPicker: () => void;
   onUnlinkRefund: () => void | Promise<void>;
 }
 
 function RefundSection({
-  transaction, allTransactions, onLinkRefund, onUnlinkRefund,
+  transaction, allTransactions, onOpenPicker, onUnlinkRefund,
 }: RefundSectionProps) {
-  const [picking, setPicking] = useState(false);
   const [busy, setBusy] = useState(false);
-
-  const linked = transaction.refundId
+  const isRefund = transaction.amount > 0;
+  // Only an expense carries a refundId; refunds don't show the linked-state
+  // card here (it would need /transaction-links to enumerate every expense
+  // linked to this refund — deferred).
+  const linked = !isRefund && transaction.refundId
     ? allTransactions.find((t) => t.id === transaction.refundId) ?? null
     : null;
-
-  // Candidate refunds: positive-amount transactions in the same currency,
-  // not the expense itself, not already used as a refund FOR this expense.
-  // Sorted by date desc so the most recent candidates surface first.
-  const candidates = useMemo(() => {
-    return allTransactions
-      .filter((t) =>
-        t.id !== transaction.id
-        && t.amount > 0
-        && t.currency === transaction.currency)
-      .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
-  }, [allTransactions, transaction.id, transaction.currency]);
 
   if (linked) {
     return (
@@ -608,7 +623,7 @@ function RefundSection({
         <div className="rf-linked">
           <div className="rf-linked-name">{linked.description}</div>
           <div className="rf-linked-sub">
-            {money(linked.amount, linked.currency)} · {linked.date}
+            +{money(linked.amount, linked.currency)} · {linked.date}
           </div>
           <button
             type="button"
@@ -629,44 +644,156 @@ function RefundSection({
   return (
     <div className="txn-sidebar-section">
       <div className="label">Reimbursement</div>
-      {!picking ? (
-        <button
-          type="button"
-          className="txn-sidebar-action"
-          onClick={() => setPicking(true)}
-        >
-          + Link a refund or reimbursement
-        </button>
+      <button
+        type="button"
+        className="txn-sidebar-action"
+        onClick={onOpenPicker}
+      >
+        {isRefund
+          ? '+ Link to an expense it pays back'
+          : '+ Link a refund or reimbursement'}
+      </button>
+    </div>
+  );
+}
+
+interface RefundPickerProps {
+  transaction: Transaction;
+  allTransactions: Transaction[];
+  categories: Category[];
+  onBack: () => void;
+  onPick: (refundId: string) => void | Promise<void>;
+}
+
+function RefundPicker({
+  transaction, allTransactions, categories, onBack, onPick,
+}: RefundPickerProps) {
+  const [busy, setBusy] = useState(false);
+  const [query, setQuery] = useState('');
+  // When the open transaction is a refund (amount > 0) the picker shows
+  // EXPENSES it could pay back (amount < 0). When it's an expense the
+  // picker shows refund candidates (amount > 0). Same currency, never
+  // the transaction itself.
+  const isRefund = transaction.amount > 0;
+  const baseCandidates = useMemo(() => {
+    return allTransactions
+      .filter((t) =>
+        t.id !== transaction.id
+        && t.currency === transaction.currency
+        && (isRefund ? t.amount < 0 : t.amount > 0))
+      .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+  }, [allTransactions, transaction.id, transaction.currency, isRefund]);
+
+  // Search narrows the list. Match on description, category, date, or amount —
+  // same shape as the main Activity search.
+  const candidates = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return baseCandidates;
+    const num = parseFloat(q.replace(/[^0-9.\-]/g, ''));
+    const numValid = Number.isFinite(num) && num !== 0;
+    return baseCandidates.filter((t) => {
+      if ((t.description || '').toLowerCase().includes(q)) return true;
+      if ((t.category || '').toLowerCase().includes(q)) return true;
+      if (t.date && t.date.includes(q)) return true;
+      if (numValid && Math.abs(Math.abs(t.amount) - Math.abs(num)) < 0.5) return true;
+      return false;
+    });
+  }, [baseCandidates, query]);
+
+  const categoryByName = new Map<string, Category>();
+  for (const c of categories) categoryByName.set(c.name, c);
+
+  // Group candidates by category, preserving the date-desc order within each
+  // group. The order of groups follows the first-appearance of each category
+  // in the sorted candidate list — so the freshest category bubbles up.
+  const grouped = useMemo(() => {
+    const map = new Map<string, Transaction[]>();
+    for (const c of candidates) {
+      const key = c.category ?? '—';
+      const list = map.get(key) ?? [];
+      list.push(c);
+      map.set(key, list);
+    }
+    return Array.from(map.entries());
+  }, [candidates]);
+
+  const hint = isRefund
+    ? 'Pick the expense this refund pays back — Hon deducts whatever ' +
+      'portion you allocate from that expense. One refund can split ' +
+      'across several expenses.'
+    : 'Pick the transaction that paid you back — Hon deducts whatever ' +
+      'portion you allocate from this expense. One transfer can split ' +
+      'across several expenses.';
+  const emptyHint = isRefund
+    ? 'No negative-amount expenses available to link this refund to.'
+    : 'No positive-amount transactions to link as a refund yet.';
+
+  return (
+    <div className="rf-picker">
+      <button type="button" className="rf-back" onClick={onBack}>‹ Back</button>
+      <p className="rf-hint">{hint}</p>
+      <div className="rf-search">
+        <input
+          type="search"
+          placeholder="Search by name, category, date, or amount…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          aria-label="Search candidates"
+        />
+      </div>
+      {baseCandidates.length === 0 ? (
+        <p className="txn-sidebar-hint">{emptyHint}</p>
       ) : candidates.length === 0 ? (
-        <p className="txn-sidebar-hint">
-          No positive-amount transactions to link as a refund yet.
-        </p>
+        <p className="txn-sidebar-hint">No matches.</p>
       ) : (
-        <ul className="rf-pick">
-          {candidates.map((c) => (
-            <li key={c.id}>
-              <button
-                type="button"
-                className="rf-pick-row"
-                disabled={busy}
-                onClick={async () => {
-                  setBusy(true);
-                  try {
-                    await onLinkRefund(c.id);
-                    setPicking(false);
-                  } finally {
-                    setBusy(false);
-                  }
-                }}
-              >
-                <span className="rf-pick-name">{c.description}</span>
-                <span className="rf-pick-meta">
-                  {money(c.amount, c.currency)} · {c.date}
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
+        <div className="rf-list">
+          {grouped.map(([catName, rows]) => {
+            const cat = categoryByName.get(catName);
+            return (
+              <section key={catName} className="rf-group">
+                <h4 className="rf-group-head">
+                  <span className="rf-group-emoji">{cat?.emoji ?? '▫️'}</span>
+                  <span>{catName}</span>
+                  <span className="rf-group-count">{rows.length}</span>
+                </h4>
+                <ul className="rf-group-list">
+                  {rows.map((c) => {
+                    const color = cat?.color ?? (isRefund ? '#E96B6B' : '#5CC773');
+                    const emoji = cat?.emoji ?? (isRefund ? '🧾' : '💰');
+                    const pos = c.amount > 0;
+                    return (
+                      <li key={c.id}>
+                        <button
+                          type="button"
+                          className="rf-opt"
+                          aria-label={c.description}
+                          disabled={busy}
+                          onClick={async () => {
+                            setBusy(true);
+                            try { await onPick(c.id); }
+                            finally { setBusy(false); }
+                          }}
+                        >
+                          <span
+                            className="txn-icon sm"
+                            style={{ background: color + '26', color }}
+                          >{emoji}</span>
+                          <span className="txn-main">
+                            <span className="txn-name">{c.description}</span>
+                            <span className="txn-sub">{fmtDate(c.date)}</span>
+                          </span>
+                          <span className={`txn-amt${pos ? ' pos' : ''}`}>
+                            {pos ? '+' : ''}{money(c.amount, c.currency)}
+                          </span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </section>
+            );
+          })}
+        </div>
       )}
     </div>
   );

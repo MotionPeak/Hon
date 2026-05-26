@@ -318,16 +318,20 @@ describe('ActivityView — refund linking', () => {
     await user.click(await screen.findByText('Shufersal'));
     const sidebar = screen.getByRole('dialog', { name: /move to category/i });
     await user.click(within(sidebar).getByRole('button', { name: /link a refund/i }));
+    // Picker takes over: category tiles + Splitwise section are gone, Back is here.
+    expect(within(sidebar).queryByRole('button', { name: /groceries/i }))
+      .not.toBeInTheDocument();
+    expect(within(sidebar).getByRole('button', { name: /^‹ back$/i }))
+      .toBeInTheDocument();
     // Refund candidate is now visible.
     expect(await within(sidebar).findByRole('button', {
       name: /shufersal — returned items/i,
     })).toBeInTheDocument();
-    // Negative-amount transactions are NOT candidates.
-    expect(within(sidebar).queryByRole('button', { name: /aroma coffee/i }))
-      .not.toBeInTheDocument();
     // The expense itself is not a candidate either.
     const candidates = within(sidebar).getAllByRole('button', { name: /shufersal/i });
-    expect(candidates.some((c) => c.textContent === 'Shufersal')).toBe(false);
+    expect(candidates.some((c) =>
+      c.getAttribute('aria-label') === 'Shufersal' || c.textContent === 'Shufersal',
+    )).toBe(false);
   });
 
   it('picking a candidate PUTs /transactions/:id/link and refetches', async () => {
@@ -369,6 +373,52 @@ describe('ActivityView — refund linking', () => {
     expect(within(sidebar).getByText(/shufersal — returned items/i)).toBeInTheDocument();
     // Unlink button is present.
     expect(within(sidebar).getByRole('button', { name: /unlink/i })).toBeInTheDocument();
+  });
+
+  it('opening a positive-amount transaction (a refund) flips the picker to expense candidates', async () => {
+    const user = userEvent.setup();
+    installFetchMock(FULL_REFUND);
+    renderView();
+    // Click the refund row itself (t-r1, "Shufersal — returned items", +250)
+    await user.click(await screen.findByText('Shufersal — returned items'));
+    const sidebar = screen.getByRole('dialog', { name: /move to category/i });
+    // The link CTA reads differently for a refund.
+    const link = within(sidebar).getByRole('button', {
+      name: /link to an expense/i,
+    });
+    await user.click(link);
+    // The picker now lists NEGATIVE-amount transactions; positives are out.
+    expect(await within(sidebar).findByRole('button', { name: /shufersal$/i }))
+      .toBeInTheDocument();
+    expect(within(sidebar).getByRole('button', { name: /aroma coffee/i }))
+      .toBeInTheDocument();
+    // The refund itself is not a candidate.
+    expect(within(sidebar).queryByRole('button', {
+      name: /shufersal — returned items/i,
+    })).not.toBeInTheDocument();
+    // Salary (+12000) is positive, so not a candidate either.
+    expect(within(sidebar).queryByRole('button', { name: /pay cheque/i }))
+      .not.toBeInTheDocument();
+  });
+
+  it('picking an expense from a refund flips the API: PUT targets the EXPENSE id with refundId=open refund', async () => {
+    const user = userEvent.setup();
+    const put = vi.fn((_body: unknown) => ({ ok: true, amount: 250 }));
+    installFetchMock({
+      ...FULL_REFUND,
+      // The refund t-r1 was opened; the user picks expense t-2 (Shufersal).
+      // The API call goes to the EXPENSE's id with the REFUND id in the body.
+      'PUT /api/transactions/t-2/link': put,
+    });
+    renderView();
+    await user.click(await screen.findByText('Shufersal — returned items'));
+    const sidebar = screen.getByRole('dialog', { name: /move to category/i });
+    await user.click(within(sidebar).getByRole('button', {
+      name: /link to an expense/i,
+    }));
+    await user.click(await within(sidebar).findByRole('button', { name: /shufersal$/i }));
+    await waitFor(() => expect(put).toHaveBeenCalled());
+    expect(put.mock.calls[0]?.[0]).toEqual({ refundId: 't-r1' });
   });
 
   it('Unlink DELETEs /transactions/:id/link and refetches', async () => {
