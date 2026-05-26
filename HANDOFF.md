@@ -1,19 +1,18 @@
 # HANDOFF.md — React migration for Hon
 
-> **Read this first.** This is the bridge between two Claude Code
-> sessions. The previous session shipped 12 fixes, a code-review pass,
-> Vitest tests, and this handoff. It then set up the Vite/React/TS
-> scaffold under `web/` and committed everything. The next session
-> (yours) picks up here.
+> **Read this first.** This is the rolling bridge between Claude Code
+> sessions. Each session ships some number of tabs from the legacy
+> `sidecar/public/app.html` into React under `web/`, then updates this
+> file so the next session starts informed.
 
 ## TL;DR
 
 - The engine (`sidecar/`) is **untouched**. Same DB, same APIs, same
   scrapers, same token-on-URL-fragment auth. Don't change it without
   a strong reason.
-- The new React UI lives in `web/`. It's a working Vite + React + TS
-  scaffold (a single page that calls `/health` and renders the
-  result). `npm run dev` works.
+- The new React UI lives in `web/`. **Settings tab is migrated**
+  (commits `de9857f`, `5196f1c` — 68 tests). The Vite + React + TS
+  scaffold + TDD harness work; `npm run dev` and `npm test` both work.
 - The **old vanilla SPA** at `sidecar/public/app.html` is still the
   one users hit when they run `npm run web`. It stays live until each
   tab has been migrated to React.
@@ -21,6 +20,7 @@
   under `web/src/`. **Do not attempt a big-bang rewrite** — the file
   is ~10k lines, hebrew/RTL, financial UI, charts, modals. Migrate
   incrementally so you can verify visually after each tab.
+- **Next up: Accounts.** See § "Migration strategy" for order.
 
 ## Why React (and why a restart)
 
@@ -130,13 +130,15 @@ by side). Don't move on until the new tab matches.
 
 **Recommended order** (easiest → hardest):
 
-1. **Health + chrome** (shell, header, tab nav) — get the skeleton
-   right. The current TABS array in app.html is:
-   `overview, activity, accounts, vouchers, loans, recurring,
-   subscriptions, piggy, insights, settings`.
-2. **Settings** — simple forms, low risk, lots of state pattern
-   you'll reuse elsewhere. Categories tile grid is here.
-3. **Accounts** — list + balances. Mostly read-only display.
+1. ✅ **Health + chrome** — shell + tab nav landed alongside Settings.
+2. ✅ **Settings** — migrated. AI engine and Splitwise are stubs
+   (TODO when their /llm and /splitwise flows are ported).
+3. **Accounts** ← **YOU ARE HERE.** Big tab. Realistically multiple
+   sessions: read-only display + per-account edits first (balance,
+   inception, excluded), then sync flow + remove + brokerage holdings
+   expansion, then the Add-connection modal (15+ banks + SnapTrade +
+   5 pension flows + manual asset modal). The previous session
+   queued task #14-#33 with a phased plan; check the task list.
 4. **Vouchers** — list + add modal + sync flows (Shufersal / BuyMe /
    Hi-Tech Zone). The sync flows are complex; lift the modal logic
    from app.html line ~5300+ verbatim, port to React.
@@ -162,34 +164,57 @@ The old SPA uses one `window.state = { ... }` object mutated directly,
 followed by manual `render()` calls. See its shape at
 `app.html` line ~2000 (`const state = {...}`).
 
-For React, the simplest path:
+For React, the path established during the Settings migration:
 
-- **One React Context** for global state (connections, accounts,
-  transactions, summary, settings — the truly shared stuff).
-- **`useState` + `useEffect`** inside individual tab components for
-  view-local state (filters, search, expanded rows).
-- **No Redux/Zustand/etc** unless you find a real need. Hon's state
-  is read-heavy and doesn't have the deep update-derivation chains
-  that Redux solves.
+- **A scoped Context per concern**, not one global store. Settings
+  uses `SettingsProvider` (`web/src/settings/useSettings.tsx`) that
+  owns just the localStorage-backed settings. When Accounts lands it
+  should get its own provider for accounts/connections/companies/
+  assets/loans/brokerage, not be folded into a mega-store.
+- **`useState` + `useEffect`** inside individual cards/components for
+  view-local state (modal open/closed, draft input, expanded rows).
+- **No Redux/Zustand/etc.** Hon's state is read-heavy and the
+  per-tab Context pattern handles the shared bits without
+  unnecessary indirection.
 
-A minimal pattern in `web/src/state/`:
+## Patterns the Settings migration established (REUSE THESE)
 
-```tsx
-// web/src/state/Store.tsx
-const StoreContext = createContext<Store | null>(null);
-export function StoreProvider({ children }) { ... }
-export function useStore() { ... }
-```
-
-Start with whatever's needed for the first tab, expand as you go.
+- **Each modal renders through a React portal** to `document.body`.
+  See `CategoriesPanel.tsx`'s `ModalPortal`. Reason: `.set-card`'s
+  fade-up animation leaves an identity transform behind, which creates
+  a containing block and breaks `position: fixed` on `.overlay`. The
+  old `app.html`'s `openModal()` appends the overlay to `<body>`
+  directly for the same reason. Don't render a modal inline inside a
+  card — it WILL look wrong.
+- **Network mock in tests via `installFetchMock`** keyed by
+  `"METHOD /path"`. See `CategoriesPanel.test.tsx` for the pattern.
+  Unmocked requests throw loud, so tests fail fast instead of hanging.
+- **The CSS port is incremental.** Every selector currently in
+  `web/src/styles.css` was lifted verbatim from `app.html`'s style
+  block. When porting a tab, grep `app.html` for the selectors you
+  use and lift them. Don't invent new selectors — match.
+- **`align-items: stretch` on grids** so cards in the same row match
+  heights. Don't use `start` even though the old app does — the
+  React port chose stretch and Settings looks better for it.
+- **Full-width cards via `.set-card--wide`** for stubs / single-item
+  cards that would otherwise sit lonely in a half-column.
+- **Tests verify behavior, not feature parity.** When a tab lands,
+  spot-check the rendered output against the legacy app for visual /
+  feature gaps the tests can't catch. The Settings migration
+  initially shipped without the emoji+colour pickers because nothing
+  failed when they were missing.
 
 ## Migration gotchas to know before you start
 
-These bit the previous session. Pin them in your test cases:
+These bit prior sessions. Pin them in your test cases:
 
-1. **RTL Hebrew text.** Mix of Hebrew (merchants, account names)
-   and English (numbers, brand names). The old CSS uses `direction:
-   rtl` at the root + `dir="ltr"` on numeric spans. Replicate.
+1. **RTL Hebrew text.** The shell is `<html dir="ltr" lang="en">`
+   as of the Settings migration (the React UI itself is English). When
+   the Accounts / Activity tabs land they will start rendering Hebrew
+   merchant names — those need per-element `dir="rtl"` or
+   `unicode-bidi: plaintext` wraps, not a global flip. The previous
+   session's `app.html` defaulted the whole document to RTL with
+   English bits flipping back to LTR. We're doing the opposite.
 
 2. **Date math is timezone-sensitive.** israeli-bank-scrapers reports
    UTC midnight, which lands "yesterday" in Israel. The fix is in
@@ -220,39 +245,61 @@ These bit the previous session. Pin them in your test cases:
 
 - `cd sidecar && npm test` runs the 41 backend tests (Vitest).
   Don't break these.
+- `cd web && npm test` runs the React component tests (68 after
+  Settings). Keep them green.
 - `cd web && npm run typecheck` runs `tsc -b --noEmit` on the React
-  code. The scaffold passes; keep it green.
-- Add React component tests as you go. Set up `@testing-library/react`
-  + `vitest` in `web/` when you start the first non-trivial component.
-  (Out of scope for the scaffold.)
+  code. Keep it clean.
 - Use `/test-driven-development` for each component: write the test
-  for "Settings tab renders the categories from /categories" first,
-  then implement.
+  first, watch it fail, write minimal code to pass. The Settings
+  migration followed this strictly — the bug fixes that came up
+  (api.ts lazy token, .set-card transform-containing-block) were all
+  caught by tests written before the code.
 - Use `/systematic-debugging` when a migration produces a visual
-  regression — don't just tweak CSS until it looks right.
+  regression — don't just tweak CSS until it looks right. Read source
+  first.
 - Use `/verification-before-completion` before marking each tab
   done: side-by-side comparison with the old app must match.
 
-## What the previous session shipped (so you don't redo it)
+## What previous sessions shipped (so you don't redo it)
 
-Most recent 12 commits on `main` (oldest → newest):
+### Session 1 — scaffold (commits ending `4d5d594`)
 
-1. `e50bd0a` — Pension login URL regex fix (Menora)
-2. `af99435` — HTZ cancel actually cancels
-3. `7376a6c` — BuyMe cancel same fix
-4. `fd455e2` — Voucher card XSS guard
-5. `b6a40a6` — HTZ prefers real Chrome
-6. `ed971c1` — HTZ balance wait + retry + wrong-code error
-7. `4f598c3` — HTZ modal frontend race + timer leak
-8. `30e5109` — Brokerage chart + tile respect account filter
-9. `ae06b9a` — CLAUDE.md (architecture map)
-10. `5630570` — Vitest harness + 41 tests
-11. `<this commit>` — Vite/React/TS scaffold + HANDOFF.md
+Set up `web/` with Vite + React + TS, the Bearer-token API client,
+and a placeholder /health page. No tests yet.
 
-Plus a code review (15 findings; top 9 fixed). The remaining 6
-findings are minor UX/correctness issues in voucher scrapers and
-chart logic — not blockers, but worth folding into the migration
-naturally.
+### Session 2 — Settings tab (commits `de9857f`, `5196f1c`)
+
+Migrated the entire Settings tab from `app.html` to React with TDD.
+
+- **6 cards landed:** Billing cycle (custom dropdown w/ chevron),
+  Spending projection (switch + segmented control), Credit-card bills
+  (switch + 6 brand chips + custom-matcher input), Categories panel
+  (full CRUD against `/categories` + emoji/colour pickers), AI engine
+  stub, Splitwise stub.
+- **App tab nav landed** with Health + Settings tabs.
+- **Test harness:** Vitest + jsdom + React Testing Library +
+  `installFetchMock` helper. 68 passing tests. Typecheck clean.
+- **CSS lifted** from `app.html` for every selector the React code
+  uses. Theme tokens, set-card grid, switch, segmented control,
+  dropdown, chips, custom-matchers, cat-tiles, modal+overlay,
+  fade-up animation.
+- **Bug fixes driven by TDD:** `api.ts` was reading the token at
+  module load (broke jsdom tests with `window.location.hash` set
+  post-import); fixed to read lazily. `'PUT'` was missing from the
+  `method` union. Modal positioning broke inside `.set-card` due to
+  identity-transform containing block; fixed via React Portal.
+- **Deferred (call-outs in code comments):**
+  - AI engine card body — needs `/llm/*` flow
+  - Splitwise card body — needs `/splitwise/*` OAuth + state
+  - Pre-delete txn count in remove-category dialog — needs
+    transactions context (lands with Activity tab)
+
+### Older history (engine fixes from the pre-React session)
+
+12 commits to `main` before the scaffold: pension regex fix, voucher
+cancel fixes, XSS guard, brokerage chart respecting account filter,
+CLAUDE.md, Vitest harness with 41 backend tests. Plus a code review
+with 6 minor findings still unfixed — none blocking the migration.
 
 ## When the migration is done
 
