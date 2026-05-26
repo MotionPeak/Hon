@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+import { render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { VouchersView } from './VouchersView';
 import { installFetchMock } from '../test/mockFetch';
 
@@ -70,5 +71,109 @@ describe('VouchersView — read-only', () => {
     installFetchMock({ 'GET /api/vouchers': () => fixture() });
     render(<VouchersView />);
     expect(await screen.findByText('Birthday gift')).toBeInTheDocument();
+  });
+});
+
+describe('VouchersView — CRUD', () => {
+  it('Add voucher button is in the header', async () => {
+    installFetchMock({ 'GET /api/vouchers': () => fixture() });
+    render(<VouchersView />);
+    expect(await screen.findByRole('button', { name: /add voucher/i })).toBeInTheDocument();
+  });
+
+  it('clicking Add opens a form with the manual-add fields', async () => {
+    const user = userEvent.setup();
+    installFetchMock({ 'GET /api/vouchers': () => fixture() });
+    render(<VouchersView />);
+    await user.click(await screen.findByRole('button', { name: /add voucher/i }));
+    const dialog = screen.getByRole('dialog', { name: /add a voucher/i });
+    expect(within(dialog).getByLabelText(/provider/i)).toBeInTheDocument();
+    expect(within(dialog).getByLabelText('Name')).toBeInTheDocument();
+    expect(within(dialog).getByLabelText(/balance/i)).toBeInTheDocument();
+    expect(within(dialog).getByLabelText(/currency/i)).toBeInTheDocument();
+  });
+
+  it('save POSTs /vouchers and refetches', async () => {
+    const user = userEvent.setup();
+    const post = vi.fn((_body: unknown) => ({ voucher: { id: 'new', name: 'X' } }));
+    const get = vi.fn(() => fixture());
+    installFetchMock({
+      'GET /api/vouchers': get,
+      'POST /api/vouchers': post,
+    });
+    render(<VouchersView />);
+    await user.click(await screen.findByRole('button', { name: /add voucher/i }));
+    const dialog = screen.getByRole('dialog', { name: /add a voucher/i });
+    await user.type(within(dialog).getByLabelText(/provider/i), 'Shufersal');
+    await user.type(within(dialog).getByLabelText('Name'), 'Birthday gift');
+    await user.type(within(dialog).getByLabelText(/balance/i), '500');
+    await user.click(within(dialog).getByRole('button', { name: /^add$/i }));
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+    expect(post.mock.calls[0]?.[0]).toMatchObject({
+      provider: 'Shufersal', name: 'Birthday gift', balance: 500, currency: 'ILS',
+    });
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+  });
+
+  it('voucher card has Edit / Exclude / Delete buttons', async () => {
+    installFetchMock({ 'GET /api/vouchers': () => fixture() });
+    render(<VouchersView />);
+    const card = (await screen.findByText('Tav HaZahav')).closest('.voucher-card')!;
+    expect(within(card as HTMLElement).getByRole('button', { name: /^edit$/i })).toBeInTheDocument();
+    expect(within(card as HTMLElement).getByRole('button', { name: /^exclude$/i })).toBeInTheDocument();
+    expect(within(card as HTMLElement).getByRole('button', { name: /^delete$/i })).toBeInTheDocument();
+  });
+
+  it('Edit opens a pre-filled modal and saves via PATCH', async () => {
+    const user = userEvent.setup();
+    const patch = vi.fn((_body: unknown) => ({ voucher: { id: 'v-1' } }));
+    const get = vi.fn(() => fixture());
+    installFetchMock({
+      'GET /api/vouchers': get,
+      'PATCH /api/vouchers/v-1': patch,
+    });
+    render(<VouchersView />);
+    const card = (await screen.findByText('Tav HaZahav')).closest('.voucher-card')!;
+    await user.click(within(card as HTMLElement).getByRole('button', { name: /^edit$/i }));
+    const dialog = screen.getByRole('dialog', { name: /edit voucher/i });
+    const balanceInput = within(dialog).getByLabelText(/balance/i);
+    await user.clear(balanceInput);
+    await user.type(balanceInput, '300');
+    await user.click(within(dialog).getByRole('button', { name: /save/i }));
+    await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
+    expect(patch.mock.calls[0]?.[0]).toMatchObject({ balance: 300 });
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+  });
+
+  it('Exclude toggles the excluded flag via PATCH', async () => {
+    const user = userEvent.setup();
+    const patch = vi.fn((_body: unknown) => ({ voucher: { id: 'v-1' } }));
+    installFetchMock({
+      'GET /api/vouchers': () => fixture(),
+      'PATCH /api/vouchers/v-1': patch,
+    });
+    render(<VouchersView />);
+    const card = (await screen.findByText('Tav HaZahav')).closest('.voucher-card')!;
+    await user.click(within(card as HTMLElement).getByRole('button', { name: /^exclude$/i }));
+    await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
+    expect(patch.mock.calls[0]?.[0]).toEqual({ excluded: true });
+  });
+
+  it('Delete opens a confirmation; confirm DELETEs and refetches', async () => {
+    const user = userEvent.setup();
+    const del = vi.fn(() => ({ ok: true }));
+    const get = vi.fn(() => fixture());
+    installFetchMock({
+      'GET /api/vouchers': get,
+      'DELETE /api/vouchers/v-1': del,
+    });
+    render(<VouchersView />);
+    const card = (await screen.findByText('Tav HaZahav')).closest('.voucher-card')!;
+    await user.click(within(card as HTMLElement).getByRole('button', { name: /^delete$/i }));
+    await user.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: /confirm/i }),
+    );
+    await waitFor(() => expect(del).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
   });
 });

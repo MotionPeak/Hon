@@ -509,6 +509,15 @@ button.mini { padding: 5px 11px; font-size: 12px; }
 .voucher-badge.expired { background: rgba(244,104,90,0.16); color: var(--red); }
 .voucher-badge.soon { background: rgba(245,152,66,0.16); color: var(--amber); }
 .voucher-badge.later { background: rgba(79,207,138,0.14); color: var(--green); }
+.voucher-actions {
+  display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
+  margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--hairline);
+}
+.voucher-actions .spacer { flex: 1; }
+.vouchers-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 6px;
+}
 
 /* --- Add-connection picker -------------------------------------------- */
 .accounts-head {
