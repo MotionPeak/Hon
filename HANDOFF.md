@@ -1,27 +1,25 @@
 # HANDOFF.md — React migration for Hon
 
 > **Read this first.** This is the rolling bridge between Claude Code
-> sessions. Each session ships some number of tabs from the legacy
-> `sidecar/public/app.html` into React under `web/`, then updates this
-> file so the next session starts informed.
+> sessions. The tab-by-tab migration from the legacy
+> `sidecar/public/app.html` into React under `web/` is **structurally
+> complete**: all 10 tabs ship. What's left is finishing the deeper
+> CRUD/interactive flows in each tab — see § "What's left".
 
 ## TL;DR
 
 - The engine (`sidecar/`) is **untouched**. Same DB, same APIs, same
-  scrapers, same token-on-URL-fragment auth. Don't change it without
-  a strong reason.
-- The new React UI lives in `web/`. **Settings is fully migrated;
-  Accounts read-only display is migrated.** 79 tests, typecheck clean.
-  `npm run dev` and `npm test` both work.
-- The **old vanilla SPA** at `sidecar/public/app.html` is still the
-  one users hit when they run `npm run web`. It stays live until each
-  tab has been migrated to React.
-- Your job is to migrate `app.html` tab-by-tab into React components
-  under `web/src/`. **Do not attempt a big-bang rewrite** — the file
-  is ~10k lines, hebrew/RTL, financial UI, charts, modals. Migrate
-  incrementally so you can verify visually after each tab.
-- **Next up: Accounts edits + actions.** Task #18 (inline
-  edit-balance) is the smallest next step. See § "Migration strategy".
+  scrapers, same token-on-URL-fragment auth.
+- All 10 tabs are migrated end-to-end. **224 tests pass, typecheck
+  clean.** `npm run dev` and `npm test` both work from `web/`.
+- The legacy SPA at `sidecar/public/app.html` is still served by
+  `npm run web` and remains the production UI. The new React app
+  ships from `cd web && npm run dev` — append `#token=<uuid>` from
+  the engine's startup URL.
+- **What's left** is a set of deferred-on-purpose CRUD + sync flows
+  inside individual tabs (see the list at the end of this file).
+  None of them block "the React UI is feature-shaped"; each is its
+  own follow-up.
 
 ## Why React (and why a restart)
 
@@ -30,81 +28,50 @@ The user wanted to:
 1. **Modularize** — `app.html` is one 10k-line file with everything
    inline. Hard to navigate, hard to review, hard to test.
 2. **Move to a real framework** — JSX components + reactive state
-   beats `render()`-by-hand + `window.state` mutations. Easier for
-   future contributors, easier for Claude to reason about.
+   beats `render()`-by-hand + `window.state` mutations.
 3. **Use Superpowers methodically** — TDD per component, systematic
    debugging when something breaks visually.
 
-The user restarted Claude Code specifically so Superpowers loads. If
-`/systematic-debugging`, `/test-driven-development`, and
+If `/systematic-debugging`, `/test-driven-development`, and
 `/verification-before-completion` aren't in your skill list, ask the
 user — the restart didn't take.
 
-## Current state on disk (start-of-your-session)
+## Current state on disk
 
 ```
 Hon/
-├── CLAUDE.md                    ← Architecture map for the codebase.
+├── CLAUDE.md                    ← Architecture map.
 ├── HANDOFF.md                   ← This file.
-├── README.md                    ← User-facing docs (unchanged).
+├── README.md
 ├── sidecar/                     ← Engine. Untouched plan.
-│   ├── public/
-│   │   └── app.html             ← Old SPA. Still in production.
-│   ├── src/                     ← TypeScript engine. 95+ HTTP routes,
-│   │   ├── server.ts            ←   scrapers, repo, vault, logger.
-│   │   ├── pension.ts           ← Pension scrapers (Harel/Meitav/...)
-│   │   ├── scrapers.ts          ← Bank scrapers + normalizers
-│   │   ├── ...
-│   ├── tests/                   ← 41 Vitest tests (backend pure-fn).
-│   │   ├── pension.test.ts
-│   │   ├── scrapers.test.ts
-│   │   └── loans.test.ts
-│   └── package.json             ← npm test runs the suite.
-├── web/                         ← NEW — React UI.
-│   ├── package.json             ← vite, react, react-dom, typescript
-│   ├── vite.config.ts           ← Proxies /api → engine on :4000
-│   ├── tsconfig.json
-│   ├── index.html               ← <!doctype><html lang="he" dir="rtl">
-│   └── src/
-│       ├── main.tsx             ← createRoot mount (StrictMode on)
-│       ├── App.tsx              ← Tab nav + token gate + active panel
-│       ├── App.test.tsx         ← 4 tests; default tab + switch + no-token
-│       ├── api.ts               ← Bearer-token fetch wrapper. Token reads
-│       │                          LAZILY — do not refactor to a module-load
-│       │                          constant; tests rely on hash changes.
-│       ├── api.test.ts          ← 3 tests; the laziness is load-bearing.
-│       ├── styles.css           ← Theme tokens + every selector the React
-│       │                          code currently uses. Lifted from app.html
-│       │                          as each tab lands. Do NOT delete rules
-│       │                          you think are unused — future tabs reuse.
-│       ├── format.ts            ← money() — currency formatting helper.
-│       ├── settings/            ← Settings tab (✅ complete). The reference
-│       │   │                       for "what a migrated tab looks like."
-│       │   ├── SettingsView.tsx    Composes 6 cards inside SettingsProvider.
-│       │   ├── BillingCycleCard.tsx
-│       │   ├── SpendingProjectionCard.tsx
-│       │   ├── CreditCardBillsCard.tsx
-│       │   ├── CategoriesPanel.tsx ← Server CRUD + modal patterns.
-│       │   ├── AiEngineCard.tsx    ← Stub ("coming soon").
-│       │   ├── SplitwiseCard.tsx   ← Stub ("coming soon").
-│       │   ├── store.ts            ← localStorage settings shape.
-│       │   ├── useSettings.tsx     ← Provider + hook; cards share state.
-│       │   └── *.test.tsx          ← 60+ tests, RED-then-GREEN.
-│       ├── accounts/            ← Accounts tab (🟡 read-only only).
-│       │   ├── types.ts            Connection/Account/Company/ManualAsset/
-│       │   │                       Loan. Mirrors sidecar/src/repo.ts.
-│       │   ├── AccountsView.tsx    Fetches 5 endpoints in parallel; groups
-│       │   │                       into 6 sections; inline Connection/Asset/
-│       │   │                       LoanCard sub-components. Extract when
-│       │   │                       files get bigger.
-│       │   └── AccountsView.test.tsx (10 tests)
-│       └── test/
-│           ├── setup.ts         ← Registers jest-dom matchers; clears
-│           │                      localStorage + URL hash after each test.
-│           ├── mockFetch.ts     ← installFetchMock({'METHOD /path': fn})
-│           │                      Use for any tab test that touches the net.
-│           └── harness.test.ts  ← Smoke test for the harness itself.
-└── docs/, electron/, ...        ← (untouched)
+│   ├── public/app.html          ← Old SPA. Still in production.
+│   ├── src/                     ← TypeScript engine. 95+ HTTP routes.
+│   └── tests/                   ← 41 Vitest tests (pure-fn).
+└── web/                         ← React UI.
+    ├── package.json             ← vite, react, react-dom, typescript
+    ├── vite.config.ts           ← Proxies /api → engine on :4000
+    └── src/
+        ├── main.tsx             ← createRoot mount (StrictMode on)
+        ├── App.tsx              ← Sidebar nav + brand header + token gate
+        ├── App.test.tsx
+        ├── api.ts               ← Bearer-token fetch (LAZY token read)
+        ├── styles.css           ← Lifted incrementally from app.html
+        ├── format.ts            ← money() helper
+        ├── cycle.ts             ← cycleKey + currentCycleKey + prevCycleKey
+        ├── overview/            ← Overview (balance + projection + essentials + net worth)
+        ├── accounts/            ← Accounts (full — see § "What's left" for deferred CRUD)
+        ├── activity/            ← Transactions list + search + category sidebar
+        ├── recurring/           ← Fixed bills (read-only)
+        ├── subscriptions/       ← 4 buckets (Active/Flagged/Cancelled/Probably)
+        ├── piggy/               ← Piggy banks (read-only)
+        ├── vouchers/            ← Gift cards CRUD (sync flows deferred)
+        ├── loans/               ← Loans read + manual loan add via picker
+        ├── insights/            ← Spending sub-tab (12-mo bars + monthly breakdown)
+        ├── settings/            ← Full settings (6 cards, all live)
+        └── test/
+            ├── setup.ts
+            ├── mockFetch.ts     ← installFetchMock({'METHOD /api/path': fn})
+            └── harness.test.ts
 ```
 
 ## How to start working
@@ -113,35 +80,33 @@ Hon/
 # Terminal 1: the engine (unchanged)
 cd sidecar && npm run web
 # Note the URL it prints: http://127.0.0.1:4000/#token=<UUID>
-# Keep that token.
 
-# Terminal 2: the React dev server
-cd web && npm install   # only first time
+# Terminal 2: React dev server (the user usually has this running)
+cd web && npm install   # first time only
 npm run dev
-# Opens http://localhost:5173/ (no token → "no access token" screen)
-
-# Open this URL in the browser, appending the token from terminal 1:
-# http://localhost:5173/#token=<UUID>
-# Should show "✓ Connected to hon-sidecar 0.3.0" + the JSON /health body.
+# http://localhost:5173/#token=<UUID-from-terminal-1>
 ```
 
-If `/health` returns 401, the token in the URL is wrong — restart
-the engine and use its new URL. If the dev server can't reach the
-engine at all, set `VITE_HON_ENGINE_URL=http://127.0.0.1:<actual port>`
-and restart `npm run dev`.
+If `/health` returns 401 the token in the URL is wrong — restart the
+engine and use its new URL. If the dev server can't reach the engine,
+set `VITE_HON_ENGINE_URL=http://127.0.0.1:<port>` and restart
+`npm run dev`.
 
-## The API surface (do not re-derive — already mapped)
+**Note for Claude:** the user typically has their own `vite` dev
+server running on `:5173` outside of the `preview_*` MCP tools.
+**Do not call `preview_start`** — it will collide with the user's
+server. Rely on the test suite + the user's own browser tab (HMR is
+on) for visual verification.
 
-The engine has **95+ HTTP routes** in `sidecar/src/server.ts`. All
-behind `Authorization: Bearer <token>`. The new React UI uses the
-same routes via the `api()` helper in `web/src/api.ts`.
+## The API surface
 
-Key endpoint families:
+The engine has **95+ HTTP routes** in `sidecar/src/server.ts`, all
+Bearer-token gated. The React UI uses `api()` in `web/src/api.ts`.
 
 | Family | Path prefix | Purpose |
 |---|---|---|
-| Health / catalog | `/health`, `/companies`, `/vault/status` | Bootstrap, list providers |
-| Connections | `/connections`, `/connections/:id`, `/connections/:id/sync` | List, add, trigger scrape |
+| Health / catalog | `/health`, `/companies`, `/vault/status` | Bootstrap |
+| Connections | `/connections`, `/connections/:id`, `/connections/:id/scrape` | List, add, scrape (pass `interactive: true` for OTP-walled banks) |
 | Sync status | `/runs/:id` | Poll a running scrape |
 | OTP | `/runs/:id/otp` | Submit 2FA code |
 | Accounts | `/accounts`, `/accounts/:id` | List, edit, exclude |
@@ -153,261 +118,183 @@ Key endpoint families:
 | Insights / Piggy / Subscriptions | `/insights`, `/piggy`, `/subscriptions` | Tabs |
 | SnapTrade | `/snaptrade/*` | Brokerage OAuth flow |
 | Splitwise | `/splitwise/*` | Refund linking |
+| Frequencies / splits | `/merchant-frequencies`, `/category-splits`, `/subscriptions/cancelled` | Recurring detection |
+| Logos | `/logo/:companyId` | Provider favicons (exempt from auth) |
 
 The OLD `app.html` is the source of truth for what every endpoint
-returns. Grep `app.html` for the route to see how it's consumed.
+returns. Grep it for the route to see how it's consumed.
 
-## Migration strategy (USE THIS ORDER)
+## What's shipped (tab-by-tab)
 
-Migrate tab-by-tab. Each tab is its own PR-sized commit. After each:
-visually diff old vs new (open both Vite + the old `npm run web` side
-by side). Don't move on until the new tab matches.
+All 10 tabs render and read from the engine. Per-tab feature notes:
 
-**Recommended order** (easiest → hardest):
+1. **Overview** — Balance card (income − committed − spent, red when
+   over), projected bank balance (bankNow + income − committed −
+   spent − piggy, with itemised detail rows), essentials budget
+   card (per-category bars, over-budget red), net worth headline
+   with per-currency chips.
+2. **Accounts (Assets)** — Full display, edits (balance, inception,
+   net-worth toggle), sync + OTP flow, remove connection,
+   set-credentials, brokerage holdings expansion, asset/loan edit,
+   add-connection picker with bank/card credential form, manual
+   asset, manual loan, provider favicons. SnapTrade portal flow
+   (#30) and pension flows 5 variants (#31) are still deferred.
+3. **Activity** — Transactions list with month picker, category
+   groups, search, category move via right-side sidebar (with
+   stubbed Reimbursement + Splitwise sections). Refund linking
+   (#10) and batch select + bulk move (#11) deferred.
+4. **Fixed bills (Recurring)** — Read-only merchant detection +
+   status pills + monthly equivalents. CRUD (#16) deferred.
+5. **Subscriptions** — 4 buckets (Active / Flagged / Cancelled /
+   Probably cancelled).
+6. **Piggy banks** — Read-only list with conic-gradient progress
+   rings + headroom strip. CRUD (#14) deferred.
+7. **Loans** — Loans read + manual-loan picker (Spitzer math
+   runs in the engine).
+8. **Vouchers** — List + add/edit/delete/toggle-excluded. Sync
+   flows for Shufersal / BuyMe / HTZone (#4) deferred.
+9. **Insights** — Spending sub-tab (12-month bars + per-month
+   category breakdown). Brokerage sub-tab (#19) + AI rollup (#20)
+   deferred.
+10. **Settings** — All 6 cards (Billing cycle, Spending projection,
+    Credit-card bills, Categories CRUD, AI engine stub, Splitwise
+    stub).
 
-1. ✅ **Health + chrome** — shell + tab nav landed alongside Settings.
-2. ✅ **Settings** — migrated. AI engine and Splitwise are stubs
-   (TODO when their /llm and /splitwise flows are ported).
-3. 🟡 **Accounts** ← **YOU ARE HERE.** Read-only display is shipped
-   (commit `f75483a`). Remaining sub-tasks queued as #18-#32 in the
-   task list:
-   - **Per-account edits** (next, smallest): inline edit-balance
-     (#18), inline edit-inception (#19), net-worth toggle (#20).
-     PATCH endpoints already exist on the engine.
-   - **Connection actions**: sync flow + polling (#24), remove
-     confirmation (#25), set-credentials modal (#26), OTP submission
-     (#27).
-   - **Brokerage holdings expansion** (#23) — per-account positions
-     list, requires loading /brokerage.
-   - **Asset/loan edit modals** — not in task list yet; add when
-     you get there.
-   - **Add-connection modal**: the picker (#28), then bank/card
-     credential form (#29), SnapTrade portal (#30), pension flows
-     (#31, 5 variants), manual asset modal (#32). This is the
-     heaviest chunk — probably its own session.
-4. **Vouchers** — list + add modal + sync flows (Shufersal / BuyMe /
-   Hi-Tech Zone). The sync flows are complex; lift the modal logic
-   from app.html line ~5300+ verbatim, port to React.
-5. **Loans** — Spitzer math runs server-side via `/loans` (which
-   computes via `loans.ts`). UI just displays.
-6. **Activity** — transaction list, refund linking, category move
-   sheet. Has the most rows; pagination/virtual scroll is worth it.
-7. **Recurring (Fixed bills)** — uses the budget projection. Read
-   `CLAUDE.md` § "The budget projection" first.
-8. **Subscriptions** — similar shape to Recurring.
-9. **Piggy** — set-asides UI.
-10. **Insights** — charts! Get the charts library decided before
-    starting. The old code hand-rolled SVG; for React, consider
-    `recharts` (declarative, great DX) or stay with hand-rolled SVG
-    if you want zero new deps. The user trusts your call.
-11. **Overview** — the headline card + projected bank balance. This
-    is where the budget math comes together. **Do this LAST** —
-    you'll have learned the patterns from every other tab.
+## What's left
+
+These are deferred on purpose — each is its own session-sized chunk.
+Pick whichever is most valuable to the user next.
+
+- **#4 Voucher sync flows** — Shufersal, BuyMe, HTZone modal +
+  polling. Heaviest UI in the legacy app's voucher tab.
+- **#10 Activity refund linking** — pair an outflow with a later
+  refund so the budget nets correctly.
+- **#11 Activity batch select + bulk move** — multi-select + move
+  N transactions to a different category.
+- **#14 Piggy banks CRUD** — new piggy form, edit, pause, delete.
+- **#16 Recurring CRUD** — remove-from-fixed-bills, split editor,
+  frequency picker.
+- **#19 Insights Brokerage sub-tab** — value-over-time chart,
+  holdings, per-account filter.
+- **#20 Insights AI rollup** — narrative summary via `/llm/*`.
+- **#30 SnapTrade portal flow** — OAuth + portal handoff for IBKR
+  via SnapTrade.
+- **#31 Pension flows (5 variants)** — Migdal/Harel/Clal automated,
+  Meitav/Menora visible-window sign-in, Altshuler manual.
+
+Smaller polish items not in the task list:
+- AI engine card body in Settings — needs `/llm/*` flow.
+- Splitwise card body in Settings + the Activity sidebar's Splitwise
+  section — needs `/splitwise/*` OAuth + state.
+- `expectedFixedThisCycle` for the Overview projection — the round-1
+  + round-2 Overview uses the budget endpoint's `committed`
+  (fixedSpent + essentialSpent so far this cycle). The legacy app
+  uses a client-side recurring-merchant rollup that includes bills
+  PROJECTED to bill this cycle. Lift `detectMerchants` out of
+  `recurring/RecurringView.tsx` into a shared module and feed
+  `?expectedFixed=` into `/budget` to match the legacy exactly.
 
 ## State management
 
-The old SPA uses one `window.state = { ... }` object mutated directly,
-followed by manual `render()` calls. See its shape at
-`app.html` line ~2000 (`const state = {...}`).
+The old SPA uses one `window.state` object mutated directly, followed
+by manual `render()` calls. See `app.html` line ~2000.
 
-For React, the path established during the Settings migration:
+For React the path established during Settings:
 
-- **A scoped Context per concern**, not one global store. Settings
-  uses `SettingsProvider` (`web/src/settings/useSettings.tsx`) that
-  owns just the localStorage-backed settings. When Accounts lands it
-  should get its own provider for accounts/connections/companies/
-  assets/loans/brokerage, not be folded into a mega-store.
-- **`useState` + `useEffect`** inside individual cards/components for
-  view-local state (modal open/closed, draft input, expanded rows).
+- **A scoped Context per concern**, not one global store. Only
+  Settings has a provider so far (`web/src/settings/useSettings.tsx`).
+  Other tabs use `useState` + `useEffect` locally; the parallel
+  fetches inside each `View.tsx` are the de facto data layer.
 - **No Redux/Zustand/etc.** Hon's state is read-heavy and the
-  per-tab Context pattern handles the shared bits without
-  unnecessary indirection.
+  per-tab Context pattern handles the shared bits.
 
-## Patterns the Settings migration established (REUSE THESE)
+## Patterns the migrations established (REUSE THESE)
 
 - **Each modal renders through a React portal** to `document.body`.
   See `CategoriesPanel.tsx`'s `ModalPortal`. Reason: `.set-card`'s
-  fade-up animation leaves an identity transform behind, which creates
-  a containing block and breaks `position: fixed` on `.overlay`. The
-  old `app.html`'s `openModal()` appends the overlay to `<body>`
-  directly for the same reason. Don't render a modal inline inside a
-  card — it WILL look wrong.
+  fade-up animation leaves an identity transform behind, which
+  creates a containing block and breaks `position: fixed` on
+  `.overlay`. Don't render a modal inline inside a card.
+- **Sidebars (Activity's category picker) slide in from the right**
+  and aren't portalled — they're inline in their tab.
 - **Network mock in tests via `installFetchMock`** keyed by
-  `"METHOD /path"`. See `CategoriesPanel.test.tsx` for the pattern.
-  Unmocked requests throw loud, so tests fail fast instead of hanging.
-- **The CSS port is incremental.** Every selector currently in
-  `web/src/styles.css` was lifted verbatim from `app.html`'s style
-  block. When porting a tab, grep `app.html` for the selectors you
-  use and lift them. Don't invent new selectors — match.
-- **`align-items: stretch` on grids** so cards in the same row match
-  heights. Don't use `start` even though the old app does — the
-  React port chose stretch and Settings looks better for it.
-- **Full-width cards via `.set-card--wide`** for stubs / single-item
-  cards that would otherwise sit lonely in a half-column.
+  `"METHOD /api/path"`. Unmocked requests throw loud so tests fail
+  fast instead of hanging.
+- **CSS port is incremental.** Every selector in `web/src/styles.css`
+  was lifted verbatim from `app.html`'s style block. When porting a
+  new piece, grep `app.html` for the selectors you use and lift them
+  — don't invent new ones.
+- **CSS subgrid** for aligning columns across rows (e.g.
+  `.conn-accounts`'s `grid-template-columns: minmax(0, 1fr) auto auto`).
+- **CSS column-count** for masonry-like layouts (`.act-cols`).
 - **Tests verify behavior, not feature parity.** When a tab lands,
   spot-check the rendered output against the legacy app for visual /
-  feature gaps the tests can't catch. The Settings migration
-  initially shipped without the emoji+colour pickers because nothing
-  failed when they were missing.
+  feature gaps the tests can't catch.
 
-## Migration gotchas to know before you start
+## Migration gotchas to know
 
-These bit prior sessions. Pin them in your test cases:
+These bit prior sessions:
 
-1. **RTL Hebrew text.** The shell is `<html dir="ltr" lang="en">`
-   as of the Settings migration (the React UI itself is English). When
-   the Accounts / Activity tabs land they will start rendering Hebrew
-   merchant names — those need per-element `dir="rtl"` or
-   `unicode-bidi: plaintext` wraps, not a global flip. The previous
-   session's `app.html` defaulted the whole document to RTL with
-   English bits flipping back to LTR. We're doing the opposite.
+1. **RTL Hebrew text.** The shell is `<html dir="ltr" lang="en">`.
+   Per-element `dir="rtl"` or `unicode-bidi: plaintext` for Hebrew
+   merchant names, not a global flip.
 
 2. **Date math is timezone-sensitive.** israeli-bank-scrapers reports
-   UTC midnight, which lands "yesterday" in Israel. The fix is in
-   `sidecar/src/scrapers.ts` (`israelDate()`). Display dates in
-   Asia/Jerusalem. There's a test for this.
+   UTC midnight, which lands "yesterday" in Israel. Display dates
+   in Asia/Jerusalem.
 
-3. **Currency formatting.** ILS uses `₪` prefix-after-number in some
-   formats, prefix-before-number in others. Hebrew locale formats
-   numbers with commas. The old code has its own `money()` helper.
-   Lift it to a `web/src/format.ts` and test it.
+3. **Currency formatting.** ILS uses `₪` prefix-before-number; the
+   `money()` helper in `web/src/format.ts` handles it. Lift more
+   behaviour when needed (agorot, brokerage holdings).
 
-4. **Custom cycle start day.** Budgets are per-cycle, NOT per
-   calendar month. See `CLAUDE.md` § "The cycle model" and
-   `app.html`'s `cycleKey(dateStr)` helper.
+4. **Custom cycle start day.** Budgets are per-cycle, NOT calendar
+   month. `cycleKey(date, monthStartDay)` and `currentCycleKey()`
+   live in `web/src/cycle.ts`. `prevCycleKey()` too.
 
 5. **Pre-cycle inception clip.** Brokerage charts must respect
-   `account.inceptionDate`. There's already a test pattern in the
-   pure-function side; replicate in the React chart components.
+   `account.inceptionDate`.
 
-6. **Token in URL fragment, not query.** `#token=<uuid>`, not
-   `?token=`. Fragment never hits the server log.
+6. **Token in URL fragment, not query.** `#token=<uuid>`. Fragment
+   never hits the server log. `api.ts` reads lazily so jsdom tests
+   that set `window.location.hash` post-import still work.
 
-7. **No auto-deploy.** This repo isn't deploy-connected to anything
-   today, but per the user's preferences: **commit locally, ask
-   before push**.
+7. **No auto-deploy.** Commit locally; **ask before pushing**.
+   Netlify-style deploy hooks aren't in play in this repo, but the
+   habit avoids surprise releases.
+
+8. **Banks that need OTP.** Pass `{ interactive: true, monthsBack }`
+   to `POST /connections/:id/scrape` for any company in
+   `HON_OTP_WATCHER_COMPANIES` (Beinleumi, Hapoalim, Otsar Hahayal,
+   Massad, Pagi). Without it, the engine's headless path hangs at
+   LOGGING_IN with no OTP modal triggered.
 
 ## Tests + Superpowers usage
 
 - `cd sidecar && npm test` runs the 41 backend tests (Vitest).
-  Don't break these.
-- `cd web && npm test` runs the React component tests (68 after
-  Settings). Keep them green.
-- `cd web && npm run typecheck` runs `tsc -b --noEmit` on the React
-  code. Keep it clean.
-- Use `/test-driven-development` for each component: write the test
-  first, watch it fail, write minimal code to pass. The Settings
-  migration followed this strictly — the bug fixes that came up
-  (api.ts lazy token, .set-card transform-containing-block) were all
-  caught by tests written before the code.
+- `cd web && npm test` runs the React component tests (**224** as
+  of the Overview round-2 commit).
+- `cd web && npm run typecheck` runs `tsc -b --noEmit`.
+- Use `/test-driven-development` for each new component: write the
+  test first, watch it fail, write minimal code to pass.
 - Use `/systematic-debugging` when a migration produces a visual
-  regression — don't just tweak CSS until it looks right. Read source
-  first.
-- Use `/verification-before-completion` before marking each tab
-  done: side-by-side comparison with the old app must match.
+  regression — read source first, don't tweak CSS blindly.
+- Use `/verification-before-completion` before marking each deferred
+  item done.
 
-## What previous sessions shipped (so you don't redo it)
-
-### Session 1 — scaffold (commits ending `4d5d594`)
-
-Set up `web/` with Vite + React + TS, the Bearer-token API client,
-and a placeholder /health page. No tests yet.
-
-### Session 2 — Settings tab (commits `de9857f`, `5196f1c`)
-
-Migrated the entire Settings tab from `app.html` to React with TDD.
-
-- **6 cards landed:** Billing cycle (custom dropdown w/ chevron),
-  Spending projection (switch + segmented control), Credit-card bills
-  (switch + 6 brand chips + custom-matcher input), Categories panel
-  (full CRUD against `/categories` + emoji/colour pickers), AI engine
-  stub, Splitwise stub.
-- **App tab nav landed** with Health + Settings tabs.
-- **Test harness:** Vitest + jsdom + React Testing Library +
-  `installFetchMock` helper. 68 passing tests. Typecheck clean.
-- **CSS lifted** from `app.html` for every selector the React code
-  uses. Theme tokens, set-card grid, switch, segmented control,
-  dropdown, chips, custom-matchers, cat-tiles, modal+overlay,
-  fade-up animation.
-- **Bug fixes driven by TDD:** `api.ts` was reading the token at
-  module load (broke jsdom tests with `window.location.hash` set
-  post-import); fixed to read lazily. `'PUT'` was missing from the
-  `method` union. Modal positioning broke inside `.set-card` due to
-  identity-transform containing block; fixed via React Portal.
-- **Deferred (call-outs in code comments):**
-  - AI engine card body — needs `/llm/*` flow
-  - Splitwise card body — needs `/splitwise/*` OAuth + state
-  - Pre-delete txn count in remove-category dialog — needs
-    transactions context (lands with Activity tab)
-
-### Session 3 — Accounts read-only (commit `f75483a`)
-
-Shipped the foundation for the Accounts tab. **Display only — no
-interactions yet** (the next session resumes at task #18).
-
-- **`web/src/accounts/types.ts`** — Connection / Account / Company /
-  ManualAsset / Loan / AssetSectionKey. Mirrors `sidecar/src/repo.ts`
-  + `sidecar/src/scrapers.ts` + `sidecar/src/loans.ts` shapes. Pure
-  type declarations; no tests needed.
-- **`web/src/accounts/AccountsView.tsx`** — fetches `/companies`,
-  `/connections`, `/accounts`, `/assets`, `/loans` in parallel on
-  mount. Groups connections by company type into Banks / Credit
-  cards / Investments / Pension; assets and loans get their own
-  sections. Renders inline `ConnectionCard` (display name + company
-  meta + accounts list + total), `AssetCard` (name + kind + value),
-  `LoanCard` (name + principal). Sorting is alphabetical within
-  each section. Empty sections don't render; empty everything shows
-  a "Nothing here yet" hint.
-- **`web/src/format.ts`** — `money()` helper. Israeli locale, symbol
-  prefix, 0 decimals for whole amounts, 2 otherwise, "−" for
-  negatives. The old app's inline `money()` was richer (e.g. agorot
-  handling for brokerage holdings) — port more behaviour here when
-  the Insights / Activity tabs land and stress it.
-- **`web/src/App.tsx`** — Accounts tab added between Health and
-  Settings.
-- **CSS** — lifted from `app.html`: `.accounts-view`, `.assets-grid`,
-  `.assets-sub-head`, `.conn-card` + `.conn-account` + `.conn-total`,
-  `.asset-card`, `.loan-card`, `.amount` / `.amount.neg`.
-- **Tests:** 11 new (10 for AccountsView, 1 for the tab routing).
-  Total 79 passing, typecheck clean.
-- **Deferred (call-outs in code + task list):**
-  - All editing (#18 balance, #19 inception, #20 net-worth toggle)
-  - Sync flow + polling (#24)
-  - Remove / set-credentials / OTP (#25, #26, #27)
-  - Brokerage holdings expansion (#23)
-  - The Add-connection modal universe (#28-#32) — biggest single
-    chunk left in the migration
-  - Asset/loan EDIT modals — not yet in the task list; add when
-    starting per-asset edits
-
-### Older history (engine fixes from the pre-React session)
-
-12 commits to `main` before the scaffold: pension regex fix, voucher
-cancel fixes, XSS guard, brokerage chart respecting account filter,
-CLAUDE.md, Vitest harness with 41 backend tests. Plus a code review
-with 6 minor findings still unfixed — none blocking the migration.
-
-## When the migration is done
+## When the migration is fully done
 
 Last step: replace the engine's `/` route to serve the React build
-output instead of `app.html`. In `sidecar/src/server.ts`, change:
+output. In `sidecar/src/server.ts`:
 
 ```ts
 app.get('/', async (_req, reply) => reply.type('text/html; charset=utf-8').send(webAppHtml));
 ```
 
-…to read from `web/dist/index.html` and serve `web/dist/assets/*`
-statically. The build step becomes:
-
-```bash
-cd web && npm run build
-# dist/ is now the engine's UI
-```
-
-Until that switch, both UIs coexist. Users on `npm run web` get the
-old one; you and any tester get the new one via `cd web && npm run
-dev` + the token URL.
+…becomes a static serve of `web/dist/index.html` + `web/dist/assets/*`.
+Build with `cd web && npm run build`. Until that switch, both UIs
+coexist.
 
 ---
 
-**Good luck. Take it slow. Tab by tab.**
+**The hard part — the 10-tab migration — is done. The remaining
+deferred items are bite-sized; pick whichever the user values most.**

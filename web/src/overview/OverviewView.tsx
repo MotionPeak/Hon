@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { money } from '../format';
+import type { Account, Company } from '../accounts/types';
 
 interface CurrencyTotal { currency: string; total: number; accountCount: number }
 
@@ -23,22 +24,35 @@ interface BudgetVariable {
   piggyFunded: number;
 }
 
+interface BudgetLine {
+  category: string;
+  budget: number | null;
+  spent: number;
+}
+
 interface BudgetResponse {
   currency: string;
   variable: BudgetVariable;
+  essentials?: BudgetLine[];
 }
 
 export function OverviewView() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [budget, setBudget] = useState<BudgetResponse | null>(null);
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
 
   useEffect(() => {
     Promise.all([
       api<Summary>('/summary'),
       api<BudgetResponse>('/budget'),
-    ]).then(([s, b]) => {
+      api<{ companies: Company[] }>('/companies').catch(() => ({ companies: [] })),
+      api<{ accounts: Account[] }>('/accounts').catch(() => ({ accounts: [] })),
+    ]).then(([s, b, c, a]) => {
       setSummary(s);
       setBudget(b);
+      setCompanies(c.companies ?? []);
+      setAccounts(a.accounts ?? []);
     }).catch(() => {
       setSummary({ byCurrency: [], accountCount: 0, connectionCount: 0, netWorthILS: 0 });
       setBudget(null);
@@ -65,18 +79,39 @@ export function OverviewView() {
     );
   }
 
+  const essentials = (budget?.essentials ?? []).filter(
+    (l) => (l.budget ?? 0) > 0 || l.spent > 0,
+  );
+
   return (
     <div className="overview-view">
       <h1>Overview</h1>
       <div className="ov-stack">
-        {v && <BalanceCard variable={v} currency={budget!.currency} />}
+        {v && (
+          <BalanceCard
+            variable={v}
+            currency={budget!.currency}
+            companies={companies}
+            accounts={accounts}
+          />
+        )}
+        {essentials.length > 0 && (
+          <EssentialsCard essentials={essentials} currency={budget!.currency} />
+        )}
         <NetWorthCard summary={summary} />
       </div>
     </div>
   );
 }
 
-function BalanceCard({ variable, currency }: { variable: BudgetVariable; currency: string }) {
+function BalanceCard({
+  variable, currency, companies, accounts,
+}: {
+  variable: BudgetVariable;
+  currency: string;
+  companies: Company[];
+  accounts: Account[];
+}) {
   const { income, committed, spent } = variable;
   if (income <= 0 && committed <= 0 && spent <= 0) return null;
   const net = income - committed - spent;
@@ -104,6 +139,121 @@ function BalanceCard({ variable, currency }: { variable: BudgetVariable; currenc
           </>
         )}
       </div>
+      <BankProjection
+        variable={variable}
+        currency={currency}
+        companies={companies}
+        accounts={accounts}
+      />
+    </section>
+  );
+}
+
+function BankProjection({
+  variable, currency, companies, accounts,
+}: {
+  variable: BudgetVariable;
+  currency: string;
+  companies: Company[];
+  accounts: Account[];
+}) {
+  const bankCompanyIds = new Set(
+    companies.filter((c) => c.type === 'bank').map((c) => c.id),
+  );
+  const bankAccounts = accounts.filter(
+    (a) => !a.excluded && a.currency === 'ILS' && bankCompanyIds.has(a.companyId),
+  );
+  if (bankAccounts.length === 0) return null;
+
+  const bankNow = bankAccounts.reduce((s, a) => s + (a.balance ?? 0), 0);
+  const expectedIncome = variable.income;
+  const fixedEss = variable.committed; // fixedSpent + essentialSpent so far
+  const cycleVariable = variable.spent;
+  const cyclePiggy = Math.max(0, variable.piggyFunded ?? 0);
+  const change = expectedIncome - fixedEss - cycleVariable - cyclePiggy;
+  const endBalance = bankNow + change;
+  const up = change >= 0;
+  const sign = up ? '+' : '−';
+  const dcls = up ? 'good' : 'bad';
+
+  const Detail = ({ label, amount, tone }: {
+    label: string; amount: number; tone: 'good' | 'bad';
+  }) => {
+    const dSign = amount === 0 ? '' : tone === 'good' ? '+' : '−';
+    const toneClass = amount === 0 ? '' : tone;
+    return (
+      <div className="balance-detail">
+        <span>{label}</span>
+        <span className={`balance-detail-amt ${toneClass}`}>
+          {dSign}{money(Math.abs(amount), currency)}
+        </span>
+      </div>
+    );
+  };
+
+  return (
+    <div className="balance-sub" data-testid="bank-projection">
+      <div className="balance-sub-head">Projected bank balance at end of cycle</div>
+      <div className="balance-sub-row">
+        <div className="balance-sub-num">{money(endBalance, currency)}</div>
+        <div className={`balance-sub-delta ${dcls}`}>
+          {sign}{money(Math.abs(change), currency)}
+        </div>
+      </div>
+      <div className="balance-details">
+        <div className="balance-detail balance-detail-baseline">
+          <span>Bank balance now</span>
+          <span className={`balance-detail-amt ${bankNow >= 0 ? 'good' : 'bad'}`}>
+            {money(bankNow, currency)}
+          </span>
+        </div>
+        <Detail label="Income expected this cycle" amount={expectedIncome} tone="good" />
+        <Detail label="Fixed + essentials this cycle" amount={fixedEss} tone="bad" />
+        <Detail label="Variable spent so far" amount={cycleVariable} tone="bad" />
+        <Detail label="Set asides (piggies)" amount={cyclePiggy} tone="bad" />
+      </div>
+    </div>
+  );
+}
+
+function EssentialsCard({
+  essentials, currency,
+}: {
+  essentials: BudgetLine[];
+  currency: string;
+}) {
+  const sorted = essentials.slice().sort((a, b) => b.spent - a.spent);
+  return (
+    <section className="card essentials-card" data-testid="essentials-card">
+      <div className="ess-head">Essentials</div>
+      <ul className="ess-list">
+        {sorted.map((l) => {
+          const budget = l.budget ?? 0;
+          const over = budget > 0 && l.spent > budget;
+          const pct = budget > 0
+            ? Math.min(100, Math.round((l.spent / budget) * 100))
+            : 0;
+          return (
+            <li key={l.category} className={`ess-row${over ? ' over' : ''}`}>
+              <div className="ess-row-head">
+                <span className="ess-cat">{l.category}</span>
+                <span className="ess-nums">
+                  <b>{money(l.spent, currency)}</b>
+                  {budget > 0 && <span className="ess-budget"> / {money(budget, currency)}</span>}
+                </span>
+              </div>
+              {budget > 0 && (
+                <div className="ess-bar">
+                  <div
+                    className={`ess-bar-fill${over ? ' over' : ''}`}
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
     </section>
   );
 }
