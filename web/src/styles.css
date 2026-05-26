@@ -759,6 +759,19 @@ button.mini { padding: 5px 11px; font-size: 12px; }
   border-color: var(--accent); background: var(--card);
 }
 .add-picker-emoji { font-size: 18px; line-height: 1; }
+
+/* --- Logo (favicon-over-emoji) --------------------------------------- */
+.logo {
+  position: relative; flex: 0 0 32px; width: 32px; height: 32px;
+  border-radius: 9px; background: var(--card-hi);
+  display: inline-flex; align-items: center; justify-content: center;
+  overflow: hidden;
+}
+.logo-emoji { font-size: 17px; line-height: 1; }
+.logo img {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: contain; background: #fff;
+}
 .add-picker-name { flex: 1; min-width: 0; }
 .add-picker-sub {
   color: var(--muted); font-size: 11px; font-weight: 500; letter-spacing: 0;
