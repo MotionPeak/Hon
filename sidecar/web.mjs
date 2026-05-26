@@ -5,7 +5,7 @@
 // fresh token generated for this run.
 import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, openSync } from 'node:fs';
+import { existsSync, mkdirSync, openSync, readFileSync, writeFileSync, chmodSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -55,10 +55,42 @@ if (!process.env.PUPPETEER_EXECUTABLE_PATH) {
 }
 
 const port = process.env.HON_PORT || '4000';
-// Reuse a token from the environment when one is set — a server keeps the same
-// token across restarts so its URL stays stable; otherwise generate a fresh
-// one for this run.
-const token = process.env.HON_TOKEN || randomUUID();
+
+// Resolve the OS-default Hon data dir (overridable with HON_DATA_DIR) — same
+// dir the engine uses for the SQLite DB, the vault, and sidecar.log. The
+// persistent dev token lives here too so the URL stays the same across
+// restarts and stays bookmarkable.
+const honDataDir = process.env.HON_DATA_DIR ?? (
+  process.platform === 'darwin'
+    ? join(homedir(), 'Library', 'Application Support', 'Hon')
+    : process.platform === 'win32'
+      ? join(process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'), 'Hon')
+      : join(process.env.XDG_DATA_HOME || join(homedir(), '.local', 'share'), 'Hon')
+);
+
+/** Read the on-disk token (creating one on first run) so the user's bookmarked
+ *  http://localhost:5173/#token=<uuid> URL keeps working across restarts. The
+ *  token gates the engine's HTTP API — anything on the local machine can hit
+ *  127.0.0.1:4000, so without auth a random browser tab could read finances. */
+function loadOrCreateToken() {
+  const tokenPath = join(honDataDir, 'dev-token');
+  try {
+    const existing = readFileSync(tokenPath, 'utf8').trim();
+    // UUID v4 sanity check; regenerate if the file got mangled.
+    if (/^[0-9a-f-]{32,40}$/i.test(existing)) return existing;
+  } catch { /* no file yet */ }
+  const fresh = randomUUID();
+  try {
+    mkdirSync(honDataDir, { recursive: true });
+    writeFileSync(tokenPath, fresh, 'utf8');
+    // Best-effort tight perms — the token is a credential.
+    try { chmodSync(tokenPath, 0o600); } catch { /* Windows: ignore */ }
+  } catch { /* fall back to in-memory only — URL still works for this run */ }
+  return fresh;
+}
+
+// Token precedence: env override > on-disk persistent > fresh-and-saved.
+const token = process.env.HON_TOKEN || loadOrCreateToken();
 const url = `http://127.0.0.1:${port}/#token=${token}`;
 const isWindows = process.platform === 'win32';
 // Headless hosts (a NAS, a server) have no browser to open.
@@ -96,19 +128,13 @@ if (headless) {
 
 // Tee the engine's stderr to a rotating-per-launch log file so a crashed
 // scrape leaves an inspectable trail without the user having to keep the
-// launch terminal open. The file lives under the OS-default Hon data dir
-// (same as the SQLite DB and debug screenshots) so it's easy to find.
-const dataDirForLog = process.env.HON_DATA_DIR ?? (
-  process.platform === 'darwin'
-    ? join(homedir(), 'Library', 'Application Support', 'Hon')
-    : process.platform === 'win32'
-      ? join(process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'), 'Hon')
-      : join(process.env.XDG_DATA_HOME || join(homedir(), '.local', 'share'), 'Hon')
-);
+// launch terminal open. Uses the same honDataDir as the SQLite DB and the
+// dev token — the directory is already mkdir'd by loadOrCreateToken on
+// first run, but mkdirSync is idempotent so we re-call it for safety.
 let stderrTarget = 'inherit';
 try {
-  mkdirSync(dataDirForLog, { recursive: true });
-  const logPath = join(dataDirForLog, 'sidecar.log');
+  mkdirSync(honDataDir, { recursive: true });
+  const logPath = join(honDataDir, 'sidecar.log');
   stderrTarget = openSync(logPath, 'w');
   console.log(`Engine logs → ${logPath}`);
 } catch (err) {
