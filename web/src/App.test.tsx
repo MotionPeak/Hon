@@ -20,6 +20,10 @@ const EMPTY = {
   'GET /api/transactions': () => ({ transactions: [] }),
   'GET /api/categories': () => ({ categories: [] }),
   'GET /api/vouchers': () => ({ vouchers: [] }),
+  'GET /api/budget': () => ({
+    piggy: { month: '', banks: [], fundedTotal: 0, headroom: 0, projected: false },
+    currency: 'ILS',
+  }),
 };
 
 function withToken(): void {
@@ -57,6 +61,18 @@ describe('App — tab routing', () => {
     await user.click(screen.getByRole('tab', { name: /settings/i }));
     expect(await screen.findByRole('heading', { level: 1, name: /settings/i })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /settings/i })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('switches to the Piggy banks tab on click', async () => {
+    withToken();
+    installFetchMock(EMPTY);
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole('tab', { name: /piggy/i }));
+    expect(await screen.findByRole('heading', { level: 1, name: /piggy banks/i }))
+      .toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /piggy/i }))
+      .toHaveAttribute('aria-selected', 'true');
   });
 
   it('switches to the Activity tab on click', async () => {

@@ -3,11 +3,12 @@ import { AccountsView } from './accounts/AccountsView';
 import { ActivityView } from './activity/ActivityView';
 import { api, ApiError, hasToken } from './api';
 import { LoansView } from './loans/LoansView';
+import { PiggyView } from './piggy/PiggyView';
 import { SettingsProvider } from './settings/useSettings';
 import { SettingsView } from './settings/SettingsView';
 import { VouchersView } from './vouchers/VouchersView';
 
-type Tab = 'accounts' | 'activity' | 'vouchers' | 'loans' | 'settings';
+type Tab = 'accounts' | 'activity' | 'piggy' | 'vouchers' | 'loans' | 'settings';
 
 interface TabDef {
   id: Tab;
@@ -18,6 +19,7 @@ interface TabDef {
 const TABS: TabDef[] = [
   { id: 'accounts',  label: 'Assets',      emoji: '🏦' },
   { id: 'activity',  label: 'Activity',    emoji: '🧾' },
+  { id: 'piggy',     label: 'Piggy banks', emoji: '🐷' },
   { id: 'loans',     label: 'Loans',       emoji: '📉' },
   { id: 'vouchers',  label: 'Vouchers',    emoji: '🎟️' },
   { id: 'settings',  label: 'Settings',    emoji: '⚙️' },
@@ -117,6 +119,7 @@ export function App() {
           <div className="app-content" role="tabpanel">
             {tab === 'accounts' && <AccountsView />}
             {tab === 'activity' && <ActivityView />}
+            {tab === 'piggy' && <PiggyView />}
             {tab === 'vouchers' && <VouchersView />}
             {tab === 'loans' && <LoansView />}
             {tab === 'settings' && <SettingsView />}
