@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+import { render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { AccountsView } from './AccountsView';
-import { installFetchMock } from '../test/mockFetch';
+import { installFetchMock, jsonResponse } from '../test/mockFetch';
 
 const COMPANIES = {
   companies: [
@@ -131,6 +132,159 @@ describe('AccountsView — connection cards', () => {
     const negAmounts = document.querySelectorAll('.conn-account .amount.neg');
     expect(negAmounts.length).toBeGreaterThanOrEqual(1);
     expect(negAmounts[0].textContent).toMatch(/1,?234/);
+  });
+});
+
+describe('AccountsView — edit balance', () => {
+  it('clicking a balance opens a dialog pre-filled with the current value', async () => {
+    const user = userEvent.setup();
+    installFetchMock(FULL);
+    render(<AccountsView />);
+    const checking = await screen.findByText('Checking');
+    const amount = within(checking.closest('li')!).getByText(/18,?250/);
+    await user.click(amount);
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByRole('heading', { name: /account balance/i })).toBeInTheDocument();
+    const input = within(dialog).getByLabelText(/balance/i) as HTMLInputElement;
+    expect(input.value).toBe('18250.5'); // 2dp-rounded (no float artefact)
+  });
+
+  it('cancel closes without calling the engine', async () => {
+    const user = userEvent.setup();
+    const get = vi.fn(() => ACCOUNTS);
+    installFetchMock({ ...FULL, 'GET /api/accounts': get });
+    render(<AccountsView />);
+    const checking = await screen.findByText('Checking');
+    await user.click(within(checking.closest('li')!).getByText(/18,?250/));
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: /cancel/i }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(get).toHaveBeenCalledTimes(1); // initial load only
+  });
+
+  it('save PATCHes /accounts/:id/balance with the new value + refetches', async () => {
+    const user = userEvent.setup();
+    const patch = vi.fn((_body: unknown) => ({ ok: true }));
+    const get = vi.fn(() => ACCOUNTS);
+    installFetchMock({
+      ...FULL,
+      'GET /api/accounts': get,
+      'PATCH /api/accounts/a-bank-1/balance': patch,
+    });
+    render(<AccountsView />);
+    const checking = await screen.findByText('Checking');
+    await user.click(within(checking.closest('li')!).getByText(/18,?250/));
+    const dialog = screen.getByRole('dialog');
+    const input = within(dialog).getByLabelText(/balance/i);
+    await user.clear(input);
+    await user.type(input, '22000');
+    await user.click(within(dialog).getByRole('button', { name: /save/i }));
+    await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
+    expect(patch.mock.calls[0]?.[0]).toEqual({ balance: 22000 });
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('shows a validation error for non-numeric input and does not call the engine', async () => {
+    const user = userEvent.setup();
+    const patch = vi.fn();
+    installFetchMock({ ...FULL, 'PATCH /api/accounts/a-bank-1/balance': patch });
+    render(<AccountsView />);
+    const checking = await screen.findByText('Checking');
+    await user.click(within(checking.closest('li')!).getByText(/18,?250/));
+    const dialog = screen.getByRole('dialog');
+    const input = within(dialog).getByLabelText(/balance/i);
+    await user.clear(input);
+    await user.type(input, 'abc');
+    await user.click(within(dialog).getByRole('button', { name: /save/i }));
+    expect(await within(dialog).findByText(/enter a number/i)).toBeInTheDocument();
+    expect(patch).not.toHaveBeenCalled();
+  });
+
+  it('surfaces server errors inline without closing the dialog', async () => {
+    const user = userEvent.setup();
+    installFetchMock({
+      ...FULL,
+      'PATCH /api/accounts/a-bank-1/balance':
+        () => jsonResponse(503, { error: 'database unavailable' }),
+    });
+    render(<AccountsView />);
+    const checking = await screen.findByText('Checking');
+    await user.click(within(checking.closest('li')!).getByText(/18,?250/));
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: /save/i }));
+    expect(await screen.findByText(/database unavailable/i)).toBeInTheDocument();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+});
+
+describe('AccountsView — net-worth toggle', () => {
+  it('shows a "Net worth" pill checked for each non-excluded account', async () => {
+    installFetchMock(FULL);
+    render(<AccountsView />);
+    await screen.findByText('Checking');
+    const pills = screen.getAllByRole('checkbox', { name: /net worth/i });
+    expect(pills.length).toBeGreaterThanOrEqual(2); // bank + card accounts
+    pills.forEach((p) => expect(p).toBeChecked());
+  });
+
+  it('renders the pill unchecked when the account is excluded', async () => {
+    installFetchMock({
+      ...FULL,
+      'GET /api/accounts': () => ({
+        accounts: [{ ...ACCOUNTS.accounts[0], excluded: true }],
+      }),
+    });
+    render(<AccountsView />);
+    const checking = await screen.findByText('Checking');
+    const pill = within(checking.closest('li')!).getByRole('checkbox', { name: /net worth/i });
+    expect(pill).not.toBeChecked();
+  });
+
+  it('toggling the pill PATCHes /accounts/:id/excluded with the new value', async () => {
+    const user = userEvent.setup();
+    const patch = vi.fn((_body: unknown) => ({ ok: true }));
+    const get = vi.fn(() => ACCOUNTS);
+    installFetchMock({
+      ...FULL,
+      'GET /api/accounts': get,
+      'PATCH /api/accounts/a-bank-1/excluded': patch,
+    });
+    render(<AccountsView />);
+    await screen.findByText('Checking');
+    const checking = screen.getByText('Checking').closest('li')!;
+    await user.click(within(checking).getByRole('checkbox', { name: /net worth/i }));
+    await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
+    expect(patch.mock.calls[0]?.[0]).toEqual({ excluded: true });
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+  });
+
+  it('asset cards have a net-worth pill that PUTs /assets/:id', async () => {
+    const user = userEvent.setup();
+    const put = vi.fn((_body: unknown) => ({ ok: true }));
+    installFetchMock({
+      ...FULL,
+      'PUT /api/assets/as-1': put,
+    });
+    render(<AccountsView />);
+    const mazda = await screen.findByText('2018 Mazda 3');
+    const card = mazda.closest('.asset-card')!;
+    await user.click(within(card as HTMLElement).getByRole('checkbox', { name: /net worth/i }));
+    await waitFor(() => expect(put).toHaveBeenCalledTimes(1));
+    expect(put.mock.calls[0]?.[0]).toEqual({ excluded: true });
+  });
+
+  it('loan cards have a net-worth pill that PATCHes /loans/:id/excluded', async () => {
+    const user = userEvent.setup();
+    const patch = vi.fn((_body: unknown) => ({ ok: true }));
+    installFetchMock({
+      ...FULL,
+      'PATCH /api/loans/l-1/excluded': patch,
+    });
+    render(<AccountsView />);
+    const mortgage = await screen.findByText('Mortgage');
+    const card = mortgage.closest('.loan-card')!;
+    await user.click(within(card as HTMLElement).getByRole('checkbox', { name: /net worth/i }));
+    await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
+    expect(patch.mock.calls[0]?.[0]).toEqual({ excluded: true });
   });
 });
 
