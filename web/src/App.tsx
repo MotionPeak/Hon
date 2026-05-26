@@ -1,15 +1,17 @@
 import { useEffect, useState } from 'react';
 import { AccountsView } from './accounts/AccountsView';
 import { api, ApiError, hasToken } from './api';
+import { LoansView } from './loans/LoansView';
 import { SettingsView } from './settings/SettingsView';
 import { VouchersView } from './vouchers/VouchersView';
 
-type Tab = 'health' | 'accounts' | 'vouchers' | 'settings';
+type Tab = 'health' | 'accounts' | 'vouchers' | 'loans' | 'settings';
 
 const TABS: Array<[Tab, string]> = [
   ['health', 'Health'],
   ['accounts', 'Accounts'],
   ['vouchers', 'Vouchers'],
+  ['loans', 'Loans'],
   ['settings', 'Settings'],
 ];
 
@@ -38,6 +40,7 @@ export function App() {
         {tab === 'health' && <HealthView />}
         {tab === 'accounts' && <AccountsView />}
         {tab === 'vouchers' && <VouchersView />}
+        {tab === 'loans' && <LoansView />}
         {tab === 'settings' && <SettingsView />}
       </div>
     </main>

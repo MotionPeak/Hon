@@ -49,6 +49,24 @@ export interface ManualAsset {
   excluded: boolean;
 }
 
+export type RateType = 'fixed' | 'prime' | 'cpi-fixed' | 'cpi-prime';
+
+/** Computed Spitzer-schedule state — included on each loan in /loans. */
+export interface LoanState {
+  monthsElapsed: number;
+  monthsRemaining: number;
+  /** Effective annual rate currently applied (rateValue or prime+margin). */
+  annualRate: number;
+  monthlyPayment: number;
+  /** Current outstanding, in current shekels (CPI-linked when applicable). */
+  outstanding: number;
+  totalPaid: number;
+  /** 0..1, how far through the term. */
+  progress: number;
+  /** CPI ratio current/start when linked; else 1. */
+  cpiRatio: number;
+}
+
 export interface Loan {
   id: string;
   name: string;
@@ -67,6 +85,10 @@ export interface Loan {
   nameOverridden: boolean;
   createdAt: string;
   updatedAt: string;
+  /** Derived: 'fixed' | 'prime' | 'cpi-fixed' | 'cpi-prime'. Engine fills it. */
+  rateType?: RateType;
+  /** Computed Spitzer state. Engine fills it when serving /loans. */
+  state?: LoanState;
 }
 
 /** A single brokerage security position. Mirrors HoldingRow in repo.ts. */

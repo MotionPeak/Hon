@@ -442,6 +442,91 @@ button.mini { padding: 5px 11px; font-size: 12px; }
 .conn-sync-msg { font-size: 12px; color: var(--amber); margin-top: 6px; }
 .conn-sync-err { font-size: 12px; color: var(--red); margin-top: 6px; }
 
+/* --- Loans view ------------------------------------------------------- */
+.loans-view { max-width: 1100px; margin: 0 auto; }
+.loans-view h1 {
+  font: 800 22px/1 ui-rounded, "SF Pro Rounded", system-ui;
+  color: var(--text); letter-spacing: -.2px; margin-bottom: 8px;
+}
+.loan-totals {
+  display: flex; gap: 9px; align-items: center;
+  background: var(--card); border: 1px solid var(--hairline);
+  border-radius: 13px; padding: 12px 15px; margin: 14px 0 18px;
+  font-size: 13px; color: var(--muted);
+}
+.loan-totals b {
+  color: var(--text); font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.loan-totals .sep { color: var(--faint); margin: 0 4px; }
+.loan-totals .emoji { font-size: 18px; }
+
+.loans-grid {
+  display: grid; gap: 18px;
+  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+}
+.loan-card-rich {
+  background: var(--card); border: 1px solid var(--hairline);
+  border-radius: 18px; padding: 18px; box-shadow: var(--shadow-sm);
+  display: flex; flex-direction: column; gap: 12px;
+  transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
+}
+.loan-card-rich:hover {
+  transform: translateY(-2px); box-shadow: var(--shadow);
+  border-color: var(--hairline-2);
+}
+.loan-head-rich {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 12px;
+}
+.loan-title-block { min-width: 0; }
+.loan-title { font-size: 16px; font-weight: 800; color: var(--text); }
+.loan-sub {
+  font-size: 12px; color: var(--muted); margin-top: 4px;
+  display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+}
+.loan-sub .sep { color: var(--faint); }
+.loan-outstanding {
+  font: 800 18px/1 ui-rounded, "SF Pro Rounded", system-ui;
+  color: var(--red); white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+.loan-pill {
+  display: inline-block; font-size: 11px; font-weight: 700;
+  padding: 2px 9px; border-radius: 999px;
+}
+.loan-pill-fixed { color: var(--text); background: var(--card-hi); }
+.loan-pill-prime { color: var(--amber); background: rgba(245,152,66,0.18); }
+.loan-pill-cpi-fixed { color: var(--green); background: rgba(79,207,138,0.16); }
+.loan-pill-cpi-prime { color: var(--indigo); background: var(--indigo-soft); }
+.loan-progress-bar {
+  height: 8px; background: var(--card-hi); border-radius: 999px; overflow: hidden;
+}
+.loan-progress-bar > span {
+  display: block; height: 100%; border-radius: 999px;
+  background: linear-gradient(90deg, var(--indigo), #5c51c4);
+  transition: width .8s cubic-bezier(.2,.7,.2,1);
+}
+.loan-stats {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px 14px;
+}
+.loan-stat label {
+  display: block; font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);
+}
+.loan-stat b {
+  display: block; font-size: 14px; font-weight: 700; margin-top: 3px;
+  color: var(--text); font-variant-numeric: tabular-nums;
+}
+.loan-stat .muted {
+  display: block; color: var(--muted); font-weight: 500; font-size: 11px;
+}
+.loan-life {
+  font-size: 12px; color: var(--muted);
+  padding-top: 10px; border-top: 1px solid var(--hairline);
+}
+.loan-life b { color: var(--text); font-weight: 700; }
+.loan-life .sep { color: var(--faint); }
+
 /* --- Vouchers view ---------------------------------------------------- */
 .vouchers-view { max-width: 1100px; margin: 0 auto; }
 .vouchers-view h1 {

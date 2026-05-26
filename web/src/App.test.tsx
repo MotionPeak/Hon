@@ -41,6 +41,21 @@ describe('App — tab routing', () => {
     expect(screen.getByRole('tab', { name: /settings/i })).toHaveAttribute('aria-selected', 'true');
   });
 
+  it('switches to the Loans tab on click', async () => {
+    withToken();
+    installFetchMock({
+      'GET /api/health': () => HEALTH,
+      'GET /api/loans': () => ({ loans: [], rates: { prime: null, cpiNow: null } }),
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole('tab', { name: /loans/i }));
+    expect(await screen.findByRole('heading', { level: 1, name: /loans/i }))
+      .toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /loans/i }))
+      .toHaveAttribute('aria-selected', 'true');
+  });
+
   it('switches to the Vouchers tab on click', async () => {
     withToken();
     installFetchMock({
