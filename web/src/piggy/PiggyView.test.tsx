@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+import { render, screen, within, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { PiggyView } from './PiggyView';
 import { installFetchMock } from '../test/mockFetch';
 
@@ -103,5 +104,164 @@ describe('PiggyView — read-only', () => {
     expect(within(strip).getByText(/3,?500/)).toBeInTheDocument();
     // Funded total this month
     expect(within(strip).getByText(/1,?000/)).toBeInTheDocument();
+  });
+});
+
+describe('PiggyView — CRUD', () => {
+  it('shows a "New piggy bank" button at the top', async () => {
+    installFetchMock({ 'GET /api/budget': () => REPORT });
+    render(<PiggyView />);
+    expect(await screen.findByRole('button', { name: /new piggy bank/i }))
+      .toBeInTheDocument();
+  });
+
+  it('opens the new-piggy dialog with empty fields when clicked', async () => {
+    installFetchMock({ 'GET /api/budget': () => REPORT });
+    const user = userEvent.setup();
+    render(<PiggyView />);
+    await user.click(await screen.findByRole('button', { name: /new piggy bank/i }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText(/new piggy bank/i)).toBeInTheDocument();
+    const name = within(dialog).getByLabelText(/name/i) as HTMLInputElement;
+    expect(name.value).toBe('');
+  });
+
+  it('POSTs to /api/piggy with the form values then refetches', async () => {
+    const post = vi.fn((_body: unknown) => ({ piggy: { id: 'new' } }));
+    let budgetCalls = 0;
+    installFetchMock({
+      'GET /api/budget': () => { budgetCalls += 1; return REPORT; },
+      'POST /api/piggy': post,
+    });
+    const user = userEvent.setup();
+    render(<PiggyView />);
+    await user.click(await screen.findByRole('button', { name: /new piggy bank/i }));
+    const dialog = await screen.findByRole('dialog');
+    await user.type(within(dialog).getByLabelText(/name/i), 'Camera');
+    await user.clear(within(dialog).getByLabelText(/target/i));
+    await user.type(within(dialog).getByLabelText(/target/i), '5000');
+    await user.clear(within(dialog).getByLabelText(/monthly amount/i));
+    await user.type(within(dialog).getByLabelText(/monthly amount/i), '500');
+    await user.click(within(dialog).getByRole('button', { name: /save/i }));
+    await waitFor(() => expect(post).toHaveBeenCalled());
+    const body = post.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(body.name).toBe('Camera');
+    expect(body.targetAmount).toBe(5000);
+    expect(body.monthlyAmount).toBe(500);
+    expect(body.kind).toBe('monthly');
+    // Dialog closes and budget refetched.
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(budgetCalls).toBeGreaterThan(1);
+  });
+
+  it('shows a per-card actions menu with Edit / Pause / Delete', async () => {
+    installFetchMock({ 'GET /api/budget': () => REPORT });
+    const user = userEvent.setup();
+    render(<PiggyView />);
+    const japan = (await screen.findByText('Japan trip')).closest('.piggy-card')!;
+    await user.click(within(japan as HTMLElement).getByRole('button', { name: /actions/i }));
+    const menu = await screen.findByRole('menu');
+    expect(within(menu).getByRole('menuitem', { name: /edit/i })).toBeInTheDocument();
+    expect(within(menu).getByRole('menuitem', { name: /pause/i })).toBeInTheDocument();
+    expect(within(menu).getByRole('menuitem', { name: /delete/i })).toBeInTheDocument();
+  });
+
+  it('shows "Resume" instead of "Pause" on an on-hold bank', async () => {
+    installFetchMock({ 'GET /api/budget': () => REPORT });
+    const user = userEvent.setup();
+    render(<PiggyView />);
+    const camera = (await screen.findByText('Camera kit')).closest('.piggy-card')!;
+    await user.click(within(camera as HTMLElement).getByRole('button', { name: /actions/i }));
+    const menu = await screen.findByRole('menu');
+    expect(within(menu).getByRole('menuitem', { name: /resume/i })).toBeInTheDocument();
+    expect(within(menu).queryByRole('menuitem', { name: /^pause/i })).not.toBeInTheDocument();
+  });
+
+  it('Edit pre-fills the dialog with the bank values and PUTs on save', async () => {
+    const put = vi.fn((_body: unknown) => ({ piggy: {} }));
+    installFetchMock({
+      'GET /api/budget': () => REPORT,
+      'PUT /api/piggy/p-1': put,
+    });
+    const user = userEvent.setup();
+    render(<PiggyView />);
+    const japan = (await screen.findByText('Japan trip')).closest('.piggy-card')!;
+    await user.click(within(japan as HTMLElement).getByRole('button', { name: /actions/i }));
+    await user.click(await screen.findByRole('menuitem', { name: /edit/i }));
+    const dialog = await screen.findByRole('dialog');
+    expect((within(dialog).getByLabelText(/name/i) as HTMLInputElement).value).toBe('Japan trip');
+    expect((within(dialog).getByLabelText(/target/i) as HTMLInputElement).value).toBe('12000');
+    await user.clear(within(dialog).getByLabelText(/target/i));
+    await user.type(within(dialog).getByLabelText(/target/i), '15000');
+    await user.click(within(dialog).getByRole('button', { name: /save/i }));
+    await waitFor(() => expect(put).toHaveBeenCalled());
+    const body = put.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(body.targetAmount).toBe(15000);
+  });
+
+  it('Pause PUTs { onHold: true }', async () => {
+    const put = vi.fn((_body: unknown) => ({ piggy: {} }));
+    installFetchMock({
+      'GET /api/budget': () => REPORT,
+      'PUT /api/piggy/p-1': put,
+    });
+    const user = userEvent.setup();
+    render(<PiggyView />);
+    const japan = (await screen.findByText('Japan trip')).closest('.piggy-card')!;
+    await user.click(within(japan as HTMLElement).getByRole('button', { name: /actions/i }));
+    await user.click(await screen.findByRole('menuitem', { name: /pause/i }));
+    await waitFor(() => expect(put).toHaveBeenCalled());
+    const body = put.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(body.onHold).toBe(true);
+  });
+
+  it('Resume PUTs { onHold: false }', async () => {
+    const put = vi.fn((_body: unknown) => ({ piggy: {} }));
+    installFetchMock({
+      'GET /api/budget': () => REPORT,
+      'PUT /api/piggy/p-4': put,
+    });
+    const user = userEvent.setup();
+    render(<PiggyView />);
+    const camera = (await screen.findByText('Camera kit')).closest('.piggy-card')!;
+    await user.click(within(camera as HTMLElement).getByRole('button', { name: /actions/i }));
+    await user.click(await screen.findByRole('menuitem', { name: /resume/i }));
+    await waitFor(() => expect(put).toHaveBeenCalled());
+    const body = put.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(body.onHold).toBe(false);
+  });
+
+  it('Delete opens a confirm dialog and DELETEs on confirm', async () => {
+    const del = vi.fn(() => ({ ok: true }));
+    installFetchMock({
+      'GET /api/budget': () => REPORT,
+      'DELETE /api/piggy/p-1': del,
+    });
+    const user = userEvent.setup();
+    render(<PiggyView />);
+    const japan = (await screen.findByText('Japan trip')).closest('.piggy-card')!;
+    await user.click(within(japan as HTMLElement).getByRole('button', { name: /actions/i }));
+    await user.click(await screen.findByRole('menuitem', { name: /delete/i }));
+    const confirm = await screen.findByRole('dialog');
+    expect(within(confirm).getByText(/delete japan trip/i)).toBeInTheDocument();
+    await user.click(within(confirm).getByRole('button', { name: /^delete$/i }));
+    await waitFor(() => expect(del).toHaveBeenCalled());
+  });
+
+  it('Delete confirm dialog Cancel button does not DELETE', async () => {
+    const del = vi.fn(() => ({ ok: true }));
+    installFetchMock({
+      'GET /api/budget': () => REPORT,
+      'DELETE /api/piggy/p-1': del,
+    });
+    const user = userEvent.setup();
+    render(<PiggyView />);
+    const japan = (await screen.findByText('Japan trip')).closest('.piggy-card')!;
+    await user.click(within(japan as HTMLElement).getByRole('button', { name: /actions/i }));
+    await user.click(await screen.findByRole('menuitem', { name: /delete/i }));
+    const confirm = await screen.findByRole('dialog');
+    await user.click(within(confirm).getByRole('button', { name: /cancel/i }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(del).not.toHaveBeenCalled();
   });
 });

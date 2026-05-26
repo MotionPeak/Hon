@@ -866,7 +866,114 @@ button.mini { padding: 5px 11px; font-size: 12px; }
 .piggy-view { max-width: 1100px; margin: 0 auto; }
 .piggy-view h1 {
   font: 800 22px/1 ui-rounded, "SF Pro Rounded", system-ui;
-  color: var(--text); letter-spacing: -.2px; margin-bottom: 8px;
+  color: var(--text); letter-spacing: -.2px; margin-bottom: 0;
+}
+.piggy-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-bottom: 8px;
+}
+
+/* --- Generic buttons (used by Piggy CRUD; reusable elsewhere) -------- */
+.btn-primary {
+  background: var(--accent); color: #fff; border: 0;
+  border-radius: 999px; padding: 9px 16px; font-size: 13px;
+  font-weight: 600; cursor: pointer;
+  transition: filter .15s ease;
+}
+.btn-primary:hover { filter: brightness(1.08); }
+.btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+.btn-ghost {
+  background: transparent; color: var(--text);
+  border: 1px solid var(--hairline); border-radius: 999px;
+  padding: 9px 16px; font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.btn-ghost:hover { background: var(--card-hi); }
+.btn-danger {
+  background: var(--red); color: #fff; border: 0;
+  border-radius: 999px; padding: 9px 16px; font-size: 13px;
+  font-weight: 600; cursor: pointer;
+}
+.btn-danger:hover { filter: brightness(1.08); }
+
+/* --- Per-card kebab + dropdown menu (Radix) -------------------------- */
+.kebab-btn {
+  background: transparent; border: 0; cursor: pointer;
+  color: var(--muted); font-size: 18px; line-height: 1;
+  padding: 4px 8px; border-radius: 8px;
+  margin-left: auto;
+}
+.kebab-btn:hover { background: var(--card-hi); color: var(--text); }
+.menu-content {
+  background: var(--card); border: 1px solid var(--hairline);
+  border-radius: 10px; padding: 4px; min-width: 140px;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.35);
+  z-index: 1000;
+}
+.menu-item {
+  font-size: 13px; padding: 7px 10px; border-radius: 6px;
+  cursor: pointer; outline: 0; color: var(--text);
+  user-select: none;
+}
+.menu-item[data-highlighted] { background: var(--card-hi); }
+.menu-item.danger { color: var(--red); }
+.menu-sep { height: 1px; background: var(--hairline); margin: 4px 0; }
+
+/* --- Radix Dialog ---------------------------------------------------- */
+.rx-overlay {
+  position: fixed; inset: 0; z-index: 999;
+  background: rgba(0,0,0,0.55);
+  animation: rx-fade-in .15s ease;
+}
+.rx-dialog {
+  position: fixed; top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--card); border: 1px solid var(--hairline);
+  border-radius: 16px; padding: 22px 24px;
+  min-width: 360px; max-width: 540px; z-index: 1000;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.5);
+  animation: rx-pop-in .18s cubic-bezier(.2,.7,.2,1);
+}
+.rx-dialog-sm { min-width: 320px; max-width: 420px; }
+.rx-dialog [data-radix-dialog-title], .rx-dialog h2 {
+  font: 700 18px/1.2 ui-rounded, "SF Pro Rounded", system-ui;
+  color: var(--text); margin: 0 0 6px;
+}
+.rx-dialog-desc {
+  color: var(--muted); font-size: 13px; margin-bottom: 16px;
+}
+@keyframes rx-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes rx-pop-in {
+  from { opacity: 0; transform: translate(-50%, -48%) scale(.96); }
+  to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+
+/* --- Piggy CRUD form ------------------------------------------------- */
+.piggy-form { display: flex; flex-direction: column; gap: 12px; }
+.form-row {
+  display: flex; flex-direction: column; gap: 5px;
+  font-size: 12px; color: var(--muted);
+}
+.form-row > span, .form-row > legend {
+  font-weight: 600; letter-spacing: .03em;
+}
+.form-row input[type="text"], .form-row input[type="number"] {
+  background: var(--card-hi); border: 1px solid var(--hairline);
+  border-radius: 8px; padding: 8px 10px; font-size: 13px;
+  color: var(--text);
+}
+.form-row input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.form-radios { flex-direction: row; gap: 14px; align-items: center;
+  border: 0; padding: 0; margin: 0; }
+.form-radios label {
+  display: inline-flex; gap: 6px; align-items: center;
+  color: var(--text); font-size: 13px; cursor: pointer;
+}
+.form-error {
+  color: var(--red); font-size: 12.5px; margin: 0;
+}
+.form-actions {
+  display: flex; justify-content: flex-end; gap: 8px;
+  margin-top: 6px;
 }
 .piggy-headroom {
   display: flex; gap: 9px; align-items: flex-start;
