@@ -1236,9 +1236,15 @@ export async function scrapeHitechZoneBalance(
 
     // Fill the digital-code input. The form has just one visible text
     // input (#eightDigit) — fill it via the React-aware setter.
+    // The site has been put behind Cloudflare's "Performing security
+    // verification" interstitial (Ray-ID page), which can keep the user
+    // there for 30-60s before letting the real form HTML render. The
+    // earlier 20s budget was tighter than Cloudflare's clear time and
+    // caused "Waiting failed: 20000ms exceeded" on perfectly good
+    // sessions; 90s leaves room for the challenge to settle.
     await page.waitForFunction(
       () => !!document.querySelector('#eightDigit'),
-      { timeout: 20_000 },
+      { timeout: 90_000 },
     );
     await fillBySelector(page, '#eightDigit', code);
     htzLog.info('code.filled');
