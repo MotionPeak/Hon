@@ -1,0 +1,29 @@
+/* Global styles. Hon's existing CSS lives inside sidecar/public/app.html
+   — when each tab is migrated, lift the relevant rules here and replace
+   the inline classes with module-scoped CSS (or CSS modules if we adopt
+   them in a later step). For now this file just sets the dark
+   background + body defaults so the starter screen doesn't read as a
+   bare white page. */
+
+:root {
+  color-scheme: dark;
+  --bg: #0a0a0a;
+  --fg: #e6e6e6;
+  --accent: #7CE5A0;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
+    Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+  min-height: 100vh;
+}
+
+a { color: var(--accent); }
+
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
