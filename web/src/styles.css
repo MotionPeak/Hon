@@ -1635,6 +1635,96 @@ button.mini { padding: 5px 11px; font-size: 12px; }
   font-size: 11px; color: var(--faint); margin: 6px 0 0;
 }
 
+/* --- AI engine settings card ---------------------------------------- */
+.ai-ready-pill {
+  margin-left: auto;
+  font-size: 10px; font-weight: 700; letter-spacing: .08em;
+  text-transform: uppercase;
+  padding: 3px 9px; border-radius: 999px;
+  background: rgba(61,220,132,0.16); color: var(--green);
+}
+.ai-mode-seg {
+  margin: 12px 0 14px;
+  display: inline-flex; gap: 2px; padding: 3px;
+  background: var(--card-hi); border-radius: 10px;
+}
+.ai-mode-seg button {
+  background: transparent; border: 0; cursor: pointer;
+  color: var(--muted); font-size: 12.5px; font-weight: 600;
+  padding: 6px 14px; border-radius: 7px;
+  transition: background-color .18s ease, color .18s ease;
+}
+.ai-mode-seg button:hover { color: var(--text); }
+.ai-mode-seg button.on {
+  background: var(--accent); color: #fff;
+  box-shadow: 0 2px 8px rgba(245,159,36,0.22);
+}
+
+.ai-model-list { display: flex; flex-direction: column; gap: 12px; }
+.ai-model {
+  padding: 14px 16px; border-radius: 14px;
+  background: var(--bg-elev); border: 1px solid var(--hairline);
+}
+.ai-model.recommended {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--hairline));
+}
+.ai-model.ready {
+  border-color: var(--green);
+  background: color-mix(in srgb, var(--green) 6%, var(--bg-elev));
+}
+.ai-model-head {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 4px;
+}
+.ai-model-name {
+  font: 700 14px/1.2 ui-rounded, "SF Pro Rounded", system-ui;
+  color: var(--text);
+}
+.ai-model-tag {
+  font-size: 9.5px; font-weight: 700; letter-spacing: .08em;
+  text-transform: uppercase;
+  padding: 2px 7px; border-radius: 999px;
+  background: var(--accent-soft); color: var(--accent);
+}
+.ai-model-tag.ready {
+  background: rgba(61,220,132,0.16); color: var(--green);
+}
+.ai-model-desc {
+  font-size: 12px; color: var(--muted); margin: 0 0 4px;
+  line-height: 1.5;
+}
+.ai-model-meta {
+  font-size: 11.5px; color: var(--faint);
+  font-variant-numeric: tabular-nums; margin-bottom: 10px;
+}
+.ai-progress {
+  height: 6px; border-radius: 999px;
+  background: var(--card-hi); overflow: hidden; margin-bottom: 6px;
+}
+.ai-progress-fill {
+  display: block; height: 100%;
+  background: linear-gradient(90deg, var(--accent), #ffb347);
+  border-radius: 999px;
+  transition: width .4s cubic-bezier(.2,.7,.2,1);
+}
+.ai-progress-meta {
+  font-size: 11.5px; color: var(--muted);
+  font-variant-numeric: tabular-nums; margin-bottom: 10px;
+}
+
+/* Remote provider (Ollama / API) — vertical form. */
+.ai-remote { display: flex; flex-direction: column; gap: 10px; }
+.ai-remote input {
+  background: var(--bg-elev); border: 1px solid var(--hairline);
+  border-radius: 9px; padding: 9px 11px; color: var(--text);
+  font: inherit; font-size: 14px;
+}
+.ai-key-hint {
+  font-weight: 400; color: var(--muted); font-size: 11.5px;
+}
+.form-ok {
+  color: var(--green); font-size: 12.5px; margin: 0;
+}
+
 /* --- Insights AI analysis card (lifted from legacy app.html) -------- */
 .ai-card-wrap .ai-head {
   display: flex; align-items: center; gap: 10px;
