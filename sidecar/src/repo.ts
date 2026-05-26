@@ -6,6 +6,7 @@ import type {
   NormalizedHolding,
 } from './scrapers.js';
 import type { Loan } from './loans.js';
+import { matchPaymentToLoan } from './loanMatcher.js';
 
 /** Tracks Israeli retail loans recognise: a fixed-rate loan, a prime-linked
  *  loan (prime + margin, no index linkage), and the CPI-linked variants of
@@ -1820,6 +1821,30 @@ export class Repo {
     return row ? toLoan(row) : undefined;
   }
 
+  /** Sets (or clears) the loan link on a single transaction. Validates
+   *  that loanId, when provided, exists — callers can rely on the row
+   *  being a valid foreign key without SQLite enforcing it. */
+  setTransactionLoan(txnId: string, loanId: string | null): void {
+    if (loanId !== null && !this.getLoan(loanId)) {
+      throw new Error(`unknown loan id: ${loanId}`);
+    }
+    this.db
+      .prepare('UPDATE transactions SET loan_id = ? WHERE id = ?')
+      .run(loanId, txnId);
+  }
+
+  /** Every transaction linked to this loan, newest-first. */
+  listLoanPayments(loanId: string): TxnRow[] {
+    return this.db
+      .prepare(
+        `SELECT ${TXN_COLS}
+         FROM transactions
+         WHERE loan_id = ?
+         ORDER BY date DESC, id DESC`,
+      )
+      .all(loanId) as TxnRow[];
+  }
+
   createLoan(
     input: Omit<Loan, 'id' | 'createdAt' | 'updatedAt' | 'connectionId' | 'externalId' | 'nameOverridden'>
       & { connectionId?: string | null; externalId?: string | null; nameOverridden?: boolean },
@@ -1926,7 +1951,7 @@ export class Repo {
       }
       return this.getLoan(existing.id)!;
     }
-    return this.createLoan({
+    const loan = this.createLoan({
       ...input,
       connectionId,
       cpiStart: input.cpiStart ?? null,
@@ -1934,6 +1959,34 @@ export class Repo {
       notes: null,
       nameOverridden: false,
     });
+
+    // Backfill the 12-month window of this connection's transactions:
+    // every negative-amount, loan_id=null row that matches the new loan
+    // gets attached so the Loans card has history straight away instead
+    // of waiting for the next month's payment to land.
+    const cutoff = new Date();
+    cutoff.setMonth(cutoff.getMonth() - 12);
+    const cutoffIso = cutoff.toISOString().slice(0, 10);
+    const candidates = this.db
+      .prepare(
+        `SELECT t.id, t.description, t.amount
+         FROM transactions t
+         JOIN accounts a ON a.id = t.account_id
+         WHERE a.connection_id = ?
+           AND t.loan_id IS NULL
+           AND t.amount < 0
+           AND t.date >= ?`,
+      )
+      .all(connectionId, cutoffIso) as
+      { id: string; description: string; amount: number }[];
+    const loansOnConn = this.listLoans().filter((l) => l.connectionId === connectionId);
+    const update = this.db.prepare('UPDATE transactions SET loan_id = ? WHERE id = ?');
+    for (const c of candidates) {
+      const match = matchPaymentToLoan(c, loansOnConn);
+      if (match) update.run(match, c.id);
+    }
+
+    return loan;
   }
 
   updateLoan(

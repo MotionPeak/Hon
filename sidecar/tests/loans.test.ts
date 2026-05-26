@@ -1,5 +1,18 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
+import { openDatabase } from '../src/db.js';
 import { computeLoanState, type Loan } from '../src/loans.js';
+import { Repo } from '../src/repo.js';
+
+/** Opens a fully-migrated in-process SQLite db per test — no shared state. */
+function freshRepo(): Repo {
+  const dir = mkdtempSync(`${tmpdir()}/hon-test-`);
+  const { db } = openDatabase(dir);
+  // Clean up on process exit; not critical for unit tests but keeps /tmp tidy.
+  process.on('exit', () => rmSync(dir, { recursive: true, force: true }));
+  return new Repo(db);
+}
 
 // Spitzer amortization (the Israeli mortgage standard). Tests anchor
 // known fixed scenarios so a refactor of the math can't silently shift
@@ -106,5 +119,85 @@ describe('computeLoanState — CPI-linked', () => {
       6, null,
     );
     expect(state.cpiRatio).toBe(1);
+  });
+});
+
+describe('upsertBankLoan — backfill matcher', () => {
+  it('attaches existing matching transactions to a newly-upserted loan', () => {
+    const repo = freshRepo();
+    // Create a connection with a pre-existing loan-payment transaction,
+    // BEFORE the loan is upserted.
+    const conn = repo.createConnection('beinleumi', 'Beinleumi');
+    repo.saveScrapeResult(conn.id, [
+      {
+        accountNumber: '1-2-3',
+        label: 'Checking',
+        balance: 1000,
+        currency: 'ILS',
+        transactions: [
+          {
+            externalId: 'txn-1',
+            date: '2026-05-10',
+            amount: -1747.17,
+            currency: 'ILS',
+            description: 'הלואה-תשלום 12345678',
+          },
+        ],
+      },
+    ]);
+
+    // Now upsert the matching loan. The backfill should tag the prior txn.
+    const loan = repo.upsertBankLoan(conn.id, {
+      name: 'משכנתא',
+      principal: 100_000,
+      startDate: '2024-01-01',
+      termMonths: 120,
+      isPrime: false,
+      isCpiLinked: false,
+      rateValue: 0.04,
+      currency: 'ILS',
+      externalId: '12345678',
+    });
+
+    const payments = repo.listLoanPayments(loan.id);
+    expect(payments).toHaveLength(1);
+    expect(payments[0]!.externalId).toBe('txn-1');
+  });
+
+  it('does NOT touch transactions older than 12 months', () => {
+    const repo = freshRepo();
+    const conn = repo.createConnection('beinleumi', 'Beinleumi');
+    // 18 months ago — outside the backfill window.
+    const oldDate = new Date();
+    oldDate.setMonth(oldDate.getMonth() - 18);
+    const oldDateStr = oldDate.toISOString().slice(0, 10);
+    repo.saveScrapeResult(conn.id, [
+      {
+        accountNumber: 'a',
+        balance: 0,
+        currency: 'ILS',
+        transactions: [
+          {
+            externalId: 'old',
+            date: oldDateStr,
+            amount: -500,
+            currency: 'ILS',
+            description: 'הלוואה 12345678',
+          },
+        ],
+      },
+    ]);
+    const loan = repo.upsertBankLoan(conn.id, {
+      name: 'L',
+      principal: 1000,
+      startDate: '2020-01-01',
+      termMonths: 120,
+      isPrime: false,
+      isCpiLinked: false,
+      rateValue: 0,
+      currency: 'ILS',
+      externalId: '12345678',
+    });
+    expect(repo.listLoanPayments(loan.id)).toHaveLength(0);
   });
 });
