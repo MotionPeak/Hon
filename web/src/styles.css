@@ -442,6 +442,74 @@ button.mini { padding: 5px 11px; font-size: 12px; }
 .conn-sync-msg { font-size: 12px; color: var(--amber); margin-top: 6px; }
 .conn-sync-err { font-size: 12px; color: var(--red); margin-top: 6px; }
 
+/* --- Vouchers view ---------------------------------------------------- */
+.vouchers-view { max-width: 1100px; margin: 0 auto; }
+.vouchers-view h1 {
+  font: 800 22px/1 ui-rounded, "SF Pro Rounded", system-ui;
+  color: var(--text); letter-spacing: -.2px; margin-bottom: 8px;
+}
+.voucher-totals {
+  display: flex; gap: 9px; align-items: center;
+  background: var(--card); border: 1px solid var(--hairline);
+  border-radius: 13px; padding: 12px 15px; margin: 14px 0 18px;
+  font-size: 13px; color: var(--muted);
+}
+.voucher-totals b {
+  color: var(--text); font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.voucher-totals .emoji { font-size: 18px; }
+.voucher-total-pill { display: inline-flex; align-items: center; gap: 4px; }
+.voucher-total-pill .sep { color: var(--faint); margin: 0 4px; }
+
+.voucher-grid {
+  display: grid; gap: 15px;
+  grid-template-columns: repeat(auto-fill, minmax(274px, 1fr));
+}
+.voucher-card {
+  background: var(--card); border: 1px solid var(--hairline);
+  border-radius: 18px; padding: 17px; box-shadow: var(--shadow-sm);
+  display: flex; flex-direction: column; gap: 10px;
+  transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
+}
+.voucher-card:hover {
+  transform: translateY(-2px); box-shadow: var(--shadow);
+  border-color: var(--hairline-2);
+}
+.voucher-head { display: flex; align-items: flex-start; gap: 10px; }
+.voucher-emoji { font-size: 28px; line-height: 1; flex: none; }
+.voucher-title-wrap { flex: 1; min-width: 0; }
+.voucher-title {
+  font-size: 15px; font-weight: 700; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.voucher-tag {
+  font-size: 10px; font-weight: 600; color: var(--muted);
+  margin-left: 5px; padding: 1px 6px; border-radius: 999px;
+  background: var(--card-hi);
+}
+.voucher-sub {
+  font-size: 12px; color: var(--muted); margin-top: 2px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.voucher-sub .sep { margin: 0 4px; color: var(--faint); }
+.voucher-desc { color: var(--muted); }
+.voucher-balance {
+  font: 800 22px/1 ui-rounded, "SF Pro Rounded", system-ui;
+  color: var(--text); font-variant-numeric: tabular-nums;
+}
+.vc-excluded .voucher-balance { opacity: 0.45; text-decoration: line-through; }
+.voucher-meta { font-size: 11px; color: var(--faint); }
+.voucher-notes { font-size: 12px; color: var(--muted); }
+.voucher-badge {
+  display: inline-flex; gap: 5px; align-items: center;
+  font-size: 11.5px; font-weight: 600;
+  padding: 4px 9px; border-radius: 999px; align-self: flex-start;
+}
+.voucher-badge.expired { background: rgba(244,104,90,0.16); color: var(--red); }
+.voucher-badge.soon { background: rgba(245,152,66,0.16); color: var(--amber); }
+.voucher-badge.later { background: rgba(79,207,138,0.14); color: var(--green); }
+
 /* --- Add-connection picker -------------------------------------------- */
 .accounts-head {
   display: flex; align-items: center; justify-content: space-between;

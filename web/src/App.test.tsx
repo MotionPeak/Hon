@@ -41,6 +41,21 @@ describe('App — tab routing', () => {
     expect(screen.getByRole('tab', { name: /settings/i })).toHaveAttribute('aria-selected', 'true');
   });
 
+  it('switches to the Vouchers tab on click', async () => {
+    withToken();
+    installFetchMock({
+      'GET /api/health': () => HEALTH,
+      'GET /api/vouchers': () => ({ vouchers: [] }),
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole('tab', { name: /vouchers/i }));
+    expect(await screen.findByRole('heading', { level: 1, name: /vouchers/i }))
+      .toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /vouchers/i }))
+      .toHaveAttribute('aria-selected', 'true');
+  });
+
   it('switches to the Accounts tab on click', async () => {
     withToken();
     installFetchMock({

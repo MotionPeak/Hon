@@ -2,12 +2,14 @@ import { useEffect, useState } from 'react';
 import { AccountsView } from './accounts/AccountsView';
 import { api, ApiError, hasToken } from './api';
 import { SettingsView } from './settings/SettingsView';
+import { VouchersView } from './vouchers/VouchersView';
 
-type Tab = 'health' | 'accounts' | 'settings';
+type Tab = 'health' | 'accounts' | 'vouchers' | 'settings';
 
 const TABS: Array<[Tab, string]> = [
   ['health', 'Health'],
   ['accounts', 'Accounts'],
+  ['vouchers', 'Vouchers'],
   ['settings', 'Settings'],
 ];
 
@@ -35,6 +37,7 @@ export function App() {
       <div role="tabpanel">
         {tab === 'health' && <HealthView />}
         {tab === 'accounts' && <AccountsView />}
+        {tab === 'vouchers' && <VouchersView />}
         {tab === 'settings' && <SettingsView />}
       </div>
     </main>
