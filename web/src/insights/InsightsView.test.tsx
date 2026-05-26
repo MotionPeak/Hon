@@ -116,3 +116,91 @@ describe('InsightsView — Spending sub-tab', () => {
     expect(within(detail).getByText(/370/)).toBeInTheDocument();
   });
 });
+
+const EMPTY_TXNS = {
+  'GET /api/transactions': () => ({ transactions: [] }),
+  'GET /api/categories': () => CATEGORIES,
+};
+const EMPTY_BROKERAGE = {
+  'GET /api/brokerage': () => ({
+    holdings: [], snapshots: [], holdingSnapshots: [],
+    performance: [], ilsRates: { USD: 3.7, EUR: 4.05 },
+  }),
+};
+
+describe('InsightsView — Brokerage sub-tab', () => {
+  it('renders a tabs strip with Spending and Brokerage', async () => {
+    installFetchMock({ ...EMPTY_TXNS, ...EMPTY_BROKERAGE });
+    renderView();
+    expect(await screen.findByRole('tab', { name: /spending/i })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /brokerage/i })).toBeInTheDocument();
+  });
+
+  it('clicking Brokerage shows an empty state when there are no holdings', async () => {
+    const user = userEvent.setup();
+    installFetchMock({ ...EMPTY_TXNS, ...EMPTY_BROKERAGE });
+    renderView();
+    await user.click(await screen.findByRole('tab', { name: /brokerage/i }));
+    expect(await screen.findByText(/no brokerage data/i)).toBeInTheDocument();
+  });
+
+  it('Brokerage shows a value-over-time chart when snapshots exist', async () => {
+    const user = userEvent.setup();
+    installFetchMock({
+      ...EMPTY_TXNS,
+      'GET /api/brokerage': () => ({
+        holdings: [],
+        snapshots: [
+          { accountId: 'b1', date: '2026-01-15', value: 100000, currency: 'ILS' },
+          { accountId: 'b1', date: '2026-02-15', value: 102000, currency: 'ILS' },
+          { accountId: 'b1', date: '2026-03-15', value: 99000, currency: 'ILS' },
+        ],
+        holdingSnapshots: [],
+        performance: [],
+        ilsRates: { USD: 3.7 },
+      }),
+    });
+    renderView();
+    await user.click(await screen.findByRole('tab', { name: /brokerage/i }));
+    const chart = await screen.findByTestId('brokerage-chart');
+    expect(chart).toBeInTheDocument();
+    // The line should have one point per snapshot (3 in this case).
+    const points = chart.querySelectorAll('circle');
+    expect(points.length).toBe(3);
+  });
+
+  it('Brokerage shows a holdings list with symbol + units + value', async () => {
+    const user = userEvent.setup();
+    installFetchMock({
+      ...EMPTY_TXNS,
+      'GET /api/brokerage': () => ({
+        holdings: [
+          {
+            accountId: 'b1', symbol: 'AAPL', description: 'Apple Inc.',
+            units: 10, price: 200, currency: 'USD',
+            costBasis: 1500, openPnl: 500, value: 2000,
+            updatedAt: '2026-05-25',
+          },
+          {
+            accountId: 'b1', symbol: 'VOO', description: 'S&P 500 ETF',
+            units: 5, price: 480, currency: 'USD',
+            costBasis: 2000, openPnl: 400, value: 2400,
+            updatedAt: '2026-05-25',
+          },
+        ],
+        snapshots: [],
+        holdingSnapshots: [],
+        performance: [],
+        ilsRates: { USD: 3.7 },
+      }),
+    });
+    renderView();
+    await user.click(await screen.findByRole('tab', { name: /brokerage/i }));
+    const list = await screen.findByTestId('brokerage-holdings');
+    expect(within(list).getByText('AAPL')).toBeInTheDocument();
+    expect(within(list).getByText('VOO')).toBeInTheDocument();
+    expect(within(list).getByText(/Apple Inc/)).toBeInTheDocument();
+    // 10 units.
+    expect(within(list).getByText(/10 units/i)).toBeInTheDocument();
+  });
+});

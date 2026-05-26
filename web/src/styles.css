@@ -859,6 +859,58 @@ button.mini { padding: 5px 11px; font-size: 12px; }
   font: 800 22px/1 ui-rounded, "SF Pro Rounded", system-ui;
   color: var(--text); letter-spacing: -.2px; margin-bottom: 14px;
 }
+/* Insights sub-tab pill bar — Spending / Brokerage. Reuses the same
+   .seg-style "track + selected pill" idiom as the Piggy form, but
+   here the on-state is just a darker chip (no sliding-pill JS). */
+.ins-tabs {
+  display: inline-flex; gap: 2px;
+  background: var(--card-hi);
+  border-radius: 10px; padding: 3px;
+  margin-bottom: 16px;
+}
+.ins-tab {
+  background: transparent; border: 0; cursor: pointer;
+  color: var(--muted); font-size: 12.5px; font-weight: 600;
+  padding: 6px 14px; border-radius: 7px;
+  transition: background-color .18s ease, color .18s ease;
+}
+.ins-tab:hover { color: var(--text); }
+.ins-tab.on {
+  background: var(--accent); color: #fff;
+  box-shadow: 0 2px 8px rgba(245,159,36,0.22);
+}
+
+/* Brokerage value-over-time chart + holdings list. */
+.brokerage-pane { display: flex; flex-direction: column; }
+.brokerage-chart {
+  width: 100%; height: 180px;
+  display: block;
+}
+.brokerage-holdings {
+  list-style: none; padding: 0; margin: 0;
+  display: flex; flex-direction: column;
+}
+.bh-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center; gap: 16px;
+  padding: 11px 0;
+  border-top: 1px solid var(--hairline);
+}
+.bh-row:first-child { border-top: 0; }
+.bh-symbol {
+  font: 700 14px/1.2 ui-rounded, "SF Pro Rounded", system-ui;
+  color: var(--text); letter-spacing: .02em;
+}
+.bh-desc { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+.bh-meta {
+  font-size: 11.5px; color: var(--muted);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.bh-value {
+  font: 700 14px/1 ui-rounded, "SF Pro Rounded", system-ui;
+  color: var(--text); font-variant-numeric: tabular-nums; white-space: nowrap;
+}
 .ins-card {
   background: var(--card); border: 1px solid var(--hairline);
   border-radius: 16px; padding: 18px 20px; margin-bottom: 18px;

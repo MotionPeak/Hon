@@ -14,11 +14,14 @@ function monthLetter(key: string): string {
   return date.toLocaleDateString('en-US', { month: 'short' })[0] ?? '?';
 }
 
+type InsightsSubTab = 'spending' | 'brokerage';
+
 export function InsightsView() {
   const [settings] = useSettings();
   const [transactions, setTransactions] = useState<Transaction[] | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
+  const [subTab, setSubTab] = useState<InsightsSubTab>('spending');
 
   useEffect(() => {
     Promise.all([
@@ -40,17 +43,6 @@ export function InsightsView() {
 
   if (transactions === null) return <p>Loading…</p>;
 
-  if (!hasData) {
-    return (
-      <div className="insights-view">
-        <h1>Insights</h1>
-        <p className="blank">
-          No analytics yet — sync an account to see your spending trends.
-        </p>
-      </div>
-    );
-  }
-
   const activeMonth = selectedMonth && months.some((m) => m.month === selectedMonth)
     ? selectedMonth
     : months[months.length - 1]?.month ?? null;
@@ -58,9 +50,30 @@ export function InsightsView() {
   return (
     <div className="insights-view">
       <h1>Insights</h1>
+      <div className="ins-tabs" role="tablist">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={subTab === 'spending'}
+          className={`ins-tab${subTab === 'spending' ? ' on' : ''}`}
+          onClick={() => setSubTab('spending')}
+        >Spending</button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={subTab === 'brokerage'}
+          className={`ins-tab${subTab === 'brokerage' ? ' on' : ''}`}
+          onClick={() => setSubTab('brokerage')}
+        >Brokerage</button>
+      </div>
+      {subTab === 'spending' && !hasData && (
+        <p className="blank">
+          No analytics yet — sync an account to see your spending trends.
+        </p>
+      )}
+      {subTab === 'spending' && hasData && (
       <section className="ins-card">
         <header className="ins-card-head">
-          <div className="label">Spending</div>
           <div className="ins-sub">Last 12 months · tap a month for its breakdown</div>
         </header>
         <MonthBars
@@ -69,7 +82,8 @@ export function InsightsView() {
           onSelect={setSelectedMonth}
         />
       </section>
-      {activeMonth && (
+      )}
+      {subTab === 'spending' && hasData && activeMonth && (
         <MonthDetail
           monthKey={activeMonth}
           transactions={transactions}
@@ -77,7 +91,167 @@ export function InsightsView() {
           monthStartDay={settings.monthStartDay}
         />
       )}
+      {subTab === 'brokerage' && <BrokerageSubTab />}
     </div>
+  );
+}
+
+interface Holding {
+  accountId: string;
+  symbol: string;
+  description: string | null;
+  units: number;
+  price: number | null;
+  currency: string;
+  costBasis: number | null;
+  openPnl: number | null;
+  value: number | null;
+  updatedAt: string;
+}
+interface ValueSnapshot {
+  accountId: string; date: string; value: number; currency: string;
+}
+interface BrokerageResp {
+  holdings: Holding[];
+  snapshots: ValueSnapshot[];
+  holdingSnapshots: unknown[];
+  performance: unknown[];
+  ilsRates: Record<string, number> | null;
+}
+
+function BrokerageSubTab() {
+  const [data, setData] = useState<BrokerageResp | null>(null);
+  useEffect(() => {
+    api<BrokerageResp>('/brokerage')
+      .then(setData)
+      .catch(() => setData({
+        holdings: [], snapshots: [], holdingSnapshots: [],
+        performance: [], ilsRates: null,
+      }));
+  }, []);
+  if (data === null) return <p>Loading…</p>;
+  if (data.holdings.length === 0 && data.snapshots.length === 0) {
+    return (
+      <p className="blank">
+        📊 No brokerage data yet — link an investment account and Hon
+        will start tracking value over time here.
+      </p>
+    );
+  }
+
+  // Aggregate snapshots by date — sum across accounts, convert non-ILS
+  // to ILS via the rates ride-along. Sorted ascending by date.
+  const dailyTotals = new Map<string, number>();
+  for (const s of data.snapshots) {
+    const rate = s.currency === 'ILS' ? 1 : data.ilsRates?.[s.currency] ?? 1;
+    dailyTotals.set(s.date, (dailyTotals.get(s.date) ?? 0) + s.value * rate);
+  }
+  const series = Array.from(dailyTotals.entries())
+    .map(([date, value]) => ({ date, value }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  const currentValue = series.at(-1)?.value ?? 0;
+
+  return (
+    <div className="brokerage-pane">
+      {series.length > 0 && (
+        <section className="ins-card">
+          <header className="ins-card-head">
+            <div className="ins-sub">Value over time · ILS</div>
+            <div className="ins-totals">
+              <b>{money(currentValue, 'ILS')}</b>
+            </div>
+          </header>
+          <ValueChart series={series} />
+        </section>
+      )}
+      {data.holdings.length > 0 && (
+        <section className="ins-card">
+          <header className="ins-card-head">
+            <div className="ins-sub">Holdings · {data.holdings.length}</div>
+          </header>
+          <ul className="brokerage-holdings" data-testid="brokerage-holdings">
+            {data.holdings
+              .slice()
+              .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
+              .map((h) => (
+                <li key={`${h.accountId}-${h.symbol}`} className="bh-row">
+                  <div className="bh-main">
+                    <div className="bh-symbol">{h.symbol}</div>
+                    {h.description && (
+                      <div className="bh-desc">{h.description}</div>
+                    )}
+                  </div>
+                  <div className="bh-meta">
+                    {h.units.toLocaleString()} units
+                    {h.price != null && (
+                      <> · {money(h.price, h.currency)}</>
+                    )}
+                  </div>
+                  <div className="bh-value">
+                    {money(h.value ?? 0, h.currency)}
+                  </div>
+                </li>
+              ))}
+          </ul>
+        </section>
+      )}
+    </div>
+  );
+}
+
+interface SeriesPoint { date: string; value: number }
+
+function ValueChart({ series }: { series: SeriesPoint[] }) {
+  const W = 600;
+  const H = 180;
+  const PAD = { l: 8, r: 8, t: 8, b: 18 };
+  const innerW = W - PAD.l - PAD.r;
+  const innerH = H - PAD.t - PAD.b;
+  const min = Math.min(...series.map((p) => p.value));
+  const max = Math.max(...series.map((p) => p.value));
+  const range = Math.max(1, max - min);
+  const n = series.length;
+  const x = (i: number): number =>
+    n === 1 ? PAD.l + innerW / 2 : PAD.l + (i / (n - 1)) * innerW;
+  const y = (v: number): number =>
+    PAD.t + innerH - ((v - min) / range) * innerH;
+  const path = series.map((p, i) => `${i === 0 ? 'M' : 'L'} ${x(i)} ${y(p.value)}`).join(' ');
+  const area = `${path} L ${x(n - 1)} ${PAD.t + innerH} L ${x(0)} ${PAD.t + innerH} Z`;
+  return (
+    <svg
+      data-testid="brokerage-chart"
+      className="brokerage-chart"
+      viewBox={`0 0 ${W} ${H}`}
+      preserveAspectRatio="none"
+    >
+      <defs>
+        <linearGradient id="bk-area" x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0%" stopColor="var(--accent)" stopOpacity=".28" />
+          <stop offset="100%" stopColor="var(--accent)" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <path d={area} fill="url(#bk-area)" />
+      <path
+        d={path}
+        fill="none"
+        stroke="var(--accent)"
+        strokeWidth="2"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
+      {series.map((p, i) => (
+        <circle
+          key={p.date}
+          cx={x(i)}
+          cy={y(p.value)}
+          r={3}
+          fill="var(--accent)"
+        >
+          <title>{p.date} · {money(p.value, 'ILS')}</title>
+        </circle>
+      ))}
+    </svg>
   );
 }
 
