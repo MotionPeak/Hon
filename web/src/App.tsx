@@ -4,6 +4,7 @@ import { ActivityView } from './activity/ActivityView';
 import { api, ApiError, hasToken } from './api';
 import { InsightsView } from './insights/InsightsView';
 import { LoansView } from './loans/LoansView';
+import { OverviewView } from './overview/OverviewView';
 import { PiggyView } from './piggy/PiggyView';
 import { RecurringView } from './recurring/RecurringView';
 import { SettingsProvider } from './settings/useSettings';
@@ -12,7 +13,7 @@ import { SubscriptionsView } from './subscriptions/SubscriptionsView';
 import { VouchersView } from './vouchers/VouchersView';
 
 type Tab =
-  | 'accounts' | 'activity' | 'recurring' | 'subscriptions'
+  | 'overview' | 'accounts' | 'activity' | 'recurring' | 'subscriptions'
   | 'piggy' | 'vouchers' | 'loans' | 'insights' | 'settings';
 
 interface TabDef {
@@ -22,6 +23,7 @@ interface TabDef {
 }
 
 const TABS: TabDef[] = [
+  { id: 'overview',  label: 'Overview',    emoji: '📊' },
   { id: 'accounts',  label: 'Assets',      emoji: '🏦' },
   { id: 'activity',  label: 'Activity',    emoji: '🧾' },
   { id: 'recurring',     label: 'Fixed bills',   emoji: '📆' },
@@ -43,7 +45,7 @@ interface Health {
 }
 
 export function App() {
-  const [tab, setTab] = useState<Tab>('accounts');
+  const [tab, setTab] = useState<Tab>('overview');
   const [health, setHealth] = useState<Health | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
 
@@ -125,6 +127,7 @@ export function App() {
             ))}
           </nav>
           <div className="app-content" role="tabpanel">
+            {tab === 'overview' && <OverviewView />}
             {tab === 'accounts' && <AccountsView />}
             {tab === 'activity' && <ActivityView />}
             {tab === 'recurring' && <RecurringView />}

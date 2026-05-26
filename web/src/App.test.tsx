@@ -10,6 +10,9 @@ const HEALTH = {
 };
 
 const EMPTY = {
+  'GET /api/summary': () => ({
+    byCurrency: [], accountCount: 0, connectionCount: 0, netWorthILS: 0,
+  }),
   'GET /api/health': () => HEALTH,
   'GET /api/companies': () => ({ companies: [] }),
   'GET /api/connections': () => ({ connections: [] }),
@@ -39,14 +42,13 @@ describe('App — tab routing', () => {
     expect(screen.getByText(/no access token/i)).toBeInTheDocument();
   });
 
-  it('defaults to the Assets tab when a token is present', async () => {
+  it('defaults to the Overview tab when a token is present', async () => {
     withToken();
     installFetchMock(EMPTY);
     render(<App />);
-    expect(await screen.findByRole('tab', { name: /assets/i }))
+    expect(await screen.findByRole('tab', { name: /overview/i }))
       .toHaveAttribute('aria-selected', 'true');
-    // Assets heading from AccountsView is "Assets".
-    expect(screen.getByRole('heading', { level: 1, name: /assets/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: /overview/i })).toBeInTheDocument();
   });
 
   it('shows the engine version in the header', async () => {
