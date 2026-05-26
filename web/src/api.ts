@@ -4,10 +4,12 @@
 // to the engine (see vite.config.ts); in production the engine serves
 // the React bundle directly and /api/* hits the same origin.
 
-const token = new URLSearchParams(window.location.hash.slice(1)).get('token');
+function getToken(): string | null {
+  return new URLSearchParams(window.location.hash.slice(1)).get('token');
+}
 
 export function hasToken(): boolean {
-  return !!token;
+  return getToken() !== null;
 }
 
 export class ApiError extends Error {
@@ -24,10 +26,11 @@ export class ApiError extends Error {
  */
 export async function api<T = unknown>(
   path: string,
-  method: 'GET' | 'POST' | 'PATCH' | 'DELETE' = 'GET',
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' = 'GET',
   body?: unknown,
 ): Promise<T> {
   const headers: Record<string, string> = { Accept: 'application/json' };
+  const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   // Routes under /api are proxied to the engine by Vite in dev and
