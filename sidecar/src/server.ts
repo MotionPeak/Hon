@@ -6,7 +6,11 @@ import { fileURLToPath } from 'node:url';
 import { openDatabase, type DbHandle } from './db.js';
 import { Repo } from './repo.js';
 import { ScrapeRunner } from './runner.js';
-import { scrapeShufersalGiftCards, scrapeBuyMeGiftCards } from './voucherScrapers.js';
+import {
+  scrapeShufersalGiftCards,
+  scrapeBuyMeGiftCards,
+  scrapeHitechZoneBalance,
+} from './voucherScrapers.js';
 import { companyCatalog, isSupportedCompany } from './scrapers.js';
 import { createPortalLink, listBrokerages, describeSnapError } from './snaptrade.js';
 import { migrateLegacySnapTradeUsers } from './snaptradeUser.js';
@@ -1385,6 +1389,165 @@ app.post('/vouchers/sync/buyme/cancel', async (req, reply) => {
 setInterval(() => {
   for (const [id, state] of buymeSyncs) {
     if (state.finished) buymeSyncs.delete(id);
+  }
+}, 60 * 60 * 1000).unref?.();
+
+// --- Voucher sync: Hi-Tech Zone --------------------------------------------
+// Hi-Tech Zone (htz.mltp.co.il) uses a code-only balance lookup gated by
+// Google reCAPTCHA. We can't solve reCAPTCHA headlessly, so the scraper
+// launches a VISIBLE Chrome window — the user solves the CAPTCHA and
+// clicks the שלח (submit) button themselves; puppeteer just fills the
+// digital code, then waits for the navigation to /Ballance and parses
+// the resulting balance line. There's no email/OTP step, so the
+// /htzone/* state is simpler than BuyMe's: just `awaiting-user-action
+// → syncing → success | error`.
+
+interface HtzSync {
+  status: 'awaiting-user-action' | 'syncing' | 'success' | 'error';
+  message?: string;
+  error?: string;
+  vouchers?: { id: string; name: string; balance: number; currency: string }[];
+  finished?: boolean;
+  /** True once the user (or the cleanup interval) has cancelled the
+   *  sync. Used to gate the post-scrape upsert so a slow-completing
+   *  scrape can't write a voucher the user said no to. */
+  cancelled?: boolean;
+  /** Retained from the scraper's onBrowserReady so /cancel can close
+   *  the visible Chrome window AND interrupt any in-flight Puppeteer
+   *  op (every op throws after browser.close, which falls into the
+   *  scraper's catch and exits cleanly). */
+  browser?: import('puppeteer').Browser;
+}
+
+const htzSyncs = new Map<string, HtzSync>();
+const HTZ_PROVIDER_LABEL = 'Hi-Tech Zone';
+const HTZ_CODE_VAULT_KEY = 'htz:code';
+
+app.get('/vouchers/sync/htzone/saved-code', async (_req, reply) => {
+  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+  if (!vault || !vault.unlocked) return { code: null };
+  try {
+    const code = vault.loadSecret(HTZ_CODE_VAULT_KEY) ?? null;
+    return { code };
+  } catch {
+    return { code: null };
+  }
+});
+
+app.post('/vouchers/sync/htzone/start', async (req, reply) => {
+  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+  const body = (req.body ?? {}) as { code?: string; remember?: boolean };
+  const code = String(body.code || '').replace(/\D/g, '');
+  if (!/^\d{8,9}$/.test(code)) {
+    return reply.code(400).send({ error: 'the digital code must be 8 or 9 digits' });
+  }
+
+  const syncId = shortId();
+  const state: HtzSync = {
+    status: 'awaiting-user-action',
+    message: 'Opening Hi-Tech Zone — tick the reCAPTCHA in the browser window and click שלח.',
+  };
+  htzSyncs.set(syncId, state);
+
+  if (body.remember && vault && vault.unlocked) {
+    try { vault.saveSecret(HTZ_CODE_VAULT_KEY, code); }
+    catch { /* fine, just won't be remembered */ }
+  }
+
+  const debugDir = join(dataDir, 'debug');
+  try { mkdirSync(debugDir, { recursive: true }); } catch { /* best effort */ }
+  const htzProfileDir = join(dataDir, 'browser-profiles', 'htzone');
+  void (async () => {
+    try {
+      const cards = await scrapeHitechZoneBalance(code, {
+        debugDumpPath: join(debugDir, 'htzone-balance.html'),
+        userDataDir: htzProfileDir,
+        // Stash the browser so /cancel can close it. The handle lives on
+        // the in-memory sync state and is cleared in the finally below.
+        onBrowserReady: (browser) => { state.browser = browser; },
+      });
+      // If the user (or the cleanup interval) cancelled between scrape
+      // start and now, do NOT persist the result. The state has already
+      // been set to 'error/Cancelled.' by the cancel handler — overwriting
+      // it would silently insert a voucher the user said no to and toast
+      // a success message on the closed modal.
+      if (state.cancelled) return;
+      const created: { id: string; name: string; balance: number; currency: string }[] = [];
+      for (const card of cards) {
+        const v = repo!.upsertScrapedVoucher({
+          name: card.brand || 'Hi-Tech Zone card',
+          provider: HTZ_PROVIDER_LABEL,
+          balance: card.balance,
+          currency: card.currency,
+          expiresOn: card.expiresOn,
+          externalId: card.externalId,
+        });
+        created.push({ id: v.id, name: v.name, balance: v.balance, currency: v.currency });
+      }
+      state.status = 'success';
+      state.message = `Synced ${cards.length} card${cards.length === 1 ? '' : 's'}.`;
+      state.vouchers = created;
+      state.finished = true;
+    } catch (err) {
+      // Don't overwrite a cancellation reason with the resulting puppeteer
+      // exception ("Protocol error: Target closed.") — the user wants to
+      // see "Cancelled.", not a stack-derived message.
+      if (state.cancelled) return;
+      state.status = 'error';
+      state.error = err instanceof Error ? err.message : String(err);
+      state.message = state.error;
+      state.finished = true;
+    } finally {
+      // Browser is now closed (either by the scrape exiting cleanly or by
+      // /cancel calling browser.close); drop the ref so the cleanup
+      // interval can GC the whole entry without holding a dead Browser.
+      state.browser = undefined;
+    }
+  })();
+
+  return { syncId };
+});
+
+app.get('/vouchers/sync/htzone/status/:id', async (req, reply) => {
+  const { id } = req.params as { id: string };
+  const state = htzSyncs.get(id);
+  if (!state) return reply.code(404).send({ error: 'sync not found' });
+  return {
+    status: state.status,
+    message: state.message ?? null,
+    error: state.error ?? null,
+    vouchers: state.vouchers ?? null,
+    finished: !!state.finished,
+  };
+});
+
+app.post('/vouchers/sync/htzone/cancel', async (req, reply) => {
+  const body = (req.body ?? {}) as { syncId?: string };
+  const syncId = String(body.syncId || '');
+  const state = htzSyncs.get(syncId);
+  if (!state) return reply.code(404).send({ error: 'sync not found' });
+  // Set the final state FIRST so any in-flight status poll sees it. The
+  // cancelled flag is what gates the post-scrape upsert (see start), so
+  // even if the puppeteer flow finishes between this line and the close,
+  // the voucher write is skipped.
+  state.status = 'error';
+  state.error = 'Cancelled.';
+  state.finished = true;
+  state.cancelled = true;
+  // Closing the browser is what actually stops the scrape — every
+  // Puppeteer op after this throws, the scrape's catch fires, state
+  // already reads 'Cancelled.', the upsert is skipped. The .catch
+  // swallows the inevitable "Browser was closed" race.
+  if (state.browser) {
+    state.browser.close().catch(() => { /* already closing */ });
+    state.browser = undefined;
+  }
+  return { ok: true };
+});
+
+setInterval(() => {
+  for (const [id, state] of htzSyncs) {
+    if (state.finished) htzSyncs.delete(id);
   }
 }, 60 * 60 * 1000).unref?.();
 

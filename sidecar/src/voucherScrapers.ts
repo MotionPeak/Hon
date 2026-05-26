@@ -1113,3 +1113,197 @@ async function extractBuyMeCards(page: Page): Promise<ScrapedVoucher[]> {
     return out;
   });
 }
+
+// ============================================================================
+// Hi-Tech Zone — https://htz.mltp.co.il/Getballance
+// ============================================================================
+// Different shape from the others: there's no account login, just a balance
+// lookup page. The user enters their 8-9 digit "digital code" (the prefix
+// of the physical card number), then solves a Google reCAPTCHA, then
+// submits. The next page (/Ballance — note the typo) renders one line:
+//   "הי <code> ,\nיתרתך: <balance> ₪\nנכון לתאריך : DD/MM/YYYY\n..."
+//
+// reCAPTCHA cannot be solved headlessly, so this scraper ALWAYS launches a
+// visible browser window. The puppeteer step fills the digital code, then
+// waits for the user to tick the CAPTCHA + click שלח themselves. The end
+// signal is a URL change to /Ballance (or the balance text appearing).
+
+const HTZ_GETBALANCE_URL = 'https://htz.mltp.co.il/Getballance';
+
+const htzLog = makeLog('vouchers:htz');
+
+export interface HitechZoneScrapeOptions {
+  debugDumpPath?: string;
+  userDataDir?: string;
+  /** Override the post-submit wait window (default 180s — enough time
+   *  for the user to comfortably solve the CAPTCHA). */
+  userActionTimeoutMs?: number;
+  /** Fired once Puppeteer's browser has launched, so the caller can
+   *  retain a handle for cancellation. Calling `browser.close()` from
+   *  the caller is the signal that aborts the scrape — every Puppeteer
+   *  op after that throws and the function returns through its catch. */
+  onBrowserReady?: (browser: Browser) => void;
+}
+
+export async function scrapeHitechZoneBalance(
+  digitalCode: string,
+  options: HitechZoneScrapeOptions = {},
+): Promise<ScrapedVoucher[]> {
+  const done = htzLog.timer('scrape', { url: HTZ_GETBALANCE_URL });
+  const code = String(digitalCode || '').replace(/\D/g, '');
+  if (!/^\d{8,9}$/.test(code)) {
+    done({ result: 'invalid-code' });
+    throw new Error('The htzone digital code must be 8 or 9 digits.');
+  }
+
+  if (options.userDataDir) {
+    try { mkdirSync(options.userDataDir, { recursive: true }); } catch {/* best effort */}
+    sweepStaleProfileLocks(options.userDataDir);
+  }
+  // CRITICAL: visible (non-headless). reCAPTCHA's bot-detection refuses to
+  // present a checkbox in headless Chrome, and the user has to click it
+  // themselves either way.
+  const browser: Browser = await puppeteer.launch({
+    headless: false,
+    defaultViewport: null,
+    userDataDir: options.userDataDir,
+    args: [
+      ...(process.env.HON_BROWSER_NO_SANDBOX === '1'
+        ? ['--no-sandbox', '--disable-setuid-sandbox'] : []),
+      '--window-size=900,720',
+    ],
+  });
+  // Hand the browser to the caller so a cancel request can close it,
+  // which makes every subsequent Puppeteer op throw — the scrape's
+  // catch block then returns and the server's IIFE finishes cleanly
+  // without writing a voucher the user cancelled.
+  try { options.onBrowserReady?.(browser); } catch { /* never let a caller's bookkeeping break the scrape */ }
+  let page: Page | undefined;
+  try {
+    page = await browser.newPage();
+    // tsx __name polyfill for the same reason BuyMe needs it.
+    await page.evaluateOnNewDocument(() => {
+      // @ts-expect-error — defined in the page, not in Node's types
+      if (typeof globalThis.__name === 'undefined') {
+        // @ts-expect-error — runtime polyfill
+        globalThis.__name = (fn: unknown) => fn;
+      }
+    });
+
+    htzLog.info('navigate', { url: HTZ_GETBALANCE_URL });
+    await page.goto(HTZ_GETBALANCE_URL, { waitUntil: 'domcontentloaded', timeout: 45_000 });
+    htzLog.info('navigate.done', { landedUrl: page.url() });
+
+    // Sometimes the persistent profile carries a session that lets us skip
+    // straight to /Ballance — if so, harvest and return.
+    if (/\/Ballance/i.test(page.url())) {
+      htzLog.info('fastpath.balance.already');
+      return await harvestHtzAndFinish(page, options, done, code);
+    }
+
+    // Fill the digital-code input. The form has just one visible text
+    // input (#eightDigit) — fill it via the React-aware setter.
+    await page.waitForFunction(
+      () => !!document.querySelector('#eightDigit'),
+      { timeout: 20_000 },
+    );
+    await fillBySelector(page, '#eightDigit', code);
+    htzLog.info('code.filled');
+
+    // Now wait for the user to solve the CAPTCHA and click שלח themselves.
+    // Detect completion by either a URL change to /Ballance OR the
+    // "יתרתך:" balance line appearing on the current page (in case it's
+    // rendered inline without a full navigation).
+    const wait = options.userActionTimeoutMs ?? 180_000;
+    htzLog.info('awaiting.user.action', { timeoutMs: wait });
+    try {
+      await page.waitForFunction(
+        () => /\/Ballance/i.test(location.href)
+          || ((document.body?.innerText || '').includes('יתרתך')),
+        { timeout: wait, polling: 1000 },
+      );
+    } catch (err) {
+      if (options.debugDumpPath) {
+        try { writeFileSync(options.debugDumpPath, await page.content(), 'utf8'); }
+        catch {/* best effort */}
+      }
+      throw new Error(
+        'Hi-Tech Zone balance never loaded. Did you tick the reCAPTCHA '
+        + 'and click שלח within ' + Math.round(wait / 1000) + 's?',
+      );
+    }
+    htzLog.info('balance.page.ready', { landedUrl: page.url() });
+
+    return await harvestHtzAndFinish(page, options, done, code);
+  } catch (err) {
+    htzLog.error('scrape.threw', {
+      message: err instanceof Error ? err.message : String(err),
+    });
+    if (page && options.debugDumpPath) {
+      try { writeFileSync(options.debugDumpPath, await page.content(), 'utf8'); }
+      catch {/* best effort */}
+    }
+    done({ result: 'exception' });
+    throw err;
+  } finally {
+    await browser.close().catch(() => {});
+  }
+}
+
+async function harvestHtzAndFinish(
+  page: Page,
+  options: HitechZoneScrapeOptions,
+  done: (fields?: Record<string, unknown>) => void,
+  code: string,
+): Promise<ScrapedVoucher[]> {
+  if (options.debugDumpPath) {
+    try {
+      writeFileSync(options.debugDumpPath, await page.content(), 'utf8');
+      htzLog.info('debug.dump', { path: options.debugDumpPath });
+    } catch {/* best effort */}
+  }
+  const parsed = await extractHtzBalance(page, code);
+  htzLog.info('balance.extracted', {
+    found: !!parsed,
+    balance: parsed?.balance ?? null,
+  });
+  if (!parsed) {
+    done({ result: 'no-balance' });
+    throw new Error(
+      'Could not read the Hi-Tech Zone balance from the result page. '
+      + 'The layout may have changed — see debug HTML dump.',
+    );
+  }
+  done({ result: 'ok', cards: 1 });
+  return [parsed];
+}
+
+// Parses the /Ballance text. The whole result is in body text, e.g.:
+//   "הי 144678784 ,\nיתרתך: 350 ₪\nנכון לתאריך : 26/05/2026"
+// We pull the balance amount (the number after יתרתך:) and the as-of
+// date (after נכון לתאריך). Card identity is the digital code itself —
+// it's both the lookup key and the only stable id we have.
+async function extractHtzBalance(
+  page: Page,
+  code: string,
+): Promise<ScrapedVoucher | null> {
+  const data = await page.evaluate(() => {
+    const text = (document.body?.innerText || '').replace(/\s+/g, ' ').trim();
+    return { text };
+  });
+  const balanceMatch = data.text.match(/יתרתך\s*[:：]?\s*([\d,.]+)\s*₪/);
+  if (!balanceMatch) return null;
+  const balance = parseFloat(balanceMatch[1].replace(/,/g, ''));
+  if (!Number.isFinite(balance)) return null;
+  // Trailing 4 digits of the code give us a "name" that hides the rest.
+  const last4 = code.slice(-4);
+  const name = `Hi-Tech Zone כרטיס ****${last4}`;
+  return {
+    externalId: `htz-${code}`,
+    brand: name,
+    last4,
+    balance,
+    currency: 'ILS',
+    expiresOn: null,
+  };
+}
