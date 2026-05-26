@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+import { render, screen, within, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { RecurringView } from './RecurringView';
 import { SettingsProvider } from '../settings/useSettings';
 import { installFetchMock } from '../test/mockFetch';
@@ -176,5 +177,136 @@ describe('RecurringView — read-only', () => {
     renderView();
     const strip = await screen.findByTestId('recurring-total');
     expect(within(strip).getByText(/4,?000/)).toBeInTheDocument();
+  });
+});
+
+const TWO_RENT = {
+  'GET /api/transactions': () => ({
+    transactions: [
+      { id: 't1', accountId: 'a', externalId: 'x1', date: `${month(-2)}-15`,
+        processedDate: null, amount: -4000, currency: 'ILS',
+        description: 'Rent', memo: null, kind: null, status: null,
+        category: 'Housing', createdAt: '2025-01-01' },
+      { id: 't2', accountId: 'a', externalId: 'x2', date: `${month(-1)}-15`,
+        processedDate: null, amount: -4000, currency: 'ILS',
+        description: 'Rent', memo: null, kind: null, status: null,
+        category: 'Housing', createdAt: '2025-01-01' },
+    ],
+  }),
+  'GET /api/categories': () => CATEGORIES,
+  ...EMPTY_HELPERS,
+} as const;
+
+describe('RecurringView — CRUD', () => {
+  it('shows a × remove button on each row (Remove from Fixed bills)', async () => {
+    installFetchMock({ ...TWO_RENT });
+    renderView();
+    const row = (await screen.findByText('Rent')).closest('.rec-row')!;
+    expect(within(row as HTMLElement).getByRole('button', { name: /remove from fixed bills/i }))
+      .toBeInTheDocument();
+  });
+
+  it('× PUTs /merchant-frequency with frequency=ignore and refetches', async () => {
+    const put = vi.fn((_body: unknown) => ({ ok: true }));
+    let freqCalls = 0;
+    installFetchMock({
+      ...TWO_RENT,
+      'GET /api/merchant-frequencies': () => {
+        freqCalls += 1;
+        return { frequencies: {} };
+      },
+      'PUT /api/merchant-frequency': put,
+    });
+    const user = userEvent.setup();
+    renderView();
+    const row = (await screen.findByText('Rent')).closest('.rec-row')!;
+    await user.click(
+      within(row as HTMLElement).getByRole('button', { name: /remove from fixed bills/i }),
+    );
+    await waitFor(() => expect(put).toHaveBeenCalled());
+    const body = put.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(body.frequency).toBe('ignore');
+    expect(typeof body.key).toBe('string');
+    expect(freqCalls).toBeGreaterThan(1);
+  });
+
+  it('renders a ÷N split pill on each category section header', async () => {
+    installFetchMock({
+      ...TWO_RENT,
+      'GET /api/category-splits': () => ({ splits: { Housing: 3 } }),
+    });
+    renderView();
+    const section = (await screen.findByRole('heading', { name: /housing/i })).closest('section')!;
+    const pill = within(section as HTMLElement).getByRole('button', { name: /split/i });
+    expect(pill.textContent).toMatch(/÷\s*3/);
+  });
+
+  it('shows ÷1 (un-split affordance) when no override exists', async () => {
+    installFetchMock({ ...TWO_RENT });
+    renderView();
+    const section = (await screen.findByRole('heading', { name: /housing/i })).closest('section')!;
+    const pill = within(section as HTMLElement).getByRole('button', { name: /split/i });
+    expect(pill.textContent).toMatch(/÷\s*1/);
+  });
+
+  it('opens a split editor dialog when the ÷N pill is clicked', async () => {
+    installFetchMock({
+      ...TWO_RENT,
+      'GET /api/category-splits': () => ({ splits: { Housing: 3 } }),
+    });
+    const user = userEvent.setup();
+    renderView();
+    const section = (await screen.findByRole('heading', { name: /housing/i })).closest('section')!;
+    await user.click(within(section as HTMLElement).getByRole('button', { name: /split/i }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText(/split housing/i)).toBeInTheDocument();
+    const input = within(dialog).getByLabelText(/people sharing/i) as HTMLInputElement;
+    expect(input.value).toBe('3');
+  });
+
+  it('saving the split dialog PUTs /category-split and refetches', async () => {
+    const put = vi.fn((_body: unknown) => ({ ok: true }));
+    let splitCalls = 0;
+    installFetchMock({
+      ...TWO_RENT,
+      'GET /api/category-splits': () => {
+        splitCalls += 1;
+        return { splits: {} };
+      },
+      'PUT /api/category-split': put,
+    });
+    const user = userEvent.setup();
+    renderView();
+    const section = (await screen.findByRole('heading', { name: /housing/i })).closest('section')!;
+    await user.click(within(section as HTMLElement).getByRole('button', { name: /split/i }));
+    const dialog = await screen.findByRole('dialog');
+    const input = within(dialog).getByLabelText(/people sharing/i);
+    await user.clear(input);
+    await user.type(input, '4');
+    await user.click(within(dialog).getByRole('button', { name: /save/i }));
+    await waitFor(() => expect(put).toHaveBeenCalled());
+    const body = put.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(body.category).toBe('Housing');
+    expect(body.splitCount).toBe(4);
+    expect(splitCalls).toBeGreaterThan(1);
+  });
+
+  it('"Don\'t split" in the dialog PUTs splitCount=null', async () => {
+    const put = vi.fn((_body: unknown) => ({ ok: true }));
+    installFetchMock({
+      ...TWO_RENT,
+      'GET /api/category-splits': () => ({ splits: { Housing: 3 } }),
+      'PUT /api/category-split': put,
+    });
+    const user = userEvent.setup();
+    renderView();
+    const section = (await screen.findByRole('heading', { name: /housing/i })).closest('section')!;
+    await user.click(within(section as HTMLElement).getByRole('button', { name: /split/i }));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: /don.t split/i }));
+    await waitFor(() => expect(put).toHaveBeenCalled());
+    const body = put.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(body.category).toBe('Housing');
+    expect(body.splitCount).toBeNull();
   });
 });
