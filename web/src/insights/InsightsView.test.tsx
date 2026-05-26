@@ -281,6 +281,130 @@ describe('InsightsView — Brokerage sub-tab', () => {
     expect(points.length).toBe(3);
   });
 
+  it('Brokerage shows 5 stat tiles (Portfolio / Gain·1Y / Unrealized P&L / Return on cost / Holdings)', async () => {
+    const user = userEvent.setup();
+    // Build a year of monthly snapshots ending today, ramping up.
+    const snapshots: { accountId: string; date: string; value: number; currency: string }[] = [];
+    const baseDate = new Date(today);
+    for (let i = 12; i >= 0; i--) {
+      const d = new Date(baseDate.getFullYear(), baseDate.getMonth() - i, 15);
+      snapshots.push({
+        accountId: 'b1',
+        date: d.toISOString().slice(0, 10),
+        value: 10000 + (12 - i) * 200,
+        currency: 'USD',
+      });
+    }
+    installFetchMock({
+      ...EMPTY_TXNS,
+      'GET /api/brokerage': () => ({
+        holdings: [
+          {
+            accountId: 'b1', symbol: 'VT', description: 'Vanguard Total World',
+            units: 10, price: 100, currency: 'USD',
+            costBasis: 800, openPnl: 200, value: 1000,
+            updatedAt: today.toISOString().slice(0, 10),
+          },
+          {
+            accountId: 'b1', symbol: 'VBR', description: 'Vanguard Small-Cap',
+            units: 5, price: 50, currency: 'USD',
+            costBasis: 200, openPnl: 50, value: 250,
+            updatedAt: today.toISOString().slice(0, 10),
+          },
+        ],
+        snapshots,
+        holdingSnapshots: [],
+        performance: [],
+        ilsRates: { USD: 3.7 },
+      }),
+    });
+    renderView();
+    await user.click(await screen.findByRole('tab', { name: /brokerage/i }));
+    const tiles = await screen.findAllByTestId('brokerage-stat');
+    expect(tiles).toHaveLength(5);
+    // Portfolio value (final snapshot = 10000 + 12*200 = 12400)
+    expect(within(tiles[0]!).getByText(/portfolio/i)).toBeInTheDocument();
+    // Holdings count
+    expect(within(tiles[4]!).getByText(/holdings/i)).toBeInTheDocument();
+    expect(within(tiles[4]!).getByText(/^2$/)).toBeInTheDocument();
+    // Unrealized P&L sums to +250.
+    expect(within(tiles[2]!).getByText(/p.?.?l/i)).toBeInTheDocument();
+    expect(within(tiles[2]!).getByText(/250/)).toBeInTheDocument();
+    // Return on cost: 250 / 1000 = 25%.
+    expect(within(tiles[3]!).getByText(/^Return/i)).toBeInTheDocument();
+    expect(within(tiles[3]!).getByText(/25\.?\d*%/)).toBeInTheDocument();
+  });
+
+  it('Brokerage range pills (1M / 3M / YTD / 1Y / ALL) filter the chart series', async () => {
+    const user = userEvent.setup();
+    // 18 monthly snapshots ending today.
+    const snapshots: { accountId: string; date: string; value: number; currency: string }[] = [];
+    const base = new Date(today.getFullYear(), today.getMonth(), 15);
+    for (let i = 18; i >= 0; i--) {
+      const d = new Date(base.getFullYear(), base.getMonth() - i, 15);
+      snapshots.push({
+        accountId: 'b1',
+        date: d.toISOString().slice(0, 10),
+        value: 10000 + (18 - i) * 100,
+        currency: 'USD',
+      });
+    }
+    installFetchMock({
+      ...EMPTY_TXNS,
+      'GET /api/brokerage': () => ({
+        holdings: [{
+          accountId: 'b1', symbol: 'VT', description: 'World',
+          units: 100, price: 100, currency: 'USD',
+          costBasis: 9000, openPnl: 1000, value: 10000,
+          updatedAt: today.toISOString().slice(0, 10),
+        }],
+        snapshots, holdingSnapshots: [], performance: [], ilsRates: { USD: 3.7 },
+      }),
+    });
+    renderView();
+    await user.click(await screen.findByRole('tab', { name: /brokerage/i }));
+    const chart = await screen.findByTestId('brokerage-chart');
+    // Default 1Y → ~13 monthly points (12 months back + current).
+    const oneYearPoints = chart.querySelectorAll('circle').length;
+    // 3M → fewer points than 1Y.
+    await user.click(screen.getByRole('button', { name: /^3M$/ }));
+    const threeMPoints = (await screen.findByTestId('brokerage-chart'))
+      .querySelectorAll('circle').length;
+    expect(threeMPoints).toBeLessThan(oneYearPoints);
+    expect(threeMPoints).toBeGreaterThan(0);
+    // ALL → at least as many as 1Y.
+    await user.click(screen.getByRole('button', { name: /^ALL$/ }));
+    const allPoints = (await screen.findByTestId('brokerage-chart'))
+      .querySelectorAll('circle').length;
+    expect(allPoints).toBeGreaterThanOrEqual(oneYearPoints);
+  });
+
+  it('Brokerage USD↔ILS toggle reformats values in the selected currency', async () => {
+    const user = userEvent.setup();
+    installFetchMock({
+      ...EMPTY_TXNS,
+      'GET /api/brokerage': () => ({
+        holdings: [{
+          accountId: 'b1', symbol: 'VT', description: 'World',
+          units: 10, price: 100, currency: 'USD',
+          costBasis: 800, openPnl: 200, value: 1000,
+          updatedAt: today.toISOString().slice(0, 10),
+        }],
+        snapshots: [{ accountId: 'b1', date: today.toISOString().slice(0, 10), value: 1000, currency: 'USD' }],
+        holdingSnapshots: [], performance: [], ilsRates: { USD: 3.7 },
+      }),
+    });
+    renderView();
+    await user.click(await screen.findByRole('tab', { name: /brokerage/i }));
+    const tiles = await screen.findAllByTestId('brokerage-stat');
+    // Default USD: portfolio = $1,000
+    expect(within(tiles[0]!).getByText(/\$1,?000/)).toBeInTheDocument();
+    // Flip to ILS — $1,000 × 3.7 = ₪3,700.
+    await user.click(screen.getByRole('button', { name: /^ILS$/ }));
+    expect(within((await screen.findAllByTestId('brokerage-stat'))[0]!)
+      .getByText(/3,?700/)).toBeInTheDocument();
+  });
+
   it('Brokerage shows a holdings list with symbol + units + value', async () => {
     const user = userEvent.setup();
     installFetchMock({
@@ -312,7 +436,8 @@ describe('InsightsView — Brokerage sub-tab', () => {
     expect(within(list).getByText('AAPL')).toBeInTheDocument();
     expect(within(list).getByText('VOO')).toBeInTheDocument();
     expect(within(list).getByText(/Apple Inc/)).toBeInTheDocument();
-    // 10 units.
-    expect(within(list).getByText(/10 units/i)).toBeInTheDocument();
+    // Each holding shows its market value.
+    expect(within(list).getByText(/2,?000/)).toBeInTheDocument();
+    expect(within(list).getByText(/2,?400/)).toBeInTheDocument();
   });
 });

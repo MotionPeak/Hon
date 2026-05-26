@@ -882,34 +882,140 @@ button.mini { padding: 5px 11px; font-size: 12px; }
 
 /* Brokerage value-over-time chart + holdings list. */
 .brokerage-pane { display: flex; flex-direction: column; }
-.brokerage-chart {
-  width: 100%; height: 180px;
-  display: block;
+
+/* Top stat row — 5 boxes (Portfolio / Gain·1Y / P&L / Return / Holdings). */
+.brk-stats {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 10px;
+  margin-bottom: 16px;
 }
+.brk-stat {
+  background: var(--bg-elev); border: 1px solid var(--hairline);
+  border-radius: 14px; padding: 14px 16px;
+  text-align: center;
+}
+.brk-stat-val {
+  font: 800 18px/1.1 ui-rounded, "SF Pro Rounded", system-ui;
+  color: var(--text); font-variant-numeric: tabular-nums;
+}
+.brk-stat-val.good { color: var(--green); }
+.brk-stat-val.bad  { color: var(--red); }
+.brk-stat-sub {
+  font-size: 11.5px; font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  margin-top: 3px; color: var(--muted);
+}
+.brk-stat-sub.good { color: var(--green); }
+.brk-stat-sub.bad  { color: var(--red); }
+.brk-stat-cap {
+  font-size: 10px; font-weight: 700; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--muted); margin-top: 6px;
+}
+@media (max-width: 920px) {
+  .brk-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* Chart card head — change pill + range + currency segments. */
+.brk-chart-card { padding-top: 18px; }
+.brk-chart-head {
+  display: flex; align-items: center; flex-wrap: wrap;
+  gap: 10px; margin-bottom: 12px;
+}
+.brk-change {
+  font-size: 12px; font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  padding: 3px 9px; border-radius: 999px;
+}
+.brk-change.good { background: rgba(61,220,132,0.16); color: var(--green); }
+.brk-change.bad  { background: rgba(239,107,107,0.16); color: var(--red); }
+.brk-range, .brk-cur {
+  display: inline-flex; gap: 2px; padding: 2px;
+  background: var(--card-hi); border-radius: 8px;
+}
+.brk-range button, .brk-cur button {
+  border: 0; background: transparent; color: var(--muted);
+  font-size: 11.5px; font-weight: 700;
+  padding: 4px 10px; border-radius: 6px; cursor: pointer;
+  transition: background-color .15s, color .15s;
+}
+.brk-range button:hover, .brk-cur button:hover { color: var(--text); }
+.brk-range button.on, .brk-cur button.on {
+  background: var(--accent); color: #fff;
+}
+.brokerage-chart {
+  width: 100%; height: 200px; display: block;
+  margin: 4px 0 6px;
+}
+.brk-chart-axis {
+  display: flex; justify-content: space-between;
+  font-size: 10.5px; font-weight: 600; letter-spacing: .04em;
+  text-transform: uppercase; color: var(--faint);
+  margin-top: 4px;
+}
+
+/* Holdings card header total. */
+.brk-total-cap {
+  font-size: 9.5px; font-weight: 700; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--muted); margin-right: 6px;
+}
+
+/* Holdings rows — dot + symbol + weight bar + value + pnl badge. */
 .brokerage-holdings {
   list-style: none; padding: 0; margin: 0;
   display: flex; flex-direction: column;
 }
 .bh-row {
   display: grid;
-  grid-template-columns: 1fr auto auto;
-  align-items: center; gap: 16px;
+  grid-template-columns: auto 1fr 1fr auto auto;
+  align-items: center; gap: 14px;
   padding: 11px 0;
   border-top: 1px solid var(--hairline);
 }
 .bh-row:first-child { border-top: 0; }
+.bh-dot {
+  width: 10px; height: 10px; border-radius: 50%; flex: none;
+}
 .bh-symbol {
   font: 700 14px/1.2 ui-rounded, "SF Pro Rounded", system-ui;
   color: var(--text); letter-spacing: .02em;
 }
 .bh-desc { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
-.bh-meta {
-  font-size: 11.5px; color: var(--muted);
-  font-variant-numeric: tabular-nums; white-space: nowrap;
+.bh-weight {
+  background: var(--card-hi); border-radius: 999px;
+  height: 6px; overflow: hidden;
+}
+.bh-weight-fill {
+  display: block; height: 100%; border-radius: 999px;
+  transition: width .35s cubic-bezier(.2,.7,.2,1);
 }
 .bh-value {
   font: 700 14px/1 ui-rounded, "SF Pro Rounded", system-ui;
-  color: var(--text); font-variant-numeric: tabular-nums; white-space: nowrap;
+  color: var(--text); font-variant-numeric: tabular-nums;
+  white-space: nowrap; text-align: right;
+}
+.bh-weight-pct {
+  font-size: 10.5px; color: var(--muted);
+  margin-top: 3px; font-variant-numeric: tabular-nums;
+}
+.brk-pnl {
+  font-size: 11px; font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  padding: 3px 9px; border-radius: 999px;
+  white-space: nowrap;
+}
+.brk-pnl.good { background: rgba(61,220,132,0.16); color: var(--green); }
+.brk-pnl.bad  { background: rgba(239,107,107,0.16); color: var(--red); }
+@media (max-width: 760px) {
+  .bh-row {
+    grid-template-columns: auto 1fr auto;
+    grid-template-areas: "dot main val" "dot weight weight" ". pnl pnl";
+  }
+  .bh-dot { grid-area: dot; }
+  .bh-main { grid-area: main; }
+  .bh-weight { grid-area: weight; }
+  .bh-value { grid-area: val; }
+  .brk-pnl { grid-area: pnl; justify-self: end; }
 }
 .ins-card {
   background: var(--card); border: 1px solid var(--hairline);

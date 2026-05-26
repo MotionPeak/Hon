@@ -120,8 +120,43 @@ interface BrokerageResp {
   ilsRates: Record<string, number> | null;
 }
 
+type Range = '1M' | '3M' | 'YTD' | '1Y' | 'ALL';
+const RANGES: Range[] = ['1M', '3M', 'YTD', '1Y', 'ALL'];
+
+function convertAmount(
+  amount: number, from: string, to: string, rates: Record<string, number> | null,
+): number {
+  if (from === to) return amount;
+  const toIls = from === 'ILS' ? 1 : rates?.[from] ?? 1;
+  const fromIls = to === 'ILS' ? 1 : rates?.[to] ?? 1;
+  return (amount * toIls) / fromIls;
+}
+
+function rangeStart(range: Range, latest: string): string {
+  const d = new Date(latest);
+  if (range === 'ALL') return '0000-01-01';
+  if (range === 'YTD') return `${d.getFullYear()}-01-01`;
+  if (range === '1M') d.setMonth(d.getMonth() - 1);
+  if (range === '3M') d.setMonth(d.getMonth() - 3);
+  if (range === '1Y') d.setFullYear(d.getFullYear() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+function pickDisplayCurrency(holdings: { currency: string }[]): string {
+  const counts = new Map<string, number>();
+  for (const h of holdings) counts.set(h.currency, (counts.get(h.currency) ?? 0) + 1);
+  let best = 'USD';
+  let bestN = 0;
+  for (const [cur, n] of counts) {
+    if (n > bestN) { best = cur; bestN = n; }
+  }
+  return best;
+}
+
 function BrokerageSubTab() {
   const [data, setData] = useState<BrokerageResp | null>(null);
+  const [range, setRange] = useState<Range>('1Y');
+  const [displayCur, setDisplayCur] = useState<string | null>(null);
   useEffect(() => {
     api<BrokerageResp>('/brokerage')
       .then(setData)
@@ -139,61 +174,180 @@ function BrokerageSubTab() {
       </p>
     );
   }
+  const rates = data.ilsRates;
+  const cur = displayCur ?? pickDisplayCurrency(data.holdings);
 
-  // Aggregate snapshots by date — sum across accounts, convert non-ILS
-  // to ILS via the rates ride-along. Sorted ascending by date.
+  // Full series (sum across accounts), in the display currency.
   const dailyTotals = new Map<string, number>();
   for (const s of data.snapshots) {
-    const rate = s.currency === 'ILS' ? 1 : data.ilsRates?.[s.currency] ?? 1;
-    dailyTotals.set(s.date, (dailyTotals.get(s.date) ?? 0) + s.value * rate);
+    const v = convertAmount(s.value, s.currency, cur, rates);
+    dailyTotals.set(s.date, (dailyTotals.get(s.date) ?? 0) + v);
   }
-  const series = Array.from(dailyTotals.entries())
+  const fullSeries: SeriesPoint[] = Array.from(dailyTotals.entries())
     .map(([date, value]) => ({ date, value }))
     .sort((a, b) => a.date.localeCompare(b.date));
 
+  const latestDate = fullSeries.at(-1)?.date ?? new Date().toISOString().slice(0, 10);
+  const cutoff = rangeStart(range, latestDate);
+  const series = fullSeries.filter((p) => p.date >= cutoff);
+
   const currentValue = series.at(-1)?.value ?? 0;
+  const startValue = series[0]?.value ?? currentValue;
+  const change = currentValue - startValue;
+  const changePct = startValue > 0 ? (change / startValue) * 100 : 0;
+
+  // Holdings totals — convert each holding into the display currency.
+  let portfolioValue = 0;
+  let unrealized = 0;
+  let costBasis = 0;
+  for (const h of data.holdings) {
+    portfolioValue += convertAmount(h.value ?? 0, h.currency, cur, rates);
+    unrealized   += convertAmount(h.openPnl ?? 0, h.currency, cur, rates);
+    costBasis    += convertAmount(h.costBasis ?? 0, h.currency, cur, rates);
+  }
+  const returnOnCost = costBasis > 0 ? (unrealized / costBasis) * 100 : 0;
+
+  // Gain · 1Y: portfolio value now vs the snapshot ~365d back (or earliest).
+  const oneYearAgo = rangeStart('1Y', latestDate);
+  const oneYearPoint = fullSeries.find((p) => p.date >= oneYearAgo) ?? fullSeries[0];
+  const gain1y = oneYearPoint ? portfolioValue - oneYearPoint.value : 0;
+  const gain1yPct = oneYearPoint && oneYearPoint.value > 0
+    ? (gain1y / oneYearPoint.value) * 100
+    : 0;
+
+  // Currencies the user can toggle between — ILS + every distinct holding cur.
+  const currencies = Array.from(new Set([
+    'ILS', ...data.holdings.map((h) => h.currency),
+  ]));
 
   return (
     <div className="brokerage-pane">
-      {series.length > 0 && (
-        <section className="ins-card">
-          <header className="ins-card-head">
-            <div className="ins-sub">Value over time · ILS</div>
-            <div className="ins-totals">
-              <b>{money(currentValue, 'ILS')}</b>
+      <div className="brk-stats" data-testid="brokerage-stats">
+        <StatBox
+          label="Portfolio value"
+          value={money(portfolioValue, cur)}
+          tone=""
+        />
+        <StatBox
+          label="Gain · 1Y"
+          value={`${gain1y >= 0 ? '+' : '−'}${money(Math.abs(gain1y), cur)}`}
+          sub={`${gain1yPct >= 0 ? '+' : '−'}${Math.abs(gain1yPct).toFixed(2)}%`}
+          tone={gain1y >= 0 ? 'good' : 'bad'}
+        />
+        <StatBox
+          label="Unrealized P&L"
+          value={`${unrealized >= 0 ? '+' : '−'}${money(Math.abs(unrealized), cur)}`}
+          tone={unrealized >= 0 ? 'good' : 'bad'}
+        />
+        <StatBox
+          label="Return on cost"
+          value={`${returnOnCost >= 0 ? '+' : '−'}${Math.abs(returnOnCost).toFixed(2)}%`}
+          tone={returnOnCost >= 0 ? 'good' : 'bad'}
+        />
+        <StatBox
+          label="Holdings"
+          value={String(data.holdings.length)}
+          tone=""
+        />
+      </div>
+
+      {fullSeries.length > 0 && (
+        <section className="ins-card brk-chart-card">
+          <header className="ins-card-head brk-chart-head">
+            <div className="ins-sub">Value over time</div>
+            <span className={`brk-change ${change >= 0 ? 'good' : 'bad'}`}>
+              {change >= 0 ? '↑' : '↓'} {Math.abs(changePct).toFixed(2)}% ·{' '}
+              {change >= 0 ? '+' : '−'}{money(Math.abs(change), cur)}
+            </span>
+            <span className="spacer" />
+            <div className="seg brk-range" role="group" aria-label="Range">
+              {RANGES.map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  className={r === range ? 'on' : ''}
+                  onClick={() => setRange(r)}
+                >{r}</button>
+              ))}
             </div>
+            {currencies.length > 1 && (
+              <div className="seg brk-cur" role="group" aria-label="Currency">
+                {currencies.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    className={c === cur ? 'on' : ''}
+                    onClick={() => setDisplayCur(c)}
+                  >{c}</button>
+                ))}
+              </div>
+            )}
           </header>
-          <ValueChart series={series} />
+          <ValueChart series={series} currency={cur} />
+          <div className="brk-chart-axis">
+            <span>{series[0]?.date ?? ''}</span>
+            <span>{series.at(-1)?.date ?? ''}</span>
+          </div>
         </section>
       )}
+
       {data.holdings.length > 0 && (
         <section className="ins-card">
           <header className="ins-card-head">
-            <div className="ins-sub">Holdings · {data.holdings.length}</div>
+            <div className="ins-sub">
+              Holdings · {data.holdings.length}
+              {' '}position{data.holdings.length === 1 ? '' : 's'}
+            </div>
+            <span className="spacer" />
+            <div className="ins-totals">
+              <span className="brk-total-cap">Portfolio total</span>
+              <b>{money(portfolioValue, cur)}</b>
+            </div>
           </header>
           <ul className="brokerage-holdings" data-testid="brokerage-holdings">
             {data.holdings
               .slice()
               .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
-              .map((h) => (
-                <li key={`${h.accountId}-${h.symbol}`} className="bh-row">
-                  <div className="bh-main">
-                    <div className="bh-symbol">{h.symbol}</div>
-                    {h.description && (
-                      <div className="bh-desc">{h.description}</div>
+              .map((h, i) => {
+                const valCur = convertAmount(h.value ?? 0, h.currency, cur, rates);
+                const weight = portfolioValue > 0 ? (valCur / portfolioValue) * 100 : 0;
+                const pnlCur = convertAmount(h.openPnl ?? 0, h.currency, cur, rates);
+                const costCur = convertAmount(h.costBasis ?? 0, h.currency, cur, rates);
+                const pnlPct = costCur > 0 ? (pnlCur / costCur) * 100 : 0;
+                const palette = ['#5C9EF5', '#5CC773', '#A880ED', '#F59942', '#E96B6B'];
+                const dot = palette[i % palette.length];
+                return (
+                  <li key={`${h.accountId}-${h.symbol}`} className="bh-row brk-row">
+                    <span className="bh-dot" style={{ background: dot }} />
+                    <div className="bh-main">
+                      <div className="bh-symbol">{h.symbol}</div>
+                      {h.description && (
+                        <div className="bh-desc">{h.description}</div>
+                      )}
+                    </div>
+                    <div className="bh-weight">
+                      <span
+                        className="bh-weight-fill"
+                        style={{
+                          width: `${Math.max(2, weight)}%`,
+                          background: dot,
+                        }}
+                      />
+                    </div>
+                    <div className="bh-value">
+                      {money(valCur, cur)}
+                      <div className="bh-weight-pct">{weight.toFixed(1)}%</div>
+                    </div>
+                    {h.openPnl != null && (
+                      <span className={`brk-pnl ${pnlCur >= 0 ? 'good' : 'bad'}`}>
+                        {pnlCur >= 0 ? '▲' : '▼'} {Math.abs(pnlPct).toFixed(2)}%
+                        {' '}
+                        {pnlCur >= 0 ? '+' : '−'}{money(Math.abs(pnlCur), cur)}
+                      </span>
                     )}
-                  </div>
-                  <div className="bh-meta">
-                    {h.units.toLocaleString()} units
-                    {h.price != null && (
-                      <> · {money(h.price, h.currency)}</>
-                    )}
-                  </div>
-                  <div className="bh-value">
-                    {money(h.value ?? 0, h.currency)}
-                  </div>
-                </li>
-              ))}
+                  </li>
+                );
+              })}
           </ul>
         </section>
       )}
@@ -201,9 +355,27 @@ function BrokerageSubTab() {
   );
 }
 
+function StatBox({
+  label, value, sub, tone,
+}: {
+  label: string; value: string; sub?: string; tone: 'good' | 'bad' | '';
+}) {
+  return (
+    <div className="brk-stat" data-testid="brokerage-stat">
+      <div className={`brk-stat-val${tone ? ' ' + tone : ''}`}>{value}</div>
+      {sub && <div className={`brk-stat-sub${tone ? ' ' + tone : ''}`}>{sub}</div>}
+      <div className="brk-stat-cap">{label}</div>
+    </div>
+  );
+}
+
 interface SeriesPoint { date: string; value: number }
 
-function ValueChart({ series }: { series: SeriesPoint[] }) {
+function ValueChart({
+  series, currency = 'ILS',
+}: {
+  series: SeriesPoint[]; currency?: string;
+}) {
   const W = 600;
   const H = 180;
   const PAD = { l: 8, r: 8, t: 8, b: 18 };
@@ -249,7 +421,7 @@ function ValueChart({ series }: { series: SeriesPoint[] }) {
           r={3}
           fill="var(--accent)"
         >
-          <title>{p.date} · {money(p.value, 'ILS')}</title>
+          <title>{p.date} · {money(p.value, currency)}</title>
         </circle>
       ))}
     </svg>
