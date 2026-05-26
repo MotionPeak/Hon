@@ -89,7 +89,7 @@ input:focus, select:focus, textarea:focus {
 }
 .set-grid {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
-  gap: 20px; align-items: start;
+  gap: 20px; align-items: stretch;
 }
 .set-card {
   position: relative;
@@ -97,8 +97,10 @@ input:focus, select:focus, textarea:focus {
   border-radius: 18px; padding: 24px 26px;
   animation: fade-up .32s ease both;
 }
-/* The last card spans full grid width so it isn't stranded in a half-slot. */
-.set-grid .set-card:last-child { grid-column: 1 / -1; }
+/* Full-width cards (last + any explicitly tagged) so they aren't stranded
+   in a half-slot when the columns are uneven heights. */
+.set-grid .set-card:last-child,
+.set-grid .set-card.set-card--wide { grid-column: 1 / -1; }
 .set-card-head {
   display: flex; align-items: center; gap: 10px;
   font-size: 12.5px; font-weight: 700;
@@ -135,15 +137,22 @@ input:focus, select:focus, textarea:focus {
 
 /* --- Segmented control ------------------------------------------------- */
 .seg {
-  display: inline-flex; gap: 2px; background: var(--card-hi);
-  border-radius: 9px; padding: 2px; flex: 0 0 auto;
+  display: inline-flex; gap: 8px; flex: 0 0 auto;
+  align-self: flex-start; padding: 0; background: transparent;
 }
 .seg button {
-  padding: 5px 12px; font-size: 12.5px; font-weight: 600;
-  border-radius: 7px; background: transparent; border: 0; color: var(--muted);
-  transition: background .15s ease, color .15s ease;
+  min-width: 44px; padding: 8px 16px;
+  font-size: 13px; font-weight: 600;
+  border-radius: 9px;
+  background: var(--card-hi); border: 1px solid var(--hairline-2);
+  color: var(--muted);
+  transition: background-color .15s ease, color .15s ease, border-color .15s;
 }
-.seg button.on { background: var(--accent); color: #fff; }
+.seg button:hover { border-color: var(--accent); color: var(--text); }
+.seg button.on {
+  background: var(--accent); border-color: var(--accent);
+  color: #fff; box-shadow: 0 4px 14px var(--accent-soft);
+}
 
 /* --- Custom dropdown --------------------------------------------------- */
 .dd { position: relative; display: inline-block; min-width: 220px; flex: 0 0 auto; }
@@ -162,6 +171,11 @@ input:focus, select:focus, textarea:focus {
 }
 .dd-trigger:hover { border-color: var(--accent); }
 .dd.open .dd-trigger { border-color: var(--accent); background: var(--card); }
+.dd-chev {
+  width: 11px; height: 8px; color: var(--accent); flex: none;
+  transition: transform .18s ease;
+}
+.dd.open .dd-chev { transform: rotate(180deg); }
 .dd-menu {
   position: absolute; top: calc(100% + 4px); left: 0; right: 0;
   background: var(--bg-elev); border: 1px solid var(--hairline-2);
@@ -307,13 +321,36 @@ input:focus, select:focus, textarea:focus {
 }
 .modal-err { color: var(--red); font-size: 13px; margin-top: 10px; }
 
-/* --- Category editor form (name + group; emoji/colour grids pending) -- */
+/* --- Category editor form ------------------------------------------------ */
 .field { margin-bottom: 13px; }
 .field > span,
 .field > legend {
   display: block; font-size: 13px; font-weight: 600; margin-bottom: 5px;
 }
 .field fieldset { border: 0; padding: 0; margin: 0; }
+.ce-emoji-grid {
+  display: grid; grid-template-columns: repeat(11, 1fr);
+  gap: 4px; margin-top: 4px;
+}
+.ce-emoji {
+  background: var(--card-hi); border: 1px solid transparent;
+  border-radius: 7px; padding: 6px 0; font-size: 17px;
+  cursor: pointer; line-height: 1;
+  transition: border-color .12s, transform .12s;
+}
+.ce-emoji:hover { border-color: var(--hairline-2); transform: translateY(-1px); }
+.ce-emoji.on { border-color: var(--indigo); background: var(--indigo-soft); }
+.ce-color-grid {
+  display: grid; grid-template-columns: repeat(11, 1fr);
+  gap: 6px; margin-top: 4px;
+}
+.ce-color {
+  width: 100%; aspect-ratio: 1; border-radius: 50%;
+  border: 2px solid transparent; cursor: pointer; padding: 0;
+  transition: transform .12s, border-color .12s;
+}
+.ce-color:hover { transform: scale(1.08); }
+.ce-color.on { border-color: var(--text); transform: scale(1.1); }
 .ce-group {
   display: grid; grid-template-columns: 22px 1fr; align-items: start;
   gap: 10px; padding: 11px 13px; border: 1px solid var(--hairline-2);

@@ -204,3 +204,79 @@ describe('CategoriesPanel — edit flow', () => {
     expect(within(dialog).queryByLabelText(/name/i)).not.toBeInTheDocument();
   });
 });
+
+describe('CategoriesPanel — emoji + colour pickers', () => {
+  it('renders a grid of emoji choices in the add modal', async () => {
+    const user = userEvent.setup();
+    installFetchMock({ 'GET /api/categories': () => FIXTURE });
+    render(<CategoriesPanel />);
+    await user.click(await screen.findByRole('button', { name: /add category/i }));
+    const dialog = screen.getByRole('dialog');
+    // A representative subset — the full catalog has dozens but these are
+    // load-bearing for typical Hon categories.
+    ['🛒', '🍽️', '🏠', '💰', '🎭'].forEach((e) =>
+      expect(within(dialog).getByRole('button', { name: e })).toBeInTheDocument(),
+    );
+  });
+
+  it('renders a grid of colour swatches in the add modal', async () => {
+    const user = userEvent.setup();
+    installFetchMock({ 'GET /api/categories': () => FIXTURE });
+    render(<CategoriesPanel />);
+    await user.click(await screen.findByRole('button', { name: /add category/i }));
+    const swatches = screen.getAllByRole('button', { name: /^#[0-9A-F]{6}$/i });
+    expect(swatches.length).toBeGreaterThanOrEqual(20);
+  });
+
+  it('clicking an emoji marks it selected', async () => {
+    const user = userEvent.setup();
+    installFetchMock({ 'GET /api/categories': () => FIXTURE });
+    render(<CategoriesPanel />);
+    await user.click(await screen.findByRole('button', { name: /add category/i }));
+    const dialog = screen.getByRole('dialog');
+    const target = within(dialog).getByRole('button', { name: '🎯' });
+    await user.click(target);
+    expect(target).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('clicking a colour marks it selected', async () => {
+    const user = userEvent.setup();
+    installFetchMock({ 'GET /api/categories': () => FIXTURE });
+    render(<CategoriesPanel />);
+    await user.click(await screen.findByRole('button', { name: /add category/i }));
+    const swatch = screen.getByRole('button', { name: '#A880ED' });
+    await user.click(swatch);
+    expect(swatch).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('save POSTs the user-picked emoji and colour, not the defaults', async () => {
+    const user = userEvent.setup();
+    const post = vi.fn((body) => ({ category: { ...(body as object), sortOrder: 500, isBuiltin: false, createdAt: 'now' } }));
+    installFetchMock({
+      'GET /api/categories': () => FIXTURE,
+      'POST /api/categories': post,
+    });
+    render(<CategoriesPanel />);
+    await user.click(await screen.findByRole('button', { name: /add category/i }));
+    const dialog = screen.getByRole('dialog');
+    await user.type(within(dialog).getByLabelText(/name/i), 'Custom');
+    await user.click(within(dialog).getByRole('button', { name: '🎯' }));
+    await user.click(within(dialog).getByRole('button', { name: '#A880ED' }));
+    await user.click(within(dialog).getByRole('button', { name: /^add$/i }));
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+    expect(post.mock.calls[0][0]).toMatchObject({
+      name: 'Custom', emoji: '🎯', color: '#A880ED',
+    });
+  });
+
+  it('edit mode pre-selects the existing emoji and colour', async () => {
+    const user = userEvent.setup();
+    installFetchMock({ 'GET /api/categories': () => FIXTURE });
+    render(<CategoriesPanel />);
+    // Coffee has emoji ☕ and colour #A880ED in the fixture.
+    await user.click((await screen.findByText('Coffee')).closest('.cat-tile')!);
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByRole('button', { name: '☕' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(dialog).getByRole('button', { name: '#A880ED' })).toHaveAttribute('aria-pressed', 'true');
+  });
+});

@@ -53,6 +53,20 @@ const GROUP_DESCRIPTIONS: Array<[Category['catGroup'], string]> = [
   ['variable', 'Discretionary, pools into the variable allowance'],
 ];
 
+const EMOJI_CHOICES = [
+  '🛒', '🍽️', '🚌', '⛽', '🛍️', '💡', '🏠', '🛡️', '⚕️', '🎭', '🔁',
+  '✈️', '📚', '💰', '↔️', '﹪', '▫️', '☕', '🍻', '🎮', '🎵', '💊',
+  '🧾', '🏋️', '🐶', '🐱', '🎁', '💼', '🧰', '🚲', '🚗', '✂️', '💇',
+  '💅', '📱', '💻', '🛏️', '🧺', '🪴', '🌱', '🧴', '🍼', '🎓', '🪙',
+  '🪺', '📉', '📈', '🎯', '🪪',
+];
+const COLOR_CHOICES = [
+  '#5CC773', '#F59942', '#5C9EF5', '#EB736B', '#D975D6', '#F2C752',
+  '#66B8BD', '#6E8FD6', '#ED6680', '#A880ED', '#7D8CED', '#5CC7DB',
+  '#73B39E', '#4CD180', '#B38C80', '#999EB8', '#8C8FA8', '#FF8AA1',
+  '#B97AFF', '#6FD09C', '#FFD166',
+];
+
 export function CategoriesPanel() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [deleting, setDeleting] = useState<Category | null>(null);
@@ -174,6 +188,8 @@ function CategoryEditor({ state, onClose, onSaved }: EditorProps) {
   };
   const [name, setName] = useState(cur.name);
   const [group, setGroup] = useState<Category['catGroup']>(cur.catGroup);
+  const [emoji, setEmoji] = useState(cur.emoji);
+  const [color, setColor] = useState(cur.color);
   const [error, setError] = useState<string | null>(null);
 
   const submit = async () => {
@@ -187,13 +203,13 @@ function CategoryEditor({ state, onClose, onSaved }: EditorProps) {
         await api(
           `/categories/${encodeURIComponent(state.category.name)}`,
           'PUT',
-          { emoji: cur.emoji, color: cur.color, catGroup: group },
+          { emoji, color, catGroup: group },
         );
       } else {
         await api('/categories', 'POST', {
           name: name.trim(),
-          emoji: cur.emoji,
-          color: cur.color,
+          emoji,
+          color,
           catGroup: group,
           sortOrder: 500,
         });
@@ -223,6 +239,39 @@ function CategoryEditor({ state, onClose, onSaved }: EditorProps) {
           onChange={(e) => setName(e.target.value)}
         />
       </label>
+      <fieldset className="field">
+        <legend>Icon</legend>
+        <div className="ce-emoji-grid">
+          {EMOJI_CHOICES.map((e) => (
+            <button
+              key={e}
+              type="button"
+              className={`ce-emoji${emoji === e ? ' on' : ''}`}
+              aria-label={e}
+              aria-pressed={emoji === e}
+              onClick={() => setEmoji(e)}
+            >
+              {e}
+            </button>
+          ))}
+        </div>
+      </fieldset>
+      <fieldset className="field">
+        <legend>Colour</legend>
+        <div className="ce-color-grid">
+          {COLOR_CHOICES.map((c) => (
+            <button
+              key={c}
+              type="button"
+              className={`ce-color${color === c ? ' on' : ''}`}
+              style={{ background: c }}
+              aria-label={c}
+              aria-pressed={color === c}
+              onClick={() => setColor(c)}
+            />
+          ))}
+        </div>
+      </fieldset>
       <fieldset className="field">
         <legend>Group</legend>
         {GROUP_DESCRIPTIONS.map(([g, sub]) => (

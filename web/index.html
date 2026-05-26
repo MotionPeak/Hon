@@ -1,13 +1,13 @@
 <!doctype html>
-<html lang="he" dir="rtl">
+<html lang="en" dir="ltr">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Hon</title>
-    <!-- Matches the old app.html viewport behavior. RTL is set as a
-         default because most of Hon's content (merchant names, dates,
-         hebrew strings) reads right-to-left; individual English bits
-         (numbers, brand names) flip back via dir="ltr" or CSS. -->
+    <!-- Defaults to LTR because the UI shell is English. Hebrew content
+         pulled from Israeli banks (merchant names, account labels)
+         flips per-element with dir="rtl" or unicode-bidi:plaintext on
+         the specific text nodes that render it. -->
   </head>
   <body>
     <div id="root"></div>

@@ -3,7 +3,7 @@
 // linking; landing the placeholder now so the SettingsView layout matches.
 export function SplitwiseCard() {
   return (
-    <section className="set-card">
+    <section className="set-card set-card--wide">
       <div className="set-card-head">
         <span className="set-ico">🤝</span>
         <h3>Splitwise</h3>

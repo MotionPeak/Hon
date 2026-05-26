@@ -51,7 +51,19 @@ export function BillingCycleCard() {
             aria-expanded={open}
             onClick={() => setOpen((o) => !o)}
           >
-            {labelFor(settings.monthStartDay)}
+            <span>{labelFor(settings.monthStartDay)}</span>
+            <svg
+              className="dd-chev"
+              viewBox="0 0 12 8"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M1 1l5 5 5-5" />
+            </svg>
           </button>
           {open && (
             <ul className="dd-menu" role="listbox">
