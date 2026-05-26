@@ -771,21 +771,56 @@ button.mini { padding: 5px 11px; font-size: 12px; }
 }
 .act-search-clear:hover { color: var(--text); }
 
-.cat-stack { display: flex; flex-direction: column; gap: 18px; }
-.cat-section-act {
+.activity-view { max-width: 1200px; }
+
+/* Umbrella sections (Income / Essentials / Fixed / Variable) stack on the
+   page; the category cards inside each umbrella flow into 1-3 columns
+   using CSS columns so the layout reflows naturally without needing a
+   JS height-balancer like the legacy app does. */
+.act-umbrellas { display: flex; flex-direction: column; gap: 24px; }
+.act-umbrella { display: flex; flex-direction: column; gap: 12px; }
+.umbrella-head {
+  display: flex; align-items: baseline; gap: 10px;
+  margin: 0 2px;
+  font-size: 11px; font-weight: 700; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--faint);
+}
+.umbrella-name { color: var(--faint); }
+.umbrella-line { flex: 1; height: 0; }
+.umbrella-total {
+  font: 800 14px/1 ui-rounded, "SF Pro Rounded", system-ui;
+  color: var(--text); margin-left: auto;
+  font-variant-numeric: tabular-nums; letter-spacing: 0; text-transform: none;
+}
+.umbrella-total.pos { color: var(--green); }
+.act-cols {
+  column-count: 3; column-gap: 18px;
+}
+@media (max-width: 1100px) { .act-cols { column-count: 2; } }
+@media (max-width: 700px) { .act-cols { column-count: 1; } }
+
+.cat-card-act {
   background: var(--card); border: 1px solid var(--hairline);
   border-radius: 14px; padding: 14px 16px;
+  break-inside: avoid; margin-bottom: 18px;
+  display: inline-block; width: 100%;
 }
 .cat-head-act {
   display: flex; align-items: center; gap: 10px;
   font-size: 12px; font-weight: 700; letter-spacing: .05em;
   text-transform: uppercase; color: var(--muted); margin: 0 0 8px;
 }
-.cat-head-act .cat-name { color: var(--text); }
+.cat-head-act .cat-name { color: var(--text); flex: 1; min-width: 0; }
 .cat-head-act .cat-count {
-  margin-left: auto; font-size: 10px; padding: 2px 7px; border-radius: 999px;
+  font-size: 10px; padding: 2px 7px; border-radius: 999px;
   background: var(--card-hi); color: var(--muted); letter-spacing: 0;
 }
+.cat-head-act .cat-total {
+  font: 700 13px/1 ui-rounded, "SF Pro Rounded", system-ui;
+  font-variant-numeric: tabular-nums;
+  color: var(--text); letter-spacing: 0; text-transform: none;
+}
+.cat-head-act .cat-total.pos { color: var(--green); }
 .cat-emoji {
   width: 26px; height: 26px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;

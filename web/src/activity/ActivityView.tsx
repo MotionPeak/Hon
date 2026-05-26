@@ -252,69 +252,13 @@ export function ActivityView() {
           No transactions in {activeMonth ? cycleLabel(activeMonth) : 'this period'}.
         </p>
       ) : (
-        <div className="cat-stack">
-          {orderedCats.map((catName) => {
-            const cat = categoryByName.get(catName);
-            const rows = grouped.get(catName) ?? [];
-            return (
-              <section key={catName} className="cat-section-act">
-                <h3 className="cat-head-act">
-                  <span
-                    className="cat-emoji"
-                    style={{ background: cat ? cat.color + '22' : 'var(--card-hi)' }}
-                  >
-                    {cat?.emoji ?? '▫️'}
-                  </span>
-                  <span className="cat-name">{catName}</span>
-                  <span className="cat-count">{rows.length}</span>
-                </h3>
-                <ul className="txn-list">
-                  {rows.map((t) => {
-                    const acct = accountById.get(t.accountId);
-                    const pos = t.amount > 0;
-                    return (
-                      <li
-                        key={t.id}
-                        className="txn"
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => setMoving(t)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault();
-                            setMoving(t);
-                          }
-                        }}
-                      >
-                        <span
-                          className="txn-icon"
-                          style={{ background: cat ? cat.color + '22' : 'var(--card-hi)' }}
-                        >
-                          {cat?.emoji ?? '▫️'}
-                        </span>
-                        <div className="txn-main">
-                          <div className="txn-name">{t.description}</div>
-                          <div className="txn-sub">
-                            {fmtDate(t.date)}
-                            {acct && (
-                              <>
-                                <span className="sep"> · </span>
-                                {acct.label || acct.connectionName}
-                              </>
-                            )}
-                          </div>
-                        </div>
-                        <div className={`txn-amt${pos ? ' pos' : ''}`}>
-                          {money(t.amount, t.currency)}
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </section>
-            );
-          })}
-        </div>
+        <UmbrellaSections
+          orderedCats={orderedCats}
+          grouped={grouped}
+          categoryByName={categoryByName}
+          accountById={accountById}
+          onPickTxn={setMoving}
+        />
       )}
       {moving && (
         <CategoryPickerModal
@@ -333,6 +277,151 @@ export function ActivityView() {
         />
       )}
     </div>
+  );
+}
+
+interface UmbrellaSectionsProps {
+  orderedCats: string[];
+  grouped: Map<string, Transaction[]>;
+  categoryByName: Map<string, Category>;
+  accountById: Map<string, Account>;
+  onPickTxn: (t: Transaction) => void;
+}
+
+const GROUP_ORDER: Category['catGroup'][] = ['income', 'essential', 'fixed', 'variable'];
+const GROUP_LABEL: Record<Category['catGroup'], string> = {
+  income: 'Income',
+  essential: 'Essentials',
+  fixed: 'Fixed expenses',
+  variable: 'Variable expenses',
+};
+
+function UmbrellaSections({
+  orderedCats, grouped, categoryByName, accountById, onPickTxn,
+}: UmbrellaSectionsProps) {
+  const groupOf = (catName: string): Category['catGroup'] => {
+    return categoryByName.get(catName)?.catGroup ?? 'variable';
+  };
+  // Bucket category names by their catGroup, preserving the ordered list
+  // inside each (catalog order then alphabetical extras).
+  const byGroup = new Map<Category['catGroup'], string[]>();
+  for (const g of GROUP_ORDER) byGroup.set(g, []);
+  for (const c of orderedCats) byGroup.get(groupOf(c))?.push(c);
+  return (
+    <div className="act-umbrellas">
+      {GROUP_ORDER.map((g) => {
+        const cats = byGroup.get(g) ?? [];
+        if (cats.length === 0) return null;
+        // Umbrella total: sum across every category under this group.
+        // Income contributes positively, expenses negative.
+        let umbrellaTotal = 0;
+        let umbrellaCur = 'ILS';
+        for (const c of cats) {
+          for (const t of grouped.get(c) ?? []) {
+            umbrellaTotal += t.amount;
+            umbrellaCur = t.currency;
+          }
+        }
+        const positive = umbrellaTotal >= 0;
+        return (
+          <section key={g} className="act-umbrella">
+            <h2 className="umbrella-head">
+              <span className="umbrella-name">{GROUP_LABEL[g]}</span>
+              <span className="umbrella-line" />
+              <span className={`umbrella-total${positive ? ' pos' : ''}`}>
+                {money(umbrellaTotal, umbrellaCur)}
+              </span>
+            </h2>
+            <div className="act-cols">
+              {cats.map((catName) => (
+                <CatCard
+                  key={catName}
+                  catName={catName}
+                  cat={categoryByName.get(catName)}
+                  rows={grouped.get(catName) ?? []}
+                  accountById={accountById}
+                  onPickTxn={onPickTxn}
+                />
+              ))}
+            </div>
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
+interface CatCardProps {
+  catName: string;
+  cat: Category | undefined;
+  rows: Transaction[];
+  accountById: Map<string, Account>;
+  onPickTxn: (t: Transaction) => void;
+}
+
+function CatCard({ catName, cat, rows, accountById, onPickTxn }: CatCardProps) {
+  let total = 0;
+  let cur = 'ILS';
+  for (const t of rows) { total += t.amount; cur = t.currency; }
+  return (
+    <article className="cat-card-act">
+      <h3 className="cat-head-act">
+        <span
+          className="cat-emoji"
+          style={{ background: cat ? cat.color + '22' : 'var(--card-hi)' }}
+        >
+          {cat?.emoji ?? '▫️'}
+        </span>
+        <span className="cat-name">{catName}</span>
+        <span className="cat-count">{rows.length}</span>
+        <span className={`cat-total${total >= 0 ? ' pos' : ''}`}>
+          {money(total, cur)}
+        </span>
+      </h3>
+      <ul className="txn-list">
+        {rows.map((t) => {
+          const acct = accountById.get(t.accountId);
+          const pos = t.amount > 0;
+          return (
+            <li
+              key={t.id}
+              className="txn"
+              role="button"
+              tabIndex={0}
+              onClick={() => onPickTxn(t)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onPickTxn(t);
+                }
+              }}
+            >
+              <span
+                className="txn-icon"
+                style={{ background: cat ? cat.color + '22' : 'var(--card-hi)' }}
+              >
+                {cat?.emoji ?? '▫️'}
+              </span>
+              <div className="txn-main">
+                <div className="txn-name">{t.description}</div>
+                <div className="txn-sub">
+                  {fmtDate(t.date)}
+                  {acct && (
+                    <>
+                      <span className="sep"> · </span>
+                      {acct.label || acct.connectionName}
+                    </>
+                  )}
+                </div>
+              </div>
+              <div className={`txn-amt${pos ? ' pos' : ''}`}>
+                {money(t.amount, t.currency)}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </article>
   );
 }
 
