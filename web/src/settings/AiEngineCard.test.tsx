@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AiEngineCard } from './AiEngineCard';
 import { installFetchMock } from '../test/mockFetch';
@@ -91,6 +91,25 @@ describe('AiEngineCard', () => {
     expect(await screen.findByText(/50%/)).toBeInTheDocument();
     // Cancel button replaces Download for the in-flight model.
     expect(screen.getByRole('button', { name: /^Cancel$/i })).toBeInTheDocument();
+  });
+
+  it('the loaded model hides the Download button (only other models can be downloaded)', async () => {
+    installFetchMock({
+      'GET /api/llm': () => statusResponse({
+        state: 'ready',
+        modelId: 'qwen2.5-3b',
+        modelName: 'Qwen2.5 3B Instruct',
+        ready: true,
+      }),
+    });
+    render(<AiEngineCard />);
+    const loaded = (await screen.findByText('Qwen2.5 3B Instruct')).closest('.ai-model')!;
+    expect(within(loaded as HTMLElement).queryByRole('button', { name: /^Download$/i }))
+      .not.toBeInTheDocument();
+    // The other (un-loaded) model still has its Download button.
+    const other = screen.getByText('Qwen2.5 7B Instruct').closest('.ai-model')!;
+    expect(within(other as HTMLElement).getByRole('button', { name: /^Download$/i }))
+      .toBeInTheDocument();
   });
 
   it('a ready local model shows a "Ready" pill', async () => {

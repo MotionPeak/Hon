@@ -182,6 +182,11 @@ function LocalModelList({
                   </button>
                 </div>
               </>
+            ) : isReady ? (
+              // The active model is already loaded — no download to offer.
+              // The green "Loaded" tag + ready border already communicate
+              // its state; an extra "✓ In use" footer would be noise.
+              null
             ) : (
               <div className="form-actions">
                 <button
