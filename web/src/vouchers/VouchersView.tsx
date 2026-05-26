@@ -418,6 +418,13 @@ interface ProviderConfig {
   validate: (value: string) => string | null;
   /** True for OTP-based flows (Shufersal, BuyMe). */
   hasOtp: boolean;
+  /** Plain-English overview shown above the credential input. */
+  description: ReactNode;
+  /** Concrete numbered steps so the user knows what to expect. */
+  steps: string[];
+  /** Message shown while we're waiting on the user OR the engine —
+   *  Hi-Tech Zone uses this to nudge the user toward the captcha. */
+  workingMessage: ReactNode;
 }
 
 const PROVIDER_CONFIGS: Record<'shufersal' | 'buyme' | 'htzone', ProviderConfig> = {
@@ -430,6 +437,20 @@ const PROVIDER_CONFIGS: Record<'shufersal' | 'buyme' | 'htzone', ProviderConfig>
     savedPath: '/vouchers/sync/shufersal/saved-phone',
     validate: (v) => /^[0-9\-+\s]{9,15}$/.test(v) ? null : 'Enter a phone number.',
     hasOtp: true,
+    description: (
+      <>
+        Shufersal will SMS a verification code to your phone. Hon opens
+        a private browser window in the background, signs in, then asks
+        you for the code back here. Nothing leaves your computer.
+      </>
+    ),
+    steps: [
+      'Enter your phone number and tap Sync.',
+      'Wait a few seconds — Shufersal will text you a 6-digit code.',
+      'Type the code into Hon when prompted.',
+      "Hon reads your Tav Hazahav + GiftCard balances and you're done.",
+    ],
+    workingMessage: 'Opening Shufersal — waiting for the SMS code…',
   },
   buyme: {
     id: 'buyme',
@@ -440,6 +461,21 @@ const PROVIDER_CONFIGS: Record<'shufersal' | 'buyme' | 'htzone', ProviderConfig>
     savedPath: '/vouchers/sync/buyme/saved-email',
     validate: (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? null : 'Enter a valid email.',
     hasOtp: true,
+    description: (
+      <>
+        BuyMe will email you a 6-digit verification code. Hon opens a
+        private browser window, signs in, then asks you for the code
+        back here. Cookies are saved so the next sync usually skips
+        straight to the wallet.
+      </>
+    ),
+    steps: [
+      'Enter your BuyMe email and tap Sync.',
+      'Check your inbox for a 6-digit BuyMe code.',
+      'Paste the code into Hon when prompted.',
+      'Hon reads every active BuyMe gift card balance.',
+    ],
+    workingMessage: 'Opening BuyMe — check your inbox for the code…',
   },
   htzone: {
     id: 'htzone',
@@ -450,6 +486,26 @@ const PROVIDER_CONFIGS: Record<'shufersal' | 'buyme' | 'htzone', ProviderConfig>
     savedPath: '/vouchers/sync/htzone/saved-code',
     validate: (v) => /^\d{8,9}$/.test(v.replace(/\D/g, '')) ? null : 'Code must be 8–9 digits.',
     hasOtp: false,
+    description: (
+      <>
+        Hi-Tech Zone protects its balance lookup with Cloudflare and a
+        reCAPTCHA. Hon opens the page with your code pre-filled in a
+        private browser window — <b>you tick the reCAPTCHA and click
+        שלח yourself</b>, then Hon reads the balance.
+      </>
+    ),
+    steps: [
+      'Enter your 8–9 digit Hi-Tech Zone code and tap Sync.',
+      'A small browser window will open at htz.mltp.co.il.',
+      'Tick the "I\'m not a robot" reCAPTCHA in that window.',
+      'Click שלח (Submit) — Hon reads the balance and closes the window.',
+    ],
+    workingMessage: (
+      <>
+        A browser window opened. <b>Tick the reCAPTCHA</b> and click
+        <b> שלח</b> there — Hon is watching for the balance to appear.
+      </>
+    ),
   },
 };
 
@@ -567,9 +623,7 @@ function ProviderSyncDialog({
         <Dialog.Content className="rx-dialog" aria-label={cfg.title}>
           <Dialog.Title>{cfg.title}</Dialog.Title>
           <Dialog.Description className="rx-dialog-desc">
-            Hon opens a private browser window in the background, signs in
-            with your {cfg.credentialLabel.toLowerCase()}, and reads the
-            balance — nothing is shared with anyone but you.
+            {cfg.description}
           </Dialog.Description>
 
           {!syncId && (
@@ -577,6 +631,11 @@ function ProviderSyncDialog({
               className="piggy-form"
               onSubmit={(e) => { e.preventDefault(); void start(); }}
             >
+              <ol className="vc-steps">
+                {cfg.steps.map((step, i) => (
+                  <li key={i}><span>{i + 1}</span>{step}</li>
+                ))}
+              </ol>
               <label htmlFor={`vc-${cfg.id}-cred`} className="fld-lbl">
                 {cfg.credentialLabel}
               </label>
@@ -608,7 +667,9 @@ function ProviderSyncDialog({
           {showProgress && (
             <div className="vc-sync-step">
               <div className="vc-sync-spinner" aria-hidden="true" />
-              <p className="vc-sync-msg">{status?.message ?? 'Working…'}</p>
+              <p className="vc-sync-msg">
+                {status?.message || cfg.workingMessage}
+              </p>
               <div className="form-actions">
                 <button type="button" className="btn-ghost" onClick={cancel}>
                   Cancel

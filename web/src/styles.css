@@ -1733,6 +1733,27 @@ button.mini { padding: 5px 11px; font-size: 12px; }
   font-size: 11.5px; color: var(--muted);
   background: var(--card-hi); border-radius: 8px;
 }
+/* Numbered step list shown above the credential input — makes the
+   sync flow concrete instead of abstract ("you'll get an SMS code"
+   beats "Hon signs in for you"). */
+.vc-steps {
+  list-style: none; padding: 0; margin: 0 0 14px;
+  display: flex; flex-direction: column; gap: 7px;
+  background: var(--card-hi); border: 1px solid var(--hairline);
+  border-radius: 12px; padding: 12px 14px;
+}
+.vc-steps li {
+  display: flex; align-items: flex-start; gap: 10px;
+  font-size: 12.5px; color: var(--text); line-height: 1.45;
+}
+.vc-steps li > span {
+  flex: none; width: 20px; height: 20px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--accent); color: #fff;
+  font-size: 10.5px; font-weight: 700;
+  margin-top: 1px;
+}
+
 /* Remember-this-credential checkbox + provider sync progress states. */
 .vc-remember {
   display: inline-flex; align-items: center; gap: 8px;

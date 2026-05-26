@@ -179,6 +179,30 @@ describe('VouchersView — CRUD', () => {
     await waitFor(() => expect(input.value).toBe('0501234567'));
   });
 
+  it('each provider sync dialog has an HTZ-specific captcha instruction', async () => {
+    const user = userEvent.setup();
+    installFetchMock({
+      'GET /api/vouchers': () => fixture(),
+      'GET /api/vouchers/sync/htzone/saved-code': () => ({ code: null }),
+      'GET /api/vouchers/sync/shufersal/saved-phone': () => ({ phone: null }),
+      'GET /api/vouchers/sync/buyme/saved-email': () => ({ email: null }),
+    });
+    render(<VouchersView />);
+    await user.click(await screen.findByRole('button', { name: /add voucher/i }));
+    await user.click(await screen.findByRole('button', { name: /hi-?tech zone/i }));
+    const htz = await screen.findByRole('dialog', { name: /sync hi-?tech zone/i });
+    // HTZ should mention the reCAPTCHA the user has to solve in the
+    // visible browser window — not the generic "signs in for you" copy.
+    expect(within(htz).getAllByText(/reCAPTCHA/i).length).toBeGreaterThan(0);
+    expect(within(htz).getAllByText(/שלח/).length).toBeGreaterThan(0);
+    // Close + re-pick Shufersal to verify its copy talks about SMS / OTP.
+    await user.click(within(htz).getByRole('button', { name: /^cancel$/i }));
+    await user.click(await screen.findByRole('button', { name: /add voucher/i }));
+    await user.click(await screen.findByRole('button', { name: /^Shufersal/i }));
+    const shuf = await screen.findByRole('dialog', { name: /sync shufersal/i });
+    expect(within(shuf).getAllByText(/SMS|text/i).length).toBeGreaterThan(0);
+  });
+
   it('Hi-Tech Zone sync validates the 8–9 digit code before POSTing', async () => {
     const user = userEvent.setup();
     const post = vi.fn(() => ({ syncId: 'sync-h' }));
