@@ -121,8 +121,9 @@ describe('PiggyView — CRUD', () => {
     render(<PiggyView />);
     await user.click(await screen.findByRole('button', { name: /new piggy bank/i }));
     const dialog = await screen.findByRole('dialog');
-    expect(within(dialog).getByText(/new piggy bank/i)).toBeInTheDocument();
-    const name = within(dialog).getByLabelText(/name/i) as HTMLInputElement;
+    expect(within(dialog).getByRole('heading', { name: /new piggy bank/i }))
+      .toBeInTheDocument();
+    const name = within(dialog).getByLabelText('Name') as HTMLInputElement;
     expect(name.value).toBe('');
   });
 
@@ -137,12 +138,12 @@ describe('PiggyView — CRUD', () => {
     render(<PiggyView />);
     await user.click(await screen.findByRole('button', { name: /new piggy bank/i }));
     const dialog = await screen.findByRole('dialog');
-    await user.type(within(dialog).getByLabelText(/name/i), 'Camera');
-    await user.clear(within(dialog).getByLabelText(/target/i));
-    await user.type(within(dialog).getByLabelText(/target/i), '5000');
-    await user.clear(within(dialog).getByLabelText(/monthly amount/i));
-    await user.type(within(dialog).getByLabelText(/monthly amount/i), '500');
-    await user.click(within(dialog).getByRole('button', { name: /save/i }));
+    await user.type(within(dialog).getByLabelText('Name'), 'Camera');
+    await user.clear(within(dialog).getByLabelText(/goal amount/i));
+    await user.type(within(dialog).getByLabelText(/goal amount/i), '5000');
+    await user.clear(within(dialog).getByLabelText(/monthly set-aside/i));
+    await user.type(within(dialog).getByLabelText(/monthly set-aside/i), '500');
+    await user.click(within(dialog).getByRole('button', { name: /create piggy bank/i }));
     await waitFor(() => expect(post).toHaveBeenCalled());
     const body = post.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(body.name).toBe('Camera');
@@ -189,11 +190,11 @@ describe('PiggyView — CRUD', () => {
     await user.click(within(japan as HTMLElement).getByRole('button', { name: /actions/i }));
     await user.click(await screen.findByRole('menuitem', { name: /edit/i }));
     const dialog = await screen.findByRole('dialog');
-    expect((within(dialog).getByLabelText(/name/i) as HTMLInputElement).value).toBe('Japan trip');
-    expect((within(dialog).getByLabelText(/target/i) as HTMLInputElement).value).toBe('12000');
-    await user.clear(within(dialog).getByLabelText(/target/i));
-    await user.type(within(dialog).getByLabelText(/target/i), '15000');
-    await user.click(within(dialog).getByRole('button', { name: /save/i }));
+    expect((within(dialog).getByLabelText('Name') as HTMLInputElement).value).toBe('Japan trip');
+    expect((within(dialog).getByLabelText(/goal amount/i) as HTMLInputElement).value).toBe('12000');
+    await user.clear(within(dialog).getByLabelText(/goal amount/i));
+    await user.type(within(dialog).getByLabelText(/goal amount/i), '15000');
+    await user.click(within(dialog).getByRole('button', { name: /save changes/i }));
     await waitFor(() => expect(put).toHaveBeenCalled());
     const body = put.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(body.targetAmount).toBe(15000);

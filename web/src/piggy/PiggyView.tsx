@@ -1,9 +1,16 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { api } from '../api';
 import { money } from '../format';
 import type { PiggyBankStatus, PiggyKind, PiggyReport } from './types';
+
+// Mirrors PIGGY_EMOJI + PIGGY_PLANS in sidecar/public/app.html.
+const PIGGY_EMOJI = ['🐷', '✈️', '🏖️', '🚗', '🏠', '💍', '🎓', '💻', '📷',
+  '🎁', '🛋️', '🚲', '⛺️', '🎮', '🪙', '❤️'];
+const PIGGY_PLANS = [3, 6, 12, 24];
+
+const SYMBOL_ILS = '₪';
 
 interface BudgetResponse {
   piggy: PiggyReport;
@@ -248,6 +255,11 @@ function formFor(bank: PiggyBankStatus | null): FormState {
   };
 }
 
+function presetFor(target: number, months: number): number | null {
+  if (!Number.isFinite(target) || target <= 0) return null;
+  return Math.max(10, Math.ceil(target / months / 10) * 10);
+}
+
 function PiggyFormDialog({
   mode, onClose, onSaved,
 }: {
@@ -256,29 +268,71 @@ function PiggyFormDialog({
   onSaved: () => void | Promise<void>;
 }) {
   const open = mode.kind === 'new' || mode.kind === 'edit';
+  const editing = mode.kind === 'edit';
   const bank = mode.kind === 'edit' ? mode.bank : null;
   const [form, setForm] = useState<FormState>(formFor(bank));
+  const [planSel, setPlanSel] = useState<number | 'custom'>('custom');
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (open) {
       setForm(formFor(bank));
+      setPlanSel('custom');
       setError(null);
       setSaving(false);
     }
   }, [open, bank]);
 
+  const target = Number(form.targetAmount);
+  const monthly = Number(form.monthlyAmount);
+  const targetValid = Number.isFinite(target) && target > 0;
+  const monthlyValid = Number.isFinite(monthly) && monthly > 0;
+  const lump = form.kind === 'lump';
+
+  const eta = useMemo(() => {
+    if (lump || !targetValid || !monthlyValid) return null;
+    const months = Math.ceil(target / monthly);
+    return `At ${money(monthly, 'ILS')} a month you'll reach ${money(target, 'ILS')} in about ${months} ${months === 1 ? 'month' : 'months'}.`;
+  }, [lump, targetValid, monthlyValid, target, monthly]);
+
+  const setKind = (kind: PiggyKind): void => {
+    setForm((f) => ({ ...f, kind }));
+  };
+  const setEmoji = (emoji: string): void => {
+    setForm((f) => ({ ...f, emoji }));
+  };
+  const onTargetChange = (v: string): void => {
+    setForm((f) => {
+      const next = { ...f, targetAmount: v };
+      if (typeof planSel === 'number') {
+        const pm = presetFor(Number(v), planSel);
+        if (pm != null) next.monthlyAmount = String(pm);
+      }
+      return next;
+    });
+  };
+  const onMonthlyChange = (v: string): void => {
+    setPlanSel('custom');
+    setForm((f) => ({ ...f, monthlyAmount: v }));
+  };
+  const onPlanClick = (months: number): void => {
+    setPlanSel(months);
+    const pm = presetFor(target, months);
+    if (pm != null) setForm((f) => ({ ...f, monthlyAmount: String(pm) }));
+  };
+
   const submit = async (): Promise<void> => {
     setError(null);
-    const targetAmount = Number(form.targetAmount);
-    const monthlyAmount = Number(form.monthlyAmount);
-    if (!form.name.trim()) { setError('Name is required'); return; }
-    if (!Number.isFinite(targetAmount) || targetAmount <= 0) {
-      setError('Target amount must be positive'); return;
+    if (!form.name.trim()) {
+      setError('Give your piggy bank a name.'); return;
     }
-    if (form.kind === 'monthly' && (!Number.isFinite(monthlyAmount) || monthlyAmount <= 0)) {
-      setError('Monthly amount must be positive'); return;
+    if (!targetValid) {
+      setError(lump ? 'Enter the amount to set aside.' : 'Enter a goal amount.');
+      return;
+    }
+    if (!lump && !monthlyValid) {
+      setError('Choose a monthly set-aside.'); return;
     }
     setSaving(true);
     try {
@@ -286,8 +340,8 @@ function PiggyFormDialog({
         name: form.name.trim(),
         emoji: form.emoji || '🐷',
         kind: form.kind,
-        targetAmount,
-        monthlyAmount: form.kind === 'monthly' ? monthlyAmount : 0,
+        targetAmount: target,
+        monthlyAmount: lump ? 0 : monthly,
       };
       if (mode.kind === 'edit') {
         await api(`/piggy/${mode.bank.id}`, 'PUT', body);
@@ -307,78 +361,139 @@ function PiggyFormDialog({
         <Dialog.Overlay className="rx-overlay" />
         <Dialog.Content className="rx-dialog">
           <Dialog.Title>
-            {mode.kind === 'edit' ? 'Edit piggy bank' : 'New piggy bank'}
+            {editing ? 'Edit piggy bank' : 'New piggy bank'}
           </Dialog.Title>
           <Dialog.Description className="rx-dialog-desc">
-            Set a goal and how much to save each month.
+            What are you saving up for? Either grow it a little each month,
+            or reserve a lump sum now for an upcoming bill.
           </Dialog.Description>
           <form
             className="piggy-form"
             onSubmit={(e) => { e.preventDefault(); void submit(); }}
           >
-            <label className="form-row">
-              <span>Name</span>
-              <input
-                type="text"
-                value={form.name}
-                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                autoFocus
-              />
+            <label className="fld-lbl">Type</label>
+            <div
+              className="seg pgy-kind"
+              role="group"
+              aria-label="Type"
+              data-kind={form.kind}
+            >
+              <button
+                type="button"
+                className={form.kind === 'monthly' ? 'on' : ''}
+                onClick={() => setKind('monthly')}
+              >
+                <span className="pgy-kind-t">Monthly</span>
+                <span className="pgy-kind-s">save each month</span>
+              </button>
+              <button
+                type="button"
+                className={form.kind === 'lump' ? 'on' : ''}
+                onClick={() => setKind('lump')}
+              >
+                <span className="pgy-kind-t">Set aside once</span>
+                <span className="pgy-kind-s">reserve a lump sum</span>
+              </button>
+            </div>
+
+            <label className="fld-lbl">Icon</label>
+            <div className="pgy-em-row">
+              {PIGGY_EMOJI.map((e) => (
+                <button
+                  key={e}
+                  type="button"
+                  className={`pgy-em${e === form.emoji ? ' on' : ''}`}
+                  aria-label={`Icon ${e}`}
+                  aria-pressed={e === form.emoji}
+                  onClick={() => setEmoji(e)}
+                >{e}</button>
+              ))}
+            </div>
+
+            <label htmlFor="pgy-name" className="fld-lbl">Name</label>
+            <input
+              id="pgy-name"
+              type="text"
+              maxLength={40}
+              placeholder="New camera, summer trip…"
+              value={form.name}
+              onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+              autoFocus
+            />
+
+            <label htmlFor="pgy-target" className="fld-lbl" style={{ marginTop: 13 }}>
+              {lump ? 'Amount to set aside' : 'Goal amount'}
             </label>
-            <label className="form-row">
-              <span>Emoji</span>
+            <div className="pgy-amt">
+              <span>{SYMBOL_ILS}</span>
               <input
-                type="text"
-                value={form.emoji}
-                onChange={(e) => setForm((f) => ({ ...f, emoji: e.target.value }))}
-                maxLength={4}
-                style={{ width: 64 }}
-              />
-            </label>
-            <fieldset className="form-row form-radios">
-              <legend>Kind</legend>
-              <label>
-                <input
-                  type="radio"
-                  name="kind"
-                  checked={form.kind === 'monthly'}
-                  onChange={() => setForm((f) => ({ ...f, kind: 'monthly' }))}
-                /> Monthly
-              </label>
-              <label>
-                <input
-                  type="radio"
-                  name="kind"
-                  checked={form.kind === 'lump'}
-                  onChange={() => setForm((f) => ({ ...f, kind: 'lump' }))}
-                /> Lump
-              </label>
-            </fieldset>
-            <label className="form-row">
-              <span>Target amount</span>
-              <input
+                id="pgy-target"
                 type="number"
+                min={0}
+                step={50}
+                placeholder="0"
                 value={form.targetAmount}
-                onChange={(e) => setForm((f) => ({ ...f, targetAmount: e.target.value }))}
+                onChange={(e) => onTargetChange(e.target.value)}
               />
-            </label>
-            {form.kind === 'monthly' && (
-              <label className="form-row">
-                <span>Monthly amount</span>
-                <input
-                  type="number"
-                  value={form.monthlyAmount}
-                  onChange={(e) => setForm((f) => ({ ...f, monthlyAmount: e.target.value }))}
-                />
-              </label>
+            </div>
+
+            {!lump && (
+              <>
+                <label htmlFor="pgy-monthly" className="fld-lbl">Monthly set-aside</label>
+                <div id="pgy-plans">
+                  {!targetValid ? (
+                    <div className="pgy-plan-hint">
+                      Enter a goal amount to see monthly options.
+                    </div>
+                  ) : (
+                    PIGGY_PLANS.map((m) => {
+                      const pm = presetFor(target, m) ?? 0;
+                      return (
+                        <button
+                          key={m}
+                          type="button"
+                          className={`pgy-plan${planSel === m ? ' on' : ''}`}
+                          onClick={() => onPlanClick(m)}
+                        >
+                          <span className="pgy-plan-amt">{money(pm, 'ILS')}</span>
+                          <span className="pgy-plan-sub">
+                            a month · ready in {m} months
+                          </span>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+                <div className="pgy-custom">
+                  <span>{SYMBOL_ILS}</span>
+                  <input
+                    id="pgy-monthly"
+                    type="number"
+                    min={0}
+                    step={10}
+                    placeholder="Custom amount"
+                    value={form.monthlyAmount}
+                    onChange={(e) => onMonthlyChange(e.target.value)}
+                  />
+                </div>
+                {eta && <div className="pgy-modal-eta">{eta}</div>}
+              </>
             )}
+
+            {lump && (
+              <div className="pgy-modal-eta">
+                The full amount is reserved the first month it fits your budget,
+                then held until you mark it used.
+              </div>
+            )}
+
             {error && <p className="form-error">{error}</p>}
             <div className="form-actions">
               <Dialog.Close asChild>
                 <button type="button" className="btn-ghost">Cancel</button>
               </Dialog.Close>
               <button type="submit" className="btn-primary" disabled={saving}>
-                {saving ? 'Saving…' : 'Save'}
+                {saving ? 'Saving…' : editing ? 'Save changes' : 'Create piggy bank'}
               </button>
             </div>
           </form>

@@ -158,6 +158,14 @@ input, select {
 input:focus, select:focus, textarea:focus {
   outline: 2px solid var(--accent); outline-offset: -1px;
 }
+/* Radio + checkbox inputs are atomic native controls — undo the generic
+   text-field styling above so they don't get stretched to 100% with
+   padding + border-radius + dark fill. Keep the accent colour token. */
+input[type="radio"], input[type="checkbox"] {
+  width: auto; padding: 0; border: 0; border-radius: 0;
+  background: transparent; accent-color: var(--accent);
+  margin: 0;
+}
 
 /* --- Settings: cards + rows + grid ------------------------------------- */
 .settings-view { max-width: 1100px; margin: 0 auto; }
@@ -947,33 +955,118 @@ button.mini { padding: 5px 11px; font-size: 12px; }
   to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 }
 
-/* --- Piggy CRUD form ------------------------------------------------- */
-.piggy-form { display: flex; flex-direction: column; gap: 12px; }
-.form-row {
-  display: flex; flex-direction: column; gap: 5px;
-  font-size: 12px; color: var(--muted);
-}
-.form-row > span, .form-row > legend {
-  font-weight: 600; letter-spacing: .03em;
-}
-.form-row input[type="text"], .form-row input[type="number"] {
-  background: var(--card-hi); border: 1px solid var(--hairline);
-  border-radius: 8px; padding: 8px 10px; font-size: 13px;
+/* --- Piggy CRUD form (lifted from legacy app.html) ------------------- */
+.piggy-form { display: flex; flex-direction: column; }
+.fld-lbl {
+  display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px;
   color: var(--text);
 }
-.form-row input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
-.form-radios { flex-direction: row; gap: 14px; align-items: center;
-  border: 0; padding: 0; margin: 0; }
-.form-radios label {
-  display: inline-flex; gap: 6px; align-items: center;
-  color: var(--text); font-size: 13px; cursor: pointer;
-}
-.form-error {
-  color: var(--red); font-size: 12.5px; margin: 0;
-}
+.form-error { color: var(--red); font-size: 12.5px; margin: 8px 0 0; }
 .form-actions {
-  display: flex; justify-content: flex-end; gap: 8px;
-  margin-top: 6px;
+  display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px;
+}
+
+/* Segmented Type picker — Monthly vs Set aside once. */
+.seg {
+  display: inline-flex; gap: 2px; background: var(--card-hi);
+  border-radius: 9px; padding: 2px; flex: 0 0 auto;
+}
+.seg button {
+  padding: 5px 12px; font-size: 12.5px; font-weight: 600;
+  border-radius: 7px; background: transparent; border: 0;
+  color: var(--muted); cursor: pointer;
+  transition: background .15s ease, color .15s ease;
+}
+.seg button.on { background: var(--accent); color: #fff; }
+.pgy-kind {
+  display: grid !important; grid-template-columns: 1fr 1fr;
+  gap: 6px; padding: 4px; width: 100%; margin-bottom: 14px;
+  position: relative; overflow: hidden;
+}
+/* Sliding amber pill that animates between the two halves when
+   data-kind flips. Sits behind the button labels (z-index:0) while
+   the buttons sit at z-index:1. */
+.pgy-kind::before {
+  content: '';
+  position: absolute;
+  top: 4px; bottom: 4px;
+  left: 4px; right: calc(50% + 3px);
+  background: var(--accent);
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(245, 159, 36, 0.3);
+  transition: left .32s cubic-bezier(.2,.7,.2,1),
+              right .32s cubic-bezier(.2,.7,.2,1);
+  z-index: 0;
+}
+.pgy-kind[data-kind="lump"]::before {
+  left: calc(50% + 3px); right: 4px;
+}
+.pgy-kind button {
+  flex: 1; padding: 10px 12px; border-radius: 8px;
+  display: flex; flex-direction: column; gap: 3px; align-items: flex-start;
+  text-align: left;
+  position: relative; z-index: 1;
+  transition: color .25s ease;
+}
+/* The pill *is* the active background — undo .seg's blanket
+   .on { background: var(--accent) } so the pill shows through. */
+.pgy-kind button.on { background: transparent; color: #fff; }
+.pgy-kind-t { font-size: 13px; font-weight: 700; }
+.pgy-kind-s { font-size: 11px; opacity: .75; font-weight: 500; }
+
+/* Emoji picker — 8-wide grid of round-corner tiles. */
+.pgy-em-row {
+  display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px;
+}
+.pgy-em {
+  width: 38px; height: 38px; flex: none; border-radius: 10px;
+  font-size: 19px; padding: 0;
+  background: var(--bg-elev); border: 1px solid var(--hairline-2);
+  cursor: pointer;
+  transition: transform .12s ease, border-color .12s ease,
+    background-color .12s ease;
+}
+.pgy-em:hover { transform: translateY(-2px); }
+.pgy-em.on {
+  border-color: var(--accent); background: var(--accent-soft);
+  transform: translateY(-2px);
+}
+
+/* Goal-amount + monthly-amount inputs (with ₪ prefix). */
+.pgy-amt, .pgy-custom { position: relative; }
+.pgy-amt { margin-bottom: 13px; }
+.pgy-custom { margin-top: 8px; }
+.pgy-amt > span, .pgy-custom > span {
+  position: absolute; left: 11px; top: 50%; transform: translateY(-50%);
+  color: var(--faint); font-size: 14px; pointer-events: none;
+}
+.pgy-amt input, .pgy-custom input { padding-left: 24px; }
+
+/* Monthly-set-aside preset plans (3 / 6 / 12 / 24 months). */
+#pgy-plans { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.pgy-plan {
+  display: flex; flex-direction: column; gap: 2px;
+  align-items: flex-start; padding: 10px 12px; border-radius: 11px;
+  cursor: pointer; text-align: left;
+  background: var(--bg-elev); border: 1px solid var(--hairline-2);
+  transition: border-color .12s ease, transform .12s ease,
+    background-color .12s ease;
+}
+.pgy-plan:hover { transform: translateY(-2px); border-color: var(--accent); }
+.pgy-plan.on { border-color: var(--accent); background: var(--accent-soft); }
+.pgy-plan-amt {
+  font: 800 15px/1 ui-rounded, "SF Pro Rounded", system-ui;
+  font-variant-numeric: tabular-nums;
+}
+.pgy-plan-sub { font-size: 10.5px; color: var(--muted); font-weight: 600; }
+.pgy-plan-hint {
+  font-size: 12px; color: var(--faint); padding: 8px 2px;
+  grid-column: 1 / -1;
+}
+.pgy-modal-eta {
+  font-size: 12px; color: var(--muted); line-height: 1.5;
+  margin-top: 11px; padding: 9px 12px; border-radius: 10px;
+  background: var(--accent-soft);
 }
 .piggy-headroom {
   display: flex; gap: 9px; align-items: flex-start;
