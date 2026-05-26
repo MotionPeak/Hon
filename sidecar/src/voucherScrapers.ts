@@ -1172,17 +1172,34 @@ export async function scrapeHitechZoneBalance(
   }
   // CRITICAL: visible (non-headless). reCAPTCHA's bot-detection refuses to
   // present a checkbox in headless Chrome, and the user has to click it
-  // themselves either way.
-  const browser: Browser = await puppeteer.launch({
-    headless: false,
+  // themselves either way. ALSO prefer the real installed Chrome over the
+  // bundled Chromium — reCAPTCHA fingerprints vanilla Chromium too and
+  // can outright refuse the checkbox or auto-fail it. Mirrors the same
+  // tradeoff pension.ts makes for Meitav/Menora's CAPTCHA flow.
+  const launchArgs = [
+    ...(process.env.HON_BROWSER_NO_SANDBOX === '1'
+      ? ['--no-sandbox', '--disable-setuid-sandbox'] : []),
+    '--window-size=900,720',
+  ];
+  const launchOpts = {
+    headless: false as const,
     defaultViewport: null,
     userDataDir: options.userDataDir,
-    args: [
-      ...(process.env.HON_BROWSER_NO_SANDBOX === '1'
-        ? ['--no-sandbox', '--disable-setuid-sandbox'] : []),
-      '--window-size=900,720',
-    ],
-  });
+    args: launchArgs,
+  };
+  let browser: Browser;
+  try {
+    browser = await puppeteer.launch({ ...launchOpts, channel: 'chrome' });
+  } catch (err) {
+    htzLog.warn('chrome.unavailable', {
+      message: err instanceof Error ? err.message : String(err),
+    });
+    // Chrome isn't installed (or the channel doesn't exist on this OS).
+    // Fall back to bundled Chromium — reCAPTCHA MAY still work, just
+    // less reliably; surfacing the warning helps debug "checkbox never
+    // appeared" reports.
+    browser = await puppeteer.launch(launchOpts);
+  }
   // Hand the browser to the caller so a cancel request can close it,
   // which makes every subsequent Puppeteer op throw — the scrape's
   // catch block then returns and the server's IIFE finishes cleanly
