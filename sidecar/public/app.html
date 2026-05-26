@@ -5923,9 +5923,21 @@ function brokerageView() {
   // connection owns any in-scope account (same scoping the chart uses).
   if (!haveGain && totalValue > 0) {
     const acctIdsInScope = new Set(acctsInScope.map((a) => a.id));
-    const perfInScope = (performance || []).filter((p) =>
-      state.accounts.some((a) =>
-        acctIdsInScope.has(a.id) && a.connectionId === p.connectionId));
+    // Only use a connection-level contributions number when EVERY one
+    // of that connection's brokerage accounts is in scope. The report's
+    // `contributions` is connection-wide; pairing it with a totalValue
+    // that's been narrowed to one account in a multi-account connection
+    // would compare a single account's value to the whole connection's
+    // net deposits, producing wildly wrong gains (often hugely negative
+    // if the un-scoped accounts hold most of the deposits). When the
+    // user has narrowed to one account, we'd rather show no gain than
+    // a misleading number. Found 2026-05-26.
+    const perfInScope = (performance || []).filter((p) => {
+      const connBrkAccts = (state.accounts || []).filter((a) =>
+        a.connectionId === p.connectionId && brkAcctIds.has(a.id));
+      if (!connBrkAccts.length) return false;
+      return connBrkAccts.every((a) => acctIdsInScope.has(a.id));
+    });
     let contribs = 0, haveContribs = false;
     perfInScope.forEach((p) => {
       const c = p.data && typeof p.data.contributions === "number"
@@ -5960,9 +5972,14 @@ function brokerageView() {
     ? performance
     : performance.filter((p) => state.accounts.some((a) =>
         a.id === acctFilter && a.connectionId === p.connectionId));
+  // Pass the focused account (or null for "all") so buildEquitySeries
+  // can apply the right inception clip per path — when one account is
+  // selected, we want THAT account's inception, not the earliest of
+  // its sibling accounts in the same connection.
+  const focusedAcctId = acctFilter === "all" ? null : acctFilter;
   const fullSeriesRaw = acctFilter === "all"
-    ? buildEquitySeries(performance, snaps, holdSnaps, conv)
-    : buildEquitySeries(filteredPerf, snapsScoped, holdSnapsScoped, conv);
+    ? buildEquitySeries(performance, snaps, holdSnaps, conv, focusedAcctId)
+    : buildEquitySeries(filteredPerf, snapsScoped, holdSnapsScoped, conv, focusedAcctId);
   // SnapTrade reports historical equity going back to whenever the broker
   // first opened the account — often years before the user actually
   // started buying. Anchor the chart to the user's earliest transaction
@@ -6367,17 +6384,32 @@ function buildHoldingSeries(holdSnaps, symbol, accountIds, conv, currency) {
 //      reconstructed per date, summed across positions with forward-fill so
 //      non-trading days don't drop positions off the running total).
 //   3) Hon's own per-sync account_value_snapshots (sparse, one per sync).
-function buildEquitySeries(performance, snaps, holdSnaps, conv) {
-  // Earliest inception across the connections feeding any of these sources.
-  // Used to clip every branch below — the user pinned this as their actual
-  // start date, and the chart should respect it no matter which path renders.
+function buildEquitySeries(performance, snaps, holdSnaps, conv, focusedAcctId) {
+  // Inception lookup. Two modes:
+  //   - "all" (focusedAcctId == null): per-connection EARLIEST inception
+  //     across the connection's accounts (multi-account portfolios still
+  //     show the full joint history).
+  //   - filtered to one account: that account's OWN inception ONLY. A
+  //     sibling account's earlier inception must NOT lend its history to
+  //     a younger account on the same connection. Found 2026-05-26 —
+  //     previously buildEquitySeries used the earliest sibling for both
+  //     paths, so an account pinned to 2024 would paint pretend history
+  //     from 2020 when its sibling's inception was set there.
   const acctsByConn = {};
+  const focusedInception = focusedAcctId
+    ? ((state.accounts || []).find((a) => a.id === focusedAcctId)?.inceptionDate || null)
+    : null;
   (state.accounts || []).forEach((a) => {
     if (a.inceptionDate) {
       acctsByConn[a.connectionId] = a.inceptionDate < (acctsByConn[a.connectionId] || '9999-12-31')
         ? a.inceptionDate : acctsByConn[a.connectionId];
     }
   });
+  // When filtered, override the per-connection map so EVERY branch
+  // uses the focused account's inception (or null if it has none —
+  // we won't invent a clip the user didn't pin).
+  const inceptionFor = (connectionId) =>
+    focusedAcctId ? focusedInception : (acctsByConn[connectionId] || null);
   // 1) SnapTrade / Meitav performance — connection-scope, sums across
   //    accounts of the same connection.
   let havePerformance = false;
@@ -6386,7 +6418,7 @@ function buildEquitySeries(performance, snaps, holdSnaps, conv) {
     const pts = (p.data && p.data.totalEquity) || [];
     if (pts.length) havePerformance = true;
     const pcur = (p.data && p.data.currency) || "USD";
-    const inception = acctsByConn[p.connectionId] || null;
+    const inception = inceptionFor(p.connectionId);
     pts.forEach((pt) => {
       if (inception && pt.date < inception) return;
       const v = conv(pt.value, pt.currency || pcur);
@@ -6456,9 +6488,27 @@ function buildEquitySeries(performance, snaps, holdSnaps, conv) {
     if (out.length) return out;
   }
 
-  // 3) Account-level snapshots — Hon's per-sync fallback.
+  // 3) Account-level snapshots — Hon's per-sync fallback. Apply the same
+  //    inception clip as paths 1 and 2: when only this path has data
+  //    (sparse local snapshots, no SnapTrade report, no per-holding
+  //    backfill), pre-inception points must NOT leak through. Look up
+  //    each snapshot's account → its inception (focused-account scope
+  //    when filtered, or earliest sibling otherwise). Found 2026-05-26
+  //    by code review — the previous implementation just summed by date
+  //    with no clip and silently painted history before the user's
+  //    pinned start date.
+  const acctInception = {};
+  (state.accounts || []).forEach((a) => {
+    if (focusedAcctId) {
+      acctInception[a.id] = a.id === focusedAcctId ? focusedInception : null;
+    } else if (a.inceptionDate) {
+      acctInception[a.id] = a.inceptionDate;
+    }
+  });
   const byDate = {};
   snaps.forEach((s) => {
+    const inception = acctInception[s.accountId];
+    if (inception && s.date < inception) return;
     const v = conv(s.value, s.currency);
     if (v == null) return;
     byDate[s.date] = (byDate[s.date] || 0) + v;
