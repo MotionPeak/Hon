@@ -4715,12 +4715,16 @@ function voucherCard(v) {
         + "Expired " + Math.abs(days) + (Math.abs(days) === 1 ? " day" : " days")
         + " ago</span></div>";
     } else if (days <= 30) {
+      // expiresOn passes through esc() like every other field that lands
+      // in innerHTML — a future scraper or import that emits non-ISO
+      // text (or, worst case, embedded markup) won't be able to inject
+      // into a fully trusted SPA that holds banking credentials.
       expiryBadge = '<div class="pgy-badge skipped"><span>⌛</span><span>'
         + "Expires in " + days + (days === 1 ? " day" : " days")
-        + " (" + v.expiresOn + ")</span></div>";
+        + " (" + esc(v.expiresOn) + ")</span></div>";
     } else {
       expiryBadge = '<div class="pgy-badge funded"><span>📅</span><span>'
-        + "Expires " + v.expiresOn + "</span></div>";
+        + "Expires " + esc(v.expiresOn) + "</span></div>";
     }
   }
 
@@ -4918,10 +4922,10 @@ const VOUCHER_SOURCES = [
     id: "hitechzone",
     emoji: "💎",
     label: "Hi-Tech Zone — היי טק זון",
-    sub: "Employer perks and gift sums",
-    domain: "hitechzone.co.il",
-    available: false,
-    note: "Coming soon — log in to Hi-Tech Zone for your balance.",
+    sub: "Balance lookup by your 8-9 digit digital code",
+    domain: "htzone.co.il",
+    available: true,
+    start: () => hitechzoneSyncModal(),
   },
   {
     id: "pluxee",
@@ -5352,6 +5356,123 @@ function buymeSyncModal() {
     };
 
     showEmailStep();
+  });
+}
+
+// Hi-Tech Zone sync: enter the 8/9-digit digital code, kick off the
+// scrape. A visible Chrome window opens; the user solves the reCAPTCHA
+// and clicks "שלח" in that window. Hon polls server status until the
+// scraper has either parsed the balance (success) or hit a timeout
+// (error). No OTP step — the CAPTCHA IS the human-verification step.
+function hitechzoneSyncModal() {
+  openModal(async (modal) => {
+    let syncId = null;
+    let pollTimer = null;
+    const stopPolling = () => { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } };
+    const cleanup = () => { stopPolling(); };
+
+    let savedCode = "";
+    try {
+      const r = await api("/vouchers/sync/htzone/saved-code");
+      savedCode = r && r.code || "";
+    } catch (e) { /* fine */ }
+
+    const showCodeStep = () => {
+      modal.innerHTML = "<h2>Sync from Hi-Tech Zone</h2>"
+        + '<p class="hint">Enter the 8 or 9-digit digital code from your '
+        + "Hi-Tech Zone card. Hon will open a Chrome window with the balance "
+        + "lookup — <b>you tick the reCAPTCHA and click שלח there</b>, then "
+        + "the result flows back into Hon.</p>"
+        + '<div class="field"><label>Digital code</label>'
+        + '<input id="htz-code" type="text" inputmode="numeric" '
+        + 'placeholder="8 or 9 digits" maxlength="9" '
+        + 'value="' + esc(savedCode) + '"></div>'
+        + '<div class="field"><label class="inline">'
+        + '<input id="htz-remember" type="checkbox"'
+        + (savedCode ? ' checked' : '') + ' /> '
+        + "Remember the code for next sync</label></div>"
+        + '<div class="modal-actions"><button data-x="cancel">Cancel</button>'
+        + '<button class="primary" id="htz-go">Open balance lookup</button></div>';
+      const codeInput = modal.querySelector("#htz-code");
+      codeInput.focus();
+      modal.querySelector('[data-x="cancel"]').addEventListener("click",
+        () => { cleanup(); closeOverlay(); });
+      modal.querySelector("#htz-go").addEventListener("click", () => start());
+      codeInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") start();
+      });
+
+      const start = async () => {
+        const code = codeInput.value.replace(/\D/g, "");
+        if (!/^\d{8,9}$/.test(code)) {
+          toast("Enter 8 or 9 digits (the code on your card).", true);
+          return;
+        }
+        const remember = modal.querySelector("#htz-remember").checked;
+        modal.querySelector("#htz-go").disabled = true;
+        modal.querySelector("#htz-go").textContent = "Opening…";
+        try {
+          const r = await api("/vouchers/sync/htzone/start", "POST", { code, remember });
+          syncId = r.syncId;
+          showWaitingStep();
+        } catch (e) {
+          modal.querySelector("#htz-go").disabled = false;
+          modal.querySelector("#htz-go").textContent = "Open balance lookup";
+          toast((e && e.message) || "Could not start the sync.", true);
+        }
+      };
+    };
+
+    const showWaitingStep = () => {
+      modal.innerHTML = "<h2>Waiting for you</h2>"
+        + '<p class="hint" id="htz-status">A Chrome window just opened. '
+        + 'Tick the <b>reCAPTCHA</b> and click <b>שלח</b> in that window — '
+        + 'Hon will pick the balance up automatically.</p>'
+        + '<div class="modal-actions"><button data-x="cancel">Cancel</button></div>';
+      modal.querySelector('[data-x="cancel"]').addEventListener("click", async () => {
+        cleanup();
+        try { await api("/vouchers/sync/htzone/cancel", "POST", { syncId }); } catch (e) {}
+        closeOverlay();
+      });
+
+      const status = modal.querySelector("#htz-status");
+      pollTimer = setInterval(async () => {
+        try {
+          const s = await api("/vouchers/sync/htzone/status/" + syncId);
+          if (s.message) status.textContent = s.message;
+          if (s.finished) {
+            stopPolling();
+            handleFinish(s);
+          }
+        } catch (e) { /* keep polling */ }
+      }, 1500);
+    };
+
+    const handleFinish = async (s) => {
+      if (s.status === "success") {
+        const fresh = await api("/vouchers").catch(() => ({ vouchers: state.vouchers }));
+        state.vouchers = fresh.vouchers || [];
+        try { state.summary = (await api("/summary")).summary; } catch (e) {}
+        render();
+        const n = (s.vouchers || []).length;
+        toast("Hi-Tech Zone: synced " + n + " card" + (n === 1 ? "" : "s") + ".");
+        closeOverlay();
+      } else {
+        toast(s.error || "Sync failed.", true);
+        modal.innerHTML = "<h2>Sync didn't complete</h2>"
+          + '<p class="hint">' + esc(s.error || "Unknown error.") + "</p>"
+          + '<div class="modal-actions">'
+          + '<button data-x="close">Close</button>'
+          + '<button class="primary" id="htz-retry">Try again</button></div>';
+        modal.querySelector('[data-x="close"]').addEventListener("click", closeOverlay);
+        modal.querySelector("#htz-retry").addEventListener("click", () => {
+          syncId = null;
+          showCodeStep();
+        });
+      }
+    };
+
+    showCodeStep();
   });
 }
 
