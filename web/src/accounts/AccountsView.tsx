@@ -1,10 +1,33 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { api, ApiError } from '../api';
 import { money } from '../format';
 import type {
   Account, AssetSectionKey, Company, Connection, Loan, ManualAsset,
 } from './types';
+
+// Polling interval while a scrape is in-flight. Short enough that tests
+// resolve quickly via waitFor; long enough that production polling isn't
+// a CPU/network drag.
+const SCRAPE_POLL_INTERVAL_MS = 200;
+
+interface RunStatus {
+  runId: string;
+  connectionId: string;
+  status: 'running' | 'needs-otp' | 'success' | 'error';
+  message: string;
+  accountsCount: number;
+  transactionsCount: number;
+  startedAt: string;
+  finishedAt?: string;
+}
+
+type SyncState =
+  | { kind: 'idle' }
+  | { kind: 'starting' }
+  | { kind: 'running'; runId: string; message: string }
+  | { kind: 'needs-otp'; runId: string; message: string }
+  | { kind: 'error'; message: string };
 
 // Modals escape stacking contexts (cards have transforms / animations that
 // turn into containing blocks). Same pattern as CategoriesPanel.
@@ -49,6 +72,10 @@ export function AccountsView() {
   const [editingBalance, setEditingBalance] = useState<Account | null>(null);
   const [removingConnection, setRemovingConnection] = useState<Connection | null>(null);
   const [editingCredentials, setEditingCredentials] = useState<Connection | null>(null);
+  const [syncStates, setSyncStates] = useState<Record<string, SyncState>>({});
+  // Active polling timers per connection — kept in a ref so re-renders don't
+  // forget pending intervals when a sync transitions states.
+  const pollTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   const refresh = useCallback(async () => {
     try {
@@ -69,6 +96,77 @@ export function AccountsView() {
   }, []);
 
   useEffect(() => { void refresh(); }, [refresh]);
+
+  // Clear all polling timers on unmount.
+  useEffect(() => {
+    const timers = pollTimers.current;
+    return () => {
+      Object.values(timers).forEach((t) => clearTimeout(t));
+    };
+  }, []);
+
+  const setSyncForConnection = useCallback((connectionId: string, next: SyncState) => {
+    setSyncStates((prev) => ({ ...prev, [connectionId]: next }));
+  }, []);
+
+  // Poll one connection's run until it terminates. Schedules itself via
+  // setTimeout to avoid stacked intervals if the previous poll is slow.
+  const pollRun = useCallback(async (connectionId: string, runId: string) => {
+    try {
+      const { run } = await api<{ run: RunStatus }>(`/scrape/${encodeURIComponent(runId)}`);
+      if (run.status === 'running') {
+        setSyncForConnection(connectionId, { kind: 'running', runId, message: run.message });
+        pollTimers.current[connectionId] = setTimeout(
+          () => void pollRun(connectionId, runId),
+          SCRAPE_POLL_INTERVAL_MS,
+        );
+      } else if (run.status === 'needs-otp') {
+        setSyncForConnection(connectionId, { kind: 'needs-otp', runId, message: run.message });
+        // Keep polling — the OTP modal posts the code, then the run goes
+        // back to running and eventually success/error.
+        pollTimers.current[connectionId] = setTimeout(
+          () => void pollRun(connectionId, runId),
+          SCRAPE_POLL_INTERVAL_MS,
+        );
+      } else if (run.status === 'success') {
+        setSyncForConnection(connectionId, { kind: 'idle' });
+        await refresh();
+      } else {
+        setSyncForConnection(connectionId, { kind: 'error', message: run.message || 'Sync failed' });
+      }
+    } catch (e) {
+      setSyncForConnection(connectionId, {
+        kind: 'error',
+        message: e instanceof ApiError ? e.message : String(e),
+      });
+    }
+  }, [refresh, setSyncForConnection]);
+
+  const startSync = useCallback(async (connection: Connection) => {
+    setSyncForConnection(connection.id, { kind: 'starting' });
+    try {
+      // Mirror the legacy app's POST body. interactive=true picks the
+      // engine's runInteractiveScrape path, which wires the OTP watcher
+      // for the banks in HON_OTP_WATCHER_COMPANIES (Beinleumi, Hapoalim,
+      // Otsar Hahayal, Massad, Pagi). Headless mode has no watcher and
+      // hangs at LOGGING_IN when the bank shows its 2FA page.
+      // monthsBack=24 matches the legacy default so initial syncs pull
+      // a sensible window even when the engine's incremental shortcut
+      // can't kick in.
+      const { runId } = await api<{ runId: string }>(
+        `/connections/${encodeURIComponent(connection.id)}/scrape`,
+        'POST',
+        { interactive: true, monthsBack: 24 },
+      );
+      setSyncForConnection(connection.id, { kind: 'running', runId, message: 'Starting…' });
+      void pollRun(connection.id, runId);
+    } catch (e) {
+      setSyncForConnection(connection.id, {
+        kind: 'error',
+        message: e instanceof ApiError ? e.message : String(e),
+      });
+    }
+  }, [pollRun, setSyncForConnection]);
 
   const toggleAccountExcluded = useCallback(async (a: Account, excluded: boolean) => {
     try {
@@ -141,6 +239,8 @@ export function AccountsView() {
                   onToggleLoanExcluded: toggleLoanExcluded,
                   onRemoveConnection: setRemovingConnection,
                   onSetCredentials: setEditingCredentials,
+                  onSync: startSync,
+                  syncStates,
                 })}
               </div>
             </section>
@@ -169,6 +269,25 @@ export function AccountsView() {
           onSaved={async () => { setEditingCredentials(null); await refresh(); }}
         />
       )}
+      {(() => {
+        // Render at most one OTP modal — the first connection that needs one.
+        const entry = Object.entries(syncStates)
+          .find(([, s]) => s.kind === 'needs-otp');
+        if (!entry) return null;
+        const [connectionId, state] = entry;
+        if (state.kind !== 'needs-otp') return null;
+        return (
+          <OtpModal
+            runId={state.runId}
+            message={state.message}
+            onClose={() => setSyncForConnection(connectionId, { kind: 'idle' })}
+            onSubmitted={() => {
+              // Keep state as needs-otp briefly — the next poll will move to
+              // running or success. Don't reset to idle here.
+            }}
+          />
+        );
+      })()}
     </div>
   );
 }
@@ -180,6 +299,8 @@ interface RowCallbacks {
   onToggleLoanExcluded: (loan: Loan, excluded: boolean) => void | Promise<void>;
   onRemoveConnection: (connection: Connection) => void;
   onSetCredentials: (connection: Connection) => void;
+  onSync: (connection: Connection) => void;
+  syncStates: Record<string, SyncState>;
 }
 
 function renderSectionItems(key: AssetSectionKey, data: AccountsData, cb: RowCallbacks) {
@@ -225,6 +346,9 @@ function ConnectionCard({ connection, company, accounts, callbacks }: Connection
   );
   const totalCurrency = accounts.find((a) => !a.excluded && a.balance != null)?.currency ?? 'ILS';
   const hasBalances = accounts.some((a) => a.balance != null && !a.excluded);
+  const syncState = callbacks.syncStates[connection.id] ?? { kind: 'idle' as const };
+  const syncing = syncState.kind === 'starting' || syncState.kind === 'running'
+    || syncState.kind === 'needs-otp';
   return (
     <article className="conn-card">
       <header className="conn-head">
@@ -240,6 +364,16 @@ function ConnectionCard({ connection, company, accounts, callbacks }: Connection
                 Set credentials
               </button>
             )}
+            {connection.hasCredentials && (
+              <button
+                type="button"
+                className="mini"
+                disabled={syncing}
+                onClick={() => callbacks.onSync(connection)}
+              >
+                {syncing ? 'Syncing…' : 'Sync'}
+              </button>
+            )}
             <button
               type="button"
               className="mini danger"
@@ -250,6 +384,12 @@ function ConnectionCard({ connection, company, accounts, callbacks }: Connection
           </div>
         </div>
         <div className="conn-meta">{meta}</div>
+        {syncState.kind === 'running' && syncState.message && (
+          <div className="conn-sync-msg">{syncState.message}</div>
+        )}
+        {syncState.kind === 'error' && (
+          <div className="conn-sync-err">{syncState.message}</div>
+        )}
       </header>
       <ul className="conn-accounts">
         {accounts.map((a) => {
@@ -471,6 +611,57 @@ function CredentialsModal({ connection, company, onClose, onSaved }: Credentials
           <div className="modal-actions">
             <button type="button" onClick={onClose}>Cancel</button>
             <button type="button" className="primary" onClick={submit}>Save</button>
+          </div>
+        </div>
+      </div>
+    </ModalPortal>
+  );
+}
+
+interface OtpModalProps {
+  runId: string;
+  message: string;
+  onClose: () => void;
+  onSubmitted: () => void;
+}
+
+function OtpModal({ runId, message, onClose, onSubmitted }: OtpModalProps) {
+  const [code, setCode] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const submit = async () => {
+    setError(null);
+    if (!code.trim()) {
+      setError('Enter the code.');
+      return;
+    }
+    try {
+      await api(`/scrape/${encodeURIComponent(runId)}/otp`, 'POST', { code: code.trim() });
+      onSubmitted();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e));
+    }
+  };
+  return (
+    <ModalPortal>
+      <div className="overlay">
+        <div role="dialog" aria-label="One-time code" className="modal">
+          <h2>One-time code</h2>
+          <p>{message || 'Enter the verification code from your bank.'}</p>
+          <label className="field">
+            <span>Code</span>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              autoFocus
+              autoComplete="one-time-code"
+            />
+          </label>
+          {error && <div className="modal-err">{error}</div>}
+          <div className="modal-actions">
+            <button type="button" onClick={onClose}>Cancel</button>
+            <button type="button" className="primary" onClick={submit}>Submit</button>
           </div>
         </div>
       </div>

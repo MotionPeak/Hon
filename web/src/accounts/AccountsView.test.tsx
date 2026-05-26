@@ -406,6 +406,101 @@ describe('AccountsView — set credentials', () => {
   });
 });
 
+describe('AccountsView — sync flow', () => {
+  it('renders a "Sync" button on every connection with credentials', async () => {
+    installFetchMock(FULL);
+    render(<AccountsView />);
+    await screen.findByText('Hapoalim main');
+    expect(screen.getAllByRole('button', { name: /^sync$/i }).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('clicking sync POSTs to /connections/:id/scrape and polls until success', async () => {
+    const user = userEvent.setup();
+    const post = vi.fn((_body: unknown) => ({ runId: 'r-1' }));
+    let poll = 0;
+    const status = vi.fn(() => {
+      poll += 1;
+      if (poll < 2) {
+        return { run: {
+          runId: 'r-1', connectionId: 'c-bank-1', status: 'running',
+          message: 'Logging in…', accountsCount: 0, transactionsCount: 0,
+          startedAt: '2026-05-26',
+        } };
+      }
+      return { run: {
+        runId: 'r-1', connectionId: 'c-bank-1', status: 'success',
+        message: 'Done', accountsCount: 1, transactionsCount: 10,
+        startedAt: '2026-05-26', finishedAt: '2026-05-26',
+      } };
+    });
+    const get = vi.fn(() => ACCOUNTS);
+    installFetchMock({
+      ...FULL,
+      'GET /api/accounts': get,
+      'POST /api/connections/c-bank-1/scrape': post,
+      'GET /api/scrape/r-1': status,
+    });
+    render(<AccountsView />);
+    const card = (await screen.findByText('Hapoalim main')).closest('.conn-card')!;
+    await user.click(within(card as HTMLElement).getByRole('button', { name: /^sync$/i }));
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(status).toHaveBeenCalled());
+    // Successful run causes a refetch of accounts.
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+  });
+
+  it('surfaces the run message while in-progress and shows error on failure', async () => {
+    const user = userEvent.setup();
+    installFetchMock({
+      ...FULL,
+      'POST /api/connections/c-bank-1/scrape': () => ({ runId: 'r-1' }),
+      'GET /api/scrape/r-1': () => ({ run: {
+        runId: 'r-1', connectionId: 'c-bank-1', status: 'error',
+        message: 'login failed', accountsCount: 0, transactionsCount: 0,
+        startedAt: '2026-05-26', finishedAt: '2026-05-26',
+      } }),
+    });
+    render(<AccountsView />);
+    const card = (await screen.findByText('Hapoalim main')).closest('.conn-card')!;
+    await user.click(within(card as HTMLElement).getByRole('button', { name: /^sync$/i }));
+    expect(await within(card as HTMLElement).findByText(/login failed/i)).toBeInTheDocument();
+  });
+
+  it('shows an OTP prompt when the run reports needs-otp; submitting POSTs the code', async () => {
+    const user = userEvent.setup();
+    const submitOtp = vi.fn((_body: unknown) => ({ ok: true }));
+    let polls = 0;
+    installFetchMock({
+      ...FULL,
+      'POST /api/connections/c-bank-1/scrape': () => ({ runId: 'r-1' }),
+      'GET /api/scrape/r-1': () => {
+        polls += 1;
+        if (polls === 1) {
+          return { run: {
+            runId: 'r-1', connectionId: 'c-bank-1', status: 'needs-otp',
+            message: 'Enter the code', accountsCount: 0, transactionsCount: 0,
+            startedAt: '2026-05-26',
+          } };
+        }
+        return { run: {
+          runId: 'r-1', connectionId: 'c-bank-1', status: 'success',
+          message: 'Done', accountsCount: 1, transactionsCount: 10,
+          startedAt: '2026-05-26', finishedAt: '2026-05-26',
+        } };
+      },
+      'POST /api/scrape/r-1/otp': submitOtp,
+    });
+    render(<AccountsView />);
+    const card = (await screen.findByText('Hapoalim main')).closest('.conn-card')!;
+    await user.click(within(card as HTMLElement).getByRole('button', { name: /^sync$/i }));
+    const otpDialog = await screen.findByRole('dialog', { name: /one-time code/i });
+    await user.type(within(otpDialog).getByLabelText(/code/i), '123456');
+    await user.click(within(otpDialog).getByRole('button', { name: /submit/i }));
+    await waitFor(() => expect(submitOtp).toHaveBeenCalledTimes(1));
+    expect(submitOtp.mock.calls[0]?.[0]).toEqual({ code: '123456' });
+  });
+});
+
 describe('AccountsView — assets + loans', () => {
   it('renders each manual asset by name in the Other assets section', async () => {
     installFetchMock(FULL);
