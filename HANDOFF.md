@@ -10,8 +10,10 @@
 
 - The engine (`sidecar/`) is **untouched**. Same DB, same APIs, same
   scrapers, same token-on-URL-fragment auth.
-- All 10 tabs are migrated end-to-end. **224 tests pass, typecheck
-  clean.** `npm run dev` and `npm test` both work from `web/`.
+- All 10 tabs are migrated end-to-end and now render close to
+  legacy parity (CRUD flows + Insights depth landed since the
+  initial migration). **267 tests pass, typecheck clean.**
+  `npm run dev` and `npm test` both work from `web/`.
 - The legacy SPA at `sidecar/public/app.html` is still served by
   `npm run web` and remains the production UI. The new React app
   ships from `cd web && npm run dev` — append `#token=<uuid>` from
@@ -124,75 +126,105 @@ Bearer-token gated. The React UI uses `api()` in `web/src/api.ts`.
 The OLD `app.html` is the source of truth for what every endpoint
 returns. Grep it for the route to see how it's consumed.
 
+## UI building blocks introduced
+
+- **Radix UI primitives** (`@radix-ui/react-dialog`,
+  `@radix-ui/react-dropdown-menu`) are now the standard for new modal
+  + action-menu flows. jsdom polyfills for `hasPointerCapture` /
+  `setPointerCapture` / `releasePointerCapture` / `scrollIntoView`
+  live in `web/src/test/setup.ts` so Radix works under Vitest.
+- **Reusable CSS scaffolding** — `.rx-overlay`, `.rx-dialog`,
+  `.rx-dialog-sm` (Radix Dialog skins); `.menu-content`, `.menu-item`,
+  `.menu-sep`, `.kebab-btn` (Radix DropdownMenu skins);
+  `.btn-primary`, `.btn-ghost`, `.btn-danger` (generic CTA pills).
+- **Sliding amber pill** on the main sidebar nav — single absolutely-
+  positioned element measured from the active button via
+  `useLayoutEffect`, animated with a soft spring on `transform` +
+  `height`. The pill carries the gradient + a blurred halo.
+- **Stagger reveal** on tab content — direct children of common view
+  containers (`.set-grid`, `.piggy-grid`, `.assets-grid`,
+  `.recurring-sections`, `.ov-stack`) fade-up with 0/50/95/135/170/
+  200 ms cascade. Plus a fade-up on the keyed `.app-tab-view`
+  wrapper itself.
+- **Sidebar swap animation** — Activity transaction sidebar flips
+  between category picker and refund picker with a spring overshoot
+  (`.sb-view-anim` / `.rf-picker`).
+- All animations respect `prefers-reduced-motion: reduce`.
+
 ## What's shipped (tab-by-tab)
 
-All 10 tabs render and read from the engine. Per-tab feature notes:
+All 10 tabs render with rich, near-legacy-parity flows. Per-tab notes:
 
-1. **Overview** — Balance card (income − committed − spent, red when
-   over), projected bank balance (bankNow + income − committed −
-   spent − piggy, with itemised detail rows), essentials budget
-   card (per-category bars, over-budget red), net worth headline
-   with per-currency chips.
+1. **Overview** — Balance card (income − committed − spent, red
+   when over), projected bank balance (bankNow + income −
+   committed − spent − piggy, itemised detail rows), essentials
+   budget card (per-category bars, over-budget red), net worth
+   headline with per-currency chips.
 2. **Accounts (Assets)** — Full display, edits (balance, inception,
    net-worth toggle), sync + OTP flow, remove connection,
    set-credentials, brokerage holdings expansion, asset/loan edit,
    add-connection picker with bank/card credential form, manual
-   asset, manual loan, provider favicons. SnapTrade portal flow
-   (#30) and pension flows 5 variants (#31) are still deferred.
+   asset, manual loan, provider favicons.
+   *Deferred:* SnapTrade portal flow (#30), pension flows 5
+   variants (#31).
 3. **Activity** — Transactions list with month picker, category
-   groups, search, category move via right-side sidebar (with
-   stubbed Reimbursement + Splitwise sections). Refund linking
-   (#10) and batch select + bulk move (#11) deferred.
-4. **Fixed bills (Recurring)** — Read-only merchant detection +
-   status pills + monthly equivalents. CRUD (#16) deferred.
+   groups, search. **Category-move sidebar** with compact
+   left-aligned 2-col category grid. **Refund linking** (#10) takes
+   over the sidebar with a search input, by-category groups, and
+   automatic direction flip when the open txn is a refund. **Batch
+   select + bulk move** (#11) — Select button enters batch mode,
+   row click toggles selection (amber inset border), toolbar shows
+   "N selected" + "Move to category…" which opens a Radix Dialog
+   that parallel-PATCHes every selected txn.
+4. **Fixed bills (Recurring)** — Merchant detection + status pills.
+   **CRUD** (#16): per-row `×` (hover) sets frequency=ignore;
+   per-category `÷N` pill opens a split-editor Dialog.
 5. **Subscriptions** — 4 buckets (Active / Flagged / Cancelled /
    Probably cancelled).
-6. **Piggy banks** — Read-only list with conic-gradient progress
-   rings + headroom strip. CRUD (#14) deferred.
-7. **Loans** — Loans read + manual-loan picker (Spitzer math
-   runs in the engine).
-8. **Vouchers** — List + add/edit/delete/toggle-excluded. Sync
-   flows for Shufersal / BuyMe / HTZone (#4) deferred.
-9. **Insights** — Spending sub-tab (12-month bars + per-month
-   category breakdown). Brokerage sub-tab (#19) + AI rollup (#20)
-   deferred.
+6. **Piggy banks** — Conic-gradient rings + headroom strip. **CRUD**
+   (#14): legacy-shape New / Edit Dialog with a sliding Type pill
+   (Monthly / Set aside once), 16-emoji grid, ₪-prefix amount
+   inputs, 4 monthly-set-aside preset cards (3/6/12/24 mo), live
+   "you'll reach X in N months" ETA. Per-card kebab menu (Edit /
+   Pause-or-Resume / Delete) with a confirm Dialog on delete.
+7. **Loans** — Loans read + manual-loan picker.
+8. **Vouchers** — List + add / edit / delete / toggle-excluded.
+   *Deferred:* sync flows for Shufersal / BuyMe / HTZone (#4).
+9. **Insights** — Spending and Brokerage sub-tabs (`.ins-tabs`
+   segmented strip).
+   - **Spending**: 12-month bars, stat tiles (Spent / Income / Saved
+     | Overspent / Transactions), vs-prev + vs-avg trend pills,
+     "Where it went" with per-category bars and ±vs-last / ±vs-avg
+     delta chips, Biggest expense highlight card.
+   - **Brokerage**: 5 stat tiles (Portfolio · Gain·1Y · Unrealized
+     P&L · Return on cost · Holdings count), value-over-time SVG
+     area chart with range pills (1M / 3M / YTD / 1Y / ALL) and a
+     USD↔ILS toggle when multi-currency holdings exist, holdings
+     rows with color dots + weight bars + ▲/▼ gain badges, sorted
+     by value desc.
+   *Deferred:* AI rollup card (#20), per-account filter pills +
+   inception-date input on the Brokerage chart, smooth bezier curve.
 10. **Settings** — All 6 cards (Billing cycle, Spending projection,
     Credit-card bills, Categories CRUD, AI engine stub, Splitwise
     stub).
 
 ## What's left
 
-These are deferred on purpose — each is its own session-sized chunk.
-Pick whichever is most valuable to the user next.
-
 - **#4 Voucher sync flows** — Shufersal, BuyMe, HTZone modal +
-  polling. Heaviest UI in the legacy app's voucher tab.
-- **#10 Activity refund linking** — pair an outflow with a later
-  refund so the budget nets correctly.
-- **#11 Activity batch select + bulk move** — multi-select + move
-  N transactions to a different category.
-- **#14 Piggy banks CRUD** — new piggy form, edit, pause, delete.
-- **#16 Recurring CRUD** — remove-from-fixed-bills, split editor,
-  frequency picker.
-- **#19 Insights Brokerage sub-tab** — value-over-time chart,
-  holdings, per-account filter.
-- **#20 Insights AI rollup** — narrative summary via `/llm/*`.
-- **#30 SnapTrade portal flow** — OAuth + portal handoff for IBKR
-  via SnapTrade.
+  polling. Three providers each with start / OTP / status / cancel
+  endpoints; the biggest single remaining chunk.
+- **#20 Insights AI rollup** — narrative summary card via
+  `POST /insights` + `GET /insights` polling.
+- **#30 SnapTrade portal flow** — OAuth + portal handoff for IBKR.
 - **#31 Pension flows (5 variants)** — Migdal/Harel/Clal automated,
   Meitav/Menora visible-window sign-in, Altshuler manual.
-
-Smaller polish items not in the task list:
-- AI engine card body in Settings — needs `/llm/*` flow.
-- Splitwise card body in Settings + the Activity sidebar's Splitwise
-  section — needs `/splitwise/*` OAuth + state.
-- `expectedFixedThisCycle` for the Overview projection — the round-1
-  + round-2 Overview uses the budget endpoint's `committed`
-  (fixedSpent + essentialSpent so far this cycle). The legacy app
-  uses a client-side recurring-merchant rollup that includes bills
-  PROJECTED to bill this cycle. Lift `detectMerchants` out of
-  `recurring/RecurringView.tsx` into a shared module and feed
-  `?expectedFixed=` into `/budget` to match the legacy exactly.
+- Smaller polish: per-account filter pills + inception-date input
+  on the Brokerage chart; smooth bezier curve in `ValueChart` (it's
+  a polyline today); AI engine card body in Settings (`/llm/*`);
+  Splitwise card body in Settings + the Activity sidebar's
+  Splitwise section (`/splitwise/*`); `expectedFixedThisCycle` for
+  the Overview projection (lift `detectMerchants` out of
+  `recurring/RecurringView.tsx` and feed it into `/budget`).
 
 ## State management
 
@@ -271,8 +303,8 @@ These bit prior sessions:
 ## Tests + Superpowers usage
 
 - `cd sidecar && npm test` runs the 41 backend tests (Vitest).
-- `cd web && npm test` runs the React component tests (**224** as
-  of the Overview round-2 commit).
+- `cd web && npm test` runs the React component tests (**267** as
+  of the Brokerage-depth commit).
 - `cd web && npm run typecheck` runs `tsc -b --noEmit`.
 - Use `/test-driven-development` for each new component: write the
   test first, watch it fail, write minimal code to pass.
