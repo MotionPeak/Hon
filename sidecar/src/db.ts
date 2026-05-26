@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-export const SCHEMA_VERSION = 29;
+export const SCHEMA_VERSION = 33;
 
 export interface DbHandle {
   db: Database.Database;
@@ -635,6 +635,19 @@ const MIGRATIONS: { version: number; sql: string }[] = [
     // chart clip pretend-history precisely at the user's known buy date.
     version: 32,
     sql: `ALTER TABLE accounts ADD COLUMN inception_date TEXT;`,
+  },
+  {
+    // Per-transaction link to a Loan row. Bank-loan payments are detected
+    // by the loanMatcher (sidecar/src/loanMatcher.ts) after each scrape
+    // and after a new bank loan is first written, then this column carries
+    // the link so the Loans tab can render a "Last payment" badge + the
+    // per-loan payment history without re-running pattern matching on
+    // every request. SQLite `ALTER TABLE ADD COLUMN` cannot carry a
+    // REFERENCES clause, so the column is a plain TEXT — integrity is
+    // maintained by setTransactionLoan's existence check and a
+    // delete-time null-out step.
+    version: 33,
+    sql: `ALTER TABLE transactions ADD COLUMN loan_id TEXT;`,
   },
 ];
 
