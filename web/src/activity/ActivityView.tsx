@@ -261,11 +261,11 @@ export function ActivityView() {
         />
       )}
       {moving && (
-        <CategoryPickerModal
+        <CategoryPickerSidebar
           transaction={moving}
           categories={categories}
           onClose={() => setMoving(null)}
-          onPicked={async (cat) => {
+          onSaved={async (cat) => {
             await api(
               `/transactions/${encodeURIComponent(moving.id)}/category`,
               'PATCH',
@@ -429,15 +429,16 @@ interface CategoryPickerProps {
   transaction: Transaction;
   categories: Category[];
   onClose: () => void;
-  onPicked: (category: string) => void | Promise<void>;
+  onSaved: (category: string) => void | Promise<void>;
 }
 
-function CategoryPickerModal(
-  { transaction, categories, onClose, onPicked }: CategoryPickerProps,
+function CategoryPickerSidebar(
+  { transaction, categories, onClose, onSaved }: CategoryPickerProps,
 ) {
+  const current = transaction.category ?? 'Other';
+  const [picked, setPicked] = useState<string>(current);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const current = transaction.category ?? 'Other';
 
   // Group by catGroup; render in income → essential → fixed → variable order.
   const groupOrder: Category['catGroup'][] = ['income', 'essential', 'fixed', 'variable'];
@@ -448,31 +449,57 @@ function CategoryPickerModal(
   for (const g of groupOrder) {
     grouped[g].sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
   }
-  const pick = async (name: string) => {
-    if (busy) return;
+  const save = async () => {
+    if (busy || picked === current) return;
     setBusy(true);
     setError(null);
     try {
-      await onPicked(name);
+      await onSaved(picked);
     } catch (e) {
       setBusy(false);
       setError(e instanceof ApiError ? e.message : String(e));
     }
   };
+  const cat = categories.find((c) => c.name === current);
   return (
     <ModalPortal>
-      <div className="overlay">
-        <div role="dialog" aria-label="Move to category" className="modal">
-          <h2>Move to category</h2>
-          <p>
-            <strong>{transaction.description}</strong> · {money(transaction.amount, transaction.currency)}
-          </p>
+      <aside
+        role="dialog"
+        aria-label="Move to category"
+        className="txn-sidebar"
+      >
+        <header className="txn-sidebar-head">
+          <span className="label">Transaction</span>
+          <button
+            type="button"
+            className="icon-btn txn-sidebar-close"
+            aria-label="Close"
+            onClick={onClose}
+          >×</button>
+        </header>
+        <div className="txn-sidebar-preview">
+          <span
+            className="txn-icon"
+            style={{ background: cat ? cat.color + '22' : 'var(--card-hi)' }}
+          >
+            {cat?.emoji ?? '▫️'}
+          </span>
+          <div className="txn-sidebar-meta">
+            <div className="txn-sidebar-name">{transaction.description}</div>
+            <div className="txn-sidebar-sub">
+              {money(transaction.amount, transaction.currency)} · {transaction.date}
+            </div>
+          </div>
+        </div>
+
+        <div className="txn-sidebar-section">
+          <div className="label">Category</div>
           {groupOrder.map((g) => grouped[g].length === 0 ? null : (
             <div key={g} className="cat-pick-section">
               <div className="cat-pick-head">{g}</div>
               <div className="cat-pick-grid">
                 {grouped[g].map((c) => {
-                  const selected = c.name === current;
+                  const selected = c.name === picked;
                   return (
                     <button
                       key={c.name}
@@ -480,7 +507,7 @@ function CategoryPickerModal(
                       className={`cat-pick-tile${selected ? ' on' : ''}`}
                       aria-pressed={selected}
                       style={{ '--cat-color': c.color } as React.CSSProperties}
-                      onClick={() => void pick(c.name)}
+                      onClick={() => setPicked(c.name)}
                       disabled={busy}
                     >
                       <span className="cat-pick-emoji">{c.emoji}</span>
@@ -491,12 +518,34 @@ function CategoryPickerModal(
               </div>
             </div>
           ))}
-          {error && <div className="modal-err">{error}</div>}
-          <div className="modal-actions">
-            <button type="button" onClick={onClose}>Cancel</button>
-          </div>
         </div>
-      </div>
+
+        <div className="txn-sidebar-section">
+          <div className="label">Reimbursement</div>
+          <button type="button" className="txn-sidebar-action" disabled>
+            + Link a refund or reimbursement
+          </button>
+          <p className="txn-sidebar-hint">Coming soon.</p>
+        </div>
+
+        <div className="txn-sidebar-section">
+          <div className="label">Splitwise</div>
+          <button type="button" className="txn-sidebar-action" disabled>
+            + Split on Splitwise
+          </button>
+          <p className="txn-sidebar-hint">Coming soon.</p>
+        </div>
+
+        {error && <div className="modal-err">{error}</div>}
+        <button
+          type="button"
+          className="primary txn-sidebar-save"
+          onClick={() => void save()}
+          disabled={busy || picked === current}
+        >
+          Save
+        </button>
+      </aside>
     </ModalPortal>
   );
 }

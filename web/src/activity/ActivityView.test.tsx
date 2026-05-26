@@ -141,31 +141,31 @@ describe('ActivityView — read-only', () => {
 });
 
 describe('ActivityView — category move', () => {
-  it('clicking a row opens a category picker showing all categories', async () => {
+  it('clicking a row opens a sidebar showing all categories', async () => {
     const user = userEvent.setup();
     installFetchMock(FULL);
     renderView();
     await user.click(await screen.findByText('Aroma Coffee'));
-    const dialog = screen.getByRole('dialog', { name: /move to category/i });
-    expect(within(dialog).getByRole('button', { name: /Groceries/ })).toBeInTheDocument();
-    expect(within(dialog).getByRole('button', { name: /Coffee/ })).toBeInTheDocument();
-    expect(within(dialog).getByRole('button', { name: /Salary/ })).toBeInTheDocument();
-    expect(within(dialog).getByRole('button', { name: /Other/ })).toBeInTheDocument();
+    const sidebar = screen.getByRole('dialog', { name: /move to category/i });
+    expect(within(sidebar).getByRole('button', { name: /Groceries/ })).toBeInTheDocument();
+    expect(within(sidebar).getByRole('button', { name: /Coffee/ })).toBeInTheDocument();
+    expect(within(sidebar).getByRole('button', { name: /Salary/ })).toBeInTheDocument();
+    expect(within(sidebar).getByRole('button', { name: /Other/ })).toBeInTheDocument();
   });
 
-  it('marks the current category as selected in the picker', async () => {
+  it('marks the current category as selected in the sidebar', async () => {
     const user = userEvent.setup();
     installFetchMock(FULL);
     renderView();
     await user.click(await screen.findByText('Aroma Coffee'));
-    const dialog = screen.getByRole('dialog', { name: /move to category/i });
-    expect(within(dialog).getByRole('button', { name: /Coffee/ }))
+    const sidebar = screen.getByRole('dialog', { name: /move to category/i });
+    expect(within(sidebar).getByRole('button', { name: /Coffee/ }))
       .toHaveAttribute('aria-pressed', 'true');
-    expect(within(dialog).getByRole('button', { name: /Groceries/ }))
+    expect(within(sidebar).getByRole('button', { name: /Groceries/ }))
       .toHaveAttribute('aria-pressed', 'false');
   });
 
-  it('picking a category PATCHes /transactions/:id/category and refetches', async () => {
+  it('picking a category then clicking Save PATCHes and refetches', async () => {
     const user = userEvent.setup();
     const patch = vi.fn((_body: unknown) => ({ ok: true }));
     const get = vi.fn(() => TXNS);
@@ -176,21 +176,36 @@ describe('ActivityView — category move', () => {
     });
     renderView();
     await user.click(await screen.findByText('Aroma Coffee'));
-    const dialog = screen.getByRole('dialog', { name: /move to category/i });
-    await user.click(within(dialog).getByRole('button', { name: /Groceries/ }));
+    const sidebar = screen.getByRole('dialog', { name: /move to category/i });
+    await user.click(within(sidebar).getByRole('button', { name: /Groceries/ }));
+    // No network call yet — tile click is selection only.
+    expect(patch).not.toHaveBeenCalled();
+    await user.click(within(sidebar).getByRole('button', { name: /^save$/i }));
     await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
     expect(patch.mock.calls[0]?.[0]).toEqual({ category: 'Groceries' });
     await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
     expect(screen.queryByRole('dialog', { name: /move to category/i })).not.toBeInTheDocument();
   });
 
-  it('cancel closes the picker without calling the engine', async () => {
+  it('Save is disabled when the selected category equals the current one', async () => {
+    const user = userEvent.setup();
+    installFetchMock(FULL);
+    renderView();
+    // Aroma Coffee is already in "Coffee" — Save should be disabled until
+    // the user picks a different tile.
+    await user.click(await screen.findByText('Aroma Coffee'));
+    const sidebar = screen.getByRole('dialog', { name: /move to category/i });
+    expect(within(sidebar).getByRole('button', { name: /^save$/i })).toBeDisabled();
+  });
+
+  it('close (X) closes the sidebar without calling the engine', async () => {
     const user = userEvent.setup();
     const patch = vi.fn();
     installFetchMock({ ...FULL, 'PATCH /api/transactions/t-1/category': patch });
     renderView();
     await user.click(await screen.findByText('Aroma Coffee'));
-    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: /cancel/i }));
+    const sidebar = screen.getByRole('dialog', { name: /move to category/i });
+    await user.click(within(sidebar).getByRole('button', { name: /^close$/i }));
     expect(screen.queryByRole('dialog', { name: /move to category/i })).not.toBeInTheDocument();
     expect(patch).not.toHaveBeenCalled();
   });
