@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
+import { DelayedLoader } from '../ui/DelayedLoader';
 import { cycleKey, cycleLabel } from '../cycle';
 import { money } from '../format';
 import { useSettings } from '../settings/useSettings';
@@ -41,7 +42,7 @@ export function InsightsView() {
   );
   const hasData = months.some((m) => m.spending > 0 || m.income > 0);
 
-  if (transactions === null) return <p>Loading…</p>;
+  if (transactions === null) return <DelayedLoader />;
 
   const activeMonth = selectedMonth && months.some((m) => m.month === selectedMonth)
     ? selectedMonth
@@ -290,7 +291,7 @@ function BrokerageSubTab() {
         performance: [], ilsRates: null,
       }));
   }, []);
-  if (data === null) return <p>Loading…</p>;
+  if (data === null) return <DelayedLoader />;
   if (data.holdings.length === 0 && data.snapshots.length === 0) {
     return (
       <p className="blank">

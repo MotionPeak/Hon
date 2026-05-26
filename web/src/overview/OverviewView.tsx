@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { money } from '../format';
 import type { Account, Company } from '../accounts/types';
+import { DelayedLoader } from '../ui/DelayedLoader';
 
 interface CurrencyTotal { currency: string; total: number; accountCount: number }
 
@@ -59,7 +60,7 @@ export function OverviewView() {
     });
   }, []);
 
-  if (summary === null) return <p>Loading…</p>;
+  if (summary === null) return <DelayedLoader />;
 
   const v = budget?.variable;
   const hasAnything = summary.accountCount > 0

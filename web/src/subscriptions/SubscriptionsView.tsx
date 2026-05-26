@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { money } from '../format';
+import { DelayedLoader } from '../ui/DelayedLoader';
 import {
   merchantKey, merchantName, monthlyEquivalent,
   RECURRENCE_ACTIVE_DAYS, type Frequency,
@@ -133,7 +134,7 @@ export function SubscriptionsView() {
     })).catch(() => setData({ transactions: [], frequencies: {}, cancelled: {} }));
   }, []);
 
-  if (!data) return <p>Loading…</p>;
+  if (!data) return <DelayedLoader />;
 
   const rows = detect(data);
   if (rows.length === 0) {

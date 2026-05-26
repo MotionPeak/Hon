@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { api } from '../api';
+import { DelayedLoader } from '../ui/DelayedLoader';
 import { cycleKey, currentCycleKey } from '../cycle';
 import { money } from '../format';
 import { useSettings } from '../settings/useSettings';
@@ -182,7 +183,7 @@ export function RecurringView() {
 
   const detected = useMemo(() => data ? detectMerchants(data) : null, [data]);
 
-  if (!data || !detected) return <p>Loading…</p>;
+  if (!data || !detected) return <DelayedLoader />;
 
   const { rows } = detected;
   if (rows.length === 0) {

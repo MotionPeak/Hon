@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { createPortal } from 'react-dom';
 import * as Dialog from '@radix-ui/react-dialog';
 import { api, ApiError } from '../api';
+import { DelayedLoader } from '../ui/DelayedLoader';
 import { cycleKey, cycleLabel, currentCycleKey } from '../cycle';
 import { money } from '../format';
 import { useSettings } from '../settings/useSettings';
@@ -103,7 +104,7 @@ export function ActivityView() {
     return monthsWithTxns[0] ?? currentCycleKey(settings.monthStartDay);
   }, [month, monthsWithTxns, transactions, settings.monthStartDay]);
 
-  if (transactions === null) return <p>Loading…</p>;
+  if (transactions === null) return <DelayedLoader />;
 
   if (transactions.length === 0) {
     return (

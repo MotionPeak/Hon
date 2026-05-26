@@ -4,6 +4,7 @@ import * as Dialog from '@radix-ui/react-dialog';
 import { api, ApiError } from '../api';
 import { money } from '../format';
 import type { Voucher } from './types';
+import { DelayedLoader } from '../ui/DelayedLoader';
 
 type SyncProviderId = 'shufersal' | 'buyme' | 'htzone';
 type AddMode =
@@ -133,7 +134,7 @@ export function VouchersView() {
     }
   }, [refresh]);
 
-  if (vouchers === null) return <p>Loading…</p>;
+  if (vouchers === null) return <DelayedLoader />;
 
   if (vouchers.length === 0) {
     return (

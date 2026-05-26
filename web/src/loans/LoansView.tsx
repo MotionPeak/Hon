@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { money } from '../format';
 import type { Loan, RateType } from '../accounts/types';
+import { DelayedLoader } from '../ui/DelayedLoader';
 
 interface LoansResponse {
   loans: Loan[];
@@ -33,7 +34,7 @@ export function LoansView() {
       .catch(() => setData({ loans: [], rates: { prime: null, cpiNow: null } }));
   }, []);
 
-  if (data === null) return <p>Loading…</p>;
+  if (data === null) return <DelayedLoader />;
 
   if (data.loans.length === 0) {
     return (

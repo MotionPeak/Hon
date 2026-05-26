@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { api } from '../api';
+import { DelayedLoader } from '../ui/DelayedLoader';
 import { money } from '../format';
 import type { PiggyBankStatus, PiggyKind, PiggyReport } from './types';
 
@@ -40,7 +41,7 @@ export function PiggyView() {
 
   useEffect(() => { void reload(); }, [reload]);
 
-  if (report === null) return <p>Loading…</p>;
+  if (report === null) return <DelayedLoader />;
 
   const cur = report.banks[0]?.currency ?? 'ILS';
   const skipped = report.banks.filter(

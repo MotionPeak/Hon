@@ -5,6 +5,7 @@ import { money } from '../format';
 import type {
   Account, AssetSectionKey, Company, Connection, Holding, Loan, ManualAsset,
 } from './types';
+import { DelayedLoader } from '../ui/DelayedLoader';
 
 // Polling interval while a scrape is in-flight. Short enough that tests
 // resolve quickly via waitFor; long enough that production polling isn't
@@ -238,7 +239,7 @@ export function AccountsView() {
     }
   }, [refresh]);
 
-  if (!data) return <p>Loading…</p>;
+  if (!data) return <DelayedLoader />;
 
   const sectionCount = (key: AssetSectionKey): number => {
     if (key === 'asset') return data.assets.length;
