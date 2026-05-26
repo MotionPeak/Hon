@@ -10,9 +10,9 @@
 - The engine (`sidecar/`) is **untouched**. Same DB, same APIs, same
   scrapers, same token-on-URL-fragment auth. Don't change it without
   a strong reason.
-- The new React UI lives in `web/`. **Settings tab is migrated**
-  (commits `de9857f`, `5196f1c` — 68 tests). The Vite + React + TS
-  scaffold + TDD harness work; `npm run dev` and `npm test` both work.
+- The new React UI lives in `web/`. **Settings is fully migrated;
+  Accounts read-only display is migrated.** 79 tests, typecheck clean.
+  `npm run dev` and `npm test` both work.
 - The **old vanilla SPA** at `sidecar/public/app.html` is still the
   one users hit when they run `npm run web`. It stays live until each
   tab has been migrated to React.
@@ -20,7 +20,8 @@
   under `web/src/`. **Do not attempt a big-bang rewrite** — the file
   is ~10k lines, hebrew/RTL, financial UI, charts, modals. Migrate
   incrementally so you can verify visually after each tab.
-- **Next up: Accounts.** See § "Migration strategy" for order.
+- **Next up: Accounts edits + actions.** Task #18 (inline
+  edit-balance) is the smallest next step. See § "Migration strategy".
 
 ## Why React (and why a restart)
 
@@ -65,10 +66,44 @@ Hon/
 │   ├── tsconfig.json
 │   ├── index.html               ← <!doctype><html lang="he" dir="rtl">
 │   └── src/
-│       ├── main.tsx             ← createRoot mount
-│       ├── App.tsx              ← Health-check starter
-│       ├── api.ts               ← Bearer-token fetch wrapper
-│       └── styles.css           ← Dark theme defaults
+│       ├── main.tsx             ← createRoot mount (StrictMode on)
+│       ├── App.tsx              ← Tab nav + token gate + active panel
+│       ├── App.test.tsx         ← 4 tests; default tab + switch + no-token
+│       ├── api.ts               ← Bearer-token fetch wrapper. Token reads
+│       │                          LAZILY — do not refactor to a module-load
+│       │                          constant; tests rely on hash changes.
+│       ├── api.test.ts          ← 3 tests; the laziness is load-bearing.
+│       ├── styles.css           ← Theme tokens + every selector the React
+│       │                          code currently uses. Lifted from app.html
+│       │                          as each tab lands. Do NOT delete rules
+│       │                          you think are unused — future tabs reuse.
+│       ├── format.ts            ← money() — currency formatting helper.
+│       ├── settings/            ← Settings tab (✅ complete). The reference
+│       │   │                       for "what a migrated tab looks like."
+│       │   ├── SettingsView.tsx    Composes 6 cards inside SettingsProvider.
+│       │   ├── BillingCycleCard.tsx
+│       │   ├── SpendingProjectionCard.tsx
+│       │   ├── CreditCardBillsCard.tsx
+│       │   ├── CategoriesPanel.tsx ← Server CRUD + modal patterns.
+│       │   ├── AiEngineCard.tsx    ← Stub ("coming soon").
+│       │   ├── SplitwiseCard.tsx   ← Stub ("coming soon").
+│       │   ├── store.ts            ← localStorage settings shape.
+│       │   ├── useSettings.tsx     ← Provider + hook; cards share state.
+│       │   └── *.test.tsx          ← 60+ tests, RED-then-GREEN.
+│       ├── accounts/            ← Accounts tab (🟡 read-only only).
+│       │   ├── types.ts            Connection/Account/Company/ManualAsset/
+│       │   │                       Loan. Mirrors sidecar/src/repo.ts.
+│       │   ├── AccountsView.tsx    Fetches 5 endpoints in parallel; groups
+│       │   │                       into 6 sections; inline Connection/Asset/
+│       │   │                       LoanCard sub-components. Extract when
+│       │   │                       files get bigger.
+│       │   └── AccountsView.test.tsx (10 tests)
+│       └── test/
+│           ├── setup.ts         ← Registers jest-dom matchers; clears
+│           │                      localStorage + URL hash after each test.
+│           ├── mockFetch.ts     ← installFetchMock({'METHOD /path': fn})
+│           │                      Use for any tab test that touches the net.
+│           └── harness.test.ts  ← Smoke test for the harness itself.
 └── docs/, electron/, ...        ← (untouched)
 ```
 
@@ -133,12 +168,23 @@ by side). Don't move on until the new tab matches.
 1. ✅ **Health + chrome** — shell + tab nav landed alongside Settings.
 2. ✅ **Settings** — migrated. AI engine and Splitwise are stubs
    (TODO when their /llm and /splitwise flows are ported).
-3. **Accounts** ← **YOU ARE HERE.** Big tab. Realistically multiple
-   sessions: read-only display + per-account edits first (balance,
-   inception, excluded), then sync flow + remove + brokerage holdings
-   expansion, then the Add-connection modal (15+ banks + SnapTrade +
-   5 pension flows + manual asset modal). The previous session
-   queued task #14-#33 with a phased plan; check the task list.
+3. 🟡 **Accounts** ← **YOU ARE HERE.** Read-only display is shipped
+   (commit `f75483a`). Remaining sub-tasks queued as #18-#32 in the
+   task list:
+   - **Per-account edits** (next, smallest): inline edit-balance
+     (#18), inline edit-inception (#19), net-worth toggle (#20).
+     PATCH endpoints already exist on the engine.
+   - **Connection actions**: sync flow + polling (#24), remove
+     confirmation (#25), set-credentials modal (#26), OTP submission
+     (#27).
+   - **Brokerage holdings expansion** (#23) — per-account positions
+     list, requires loading /brokerage.
+   - **Asset/loan edit modals** — not in task list yet; add when
+     you get there.
+   - **Add-connection modal**: the picker (#28), then bank/card
+     credential form (#29), SnapTrade portal (#30), pension flows
+     (#31, 5 variants), manual asset modal (#32). This is the
+     heaviest chunk — probably its own session.
 4. **Vouchers** — list + add modal + sync flows (Shufersal / BuyMe /
    Hi-Tech Zone). The sync flows are complex; lift the modal logic
    from app.html line ~5300+ verbatim, port to React.
@@ -293,6 +339,46 @@ Migrated the entire Settings tab from `app.html` to React with TDD.
   - Splitwise card body — needs `/splitwise/*` OAuth + state
   - Pre-delete txn count in remove-category dialog — needs
     transactions context (lands with Activity tab)
+
+### Session 3 — Accounts read-only (commit `f75483a`)
+
+Shipped the foundation for the Accounts tab. **Display only — no
+interactions yet** (the next session resumes at task #18).
+
+- **`web/src/accounts/types.ts`** — Connection / Account / Company /
+  ManualAsset / Loan / AssetSectionKey. Mirrors `sidecar/src/repo.ts`
+  + `sidecar/src/scrapers.ts` + `sidecar/src/loans.ts` shapes. Pure
+  type declarations; no tests needed.
+- **`web/src/accounts/AccountsView.tsx`** — fetches `/companies`,
+  `/connections`, `/accounts`, `/assets`, `/loans` in parallel on
+  mount. Groups connections by company type into Banks / Credit
+  cards / Investments / Pension; assets and loans get their own
+  sections. Renders inline `ConnectionCard` (display name + company
+  meta + accounts list + total), `AssetCard` (name + kind + value),
+  `LoanCard` (name + principal). Sorting is alphabetical within
+  each section. Empty sections don't render; empty everything shows
+  a "Nothing here yet" hint.
+- **`web/src/format.ts`** — `money()` helper. Israeli locale, symbol
+  prefix, 0 decimals for whole amounts, 2 otherwise, "−" for
+  negatives. The old app's inline `money()` was richer (e.g. agorot
+  handling for brokerage holdings) — port more behaviour here when
+  the Insights / Activity tabs land and stress it.
+- **`web/src/App.tsx`** — Accounts tab added between Health and
+  Settings.
+- **CSS** — lifted from `app.html`: `.accounts-view`, `.assets-grid`,
+  `.assets-sub-head`, `.conn-card` + `.conn-account` + `.conn-total`,
+  `.asset-card`, `.loan-card`, `.amount` / `.amount.neg`.
+- **Tests:** 11 new (10 for AccountsView, 1 for the tab routing).
+  Total 79 passing, typecheck clean.
+- **Deferred (call-outs in code + task list):**
+  - All editing (#18 balance, #19 inception, #20 net-worth toggle)
+  - Sync flow + polling (#24)
+  - Remove / set-credentials / OTP (#25, #26, #27)
+  - Brokerage holdings expansion (#23)
+  - The Add-connection modal universe (#28-#32) — biggest single
+    chunk left in the migration
+  - Asset/loan EDIT modals — not yet in the task list; add when
+    starting per-asset edits
 
 ### Older history (engine fixes from the pre-React session)
 
