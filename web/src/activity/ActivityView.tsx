@@ -263,6 +263,7 @@ export function ActivityView() {
       {moving && (
         <CategoryPickerSidebar
           transaction={moving}
+          allTransactions={transactions}
           categories={categories}
           onClose={() => setMoving(null)}
           onSaved={async (cat) => {
@@ -272,6 +273,21 @@ export function ActivityView() {
               { category: cat },
             );
             setMoving(null);
+            await refresh();
+          }}
+          onLinkRefund={async (refundId) => {
+            await api(
+              `/transactions/${encodeURIComponent(moving.id)}/link`,
+              'PUT',
+              { refundId },
+            );
+            await refresh();
+          }}
+          onUnlinkRefund={async () => {
+            await api(
+              `/transactions/${encodeURIComponent(moving.id)}/link`,
+              'DELETE',
+            );
             await refresh();
           }}
         />
@@ -427,13 +443,19 @@ function CatCard({ catName, cat, rows, accountById, onPickTxn }: CatCardProps) {
 
 interface CategoryPickerProps {
   transaction: Transaction;
+  allTransactions: Transaction[];
   categories: Category[];
   onClose: () => void;
   onSaved: (category: string) => void | Promise<void>;
+  onLinkRefund: (refundId: string) => void | Promise<void>;
+  onUnlinkRefund: () => void | Promise<void>;
 }
 
 function CategoryPickerSidebar(
-  { transaction, categories, onClose, onSaved }: CategoryPickerProps,
+  {
+    transaction, allTransactions, categories, onClose, onSaved,
+    onLinkRefund, onUnlinkRefund,
+  }: CategoryPickerProps,
 ) {
   const current = transaction.category ?? 'Other';
   const [picked, setPicked] = useState<string>(current);
@@ -520,13 +542,13 @@ function CategoryPickerSidebar(
           ))}
         </div>
 
-        <div className="txn-sidebar-section">
-          <div className="label">Reimbursement</div>
-          <button type="button" className="txn-sidebar-action" disabled>
-            + Link a refund or reimbursement
-          </button>
-          <p className="txn-sidebar-hint">Coming soon.</p>
-        </div>
+        <RefundSection
+          transaction={transaction}
+          allTransactions={allTransactions}
+          onLinkRefund={onLinkRefund}
+          onUnlinkRefund={onUnlinkRefund}
+        />
+
 
         <div className="txn-sidebar-section">
           <div className="label">Splitwise</div>
@@ -547,5 +569,105 @@ function CategoryPickerSidebar(
         </button>
       </aside>
     </ModalPortal>
+  );
+}
+
+interface RefundSectionProps {
+  transaction: Transaction;
+  allTransactions: Transaction[];
+  onLinkRefund: (refundId: string) => void | Promise<void>;
+  onUnlinkRefund: () => void | Promise<void>;
+}
+
+function RefundSection({
+  transaction, allTransactions, onLinkRefund, onUnlinkRefund,
+}: RefundSectionProps) {
+  const [picking, setPicking] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const linked = transaction.refundId
+    ? allTransactions.find((t) => t.id === transaction.refundId) ?? null
+    : null;
+
+  // Candidate refunds: positive-amount transactions in the same currency,
+  // not the expense itself, not already used as a refund FOR this expense.
+  // Sorted by date desc so the most recent candidates surface first.
+  const candidates = useMemo(() => {
+    return allTransactions
+      .filter((t) =>
+        t.id !== transaction.id
+        && t.amount > 0
+        && t.currency === transaction.currency)
+      .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+  }, [allTransactions, transaction.id, transaction.currency]);
+
+  if (linked) {
+    return (
+      <div className="txn-sidebar-section">
+        <div className="label">Reimbursement</div>
+        <div className="rf-linked">
+          <div className="rf-linked-name">{linked.description}</div>
+          <div className="rf-linked-sub">
+            {money(linked.amount, linked.currency)} · {linked.date}
+          </div>
+          <button
+            type="button"
+            className="rf-unlink"
+            aria-label="Unlink refund"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              try { await onUnlinkRefund(); }
+              finally { setBusy(false); }
+            }}
+          >Unlink</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="txn-sidebar-section">
+      <div className="label">Reimbursement</div>
+      {!picking ? (
+        <button
+          type="button"
+          className="txn-sidebar-action"
+          onClick={() => setPicking(true)}
+        >
+          + Link a refund or reimbursement
+        </button>
+      ) : candidates.length === 0 ? (
+        <p className="txn-sidebar-hint">
+          No positive-amount transactions to link as a refund yet.
+        </p>
+      ) : (
+        <ul className="rf-pick">
+          {candidates.map((c) => (
+            <li key={c.id}>
+              <button
+                type="button"
+                className="rf-pick-row"
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true);
+                  try {
+                    await onLinkRefund(c.id);
+                    setPicking(false);
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                <span className="rf-pick-name">{c.description}</span>
+                <span className="rf-pick-meta">
+                  {money(c.amount, c.currency)} · {c.date}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }

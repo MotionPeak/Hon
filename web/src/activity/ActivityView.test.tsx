@@ -283,3 +283,113 @@ describe('ActivityView — search', () => {
   });
 });
 
+const REFUND_TXNS = {
+  transactions: [
+    ...TXNS.transactions,
+    {
+      // Refund candidate — positive amount this month.
+      id: 't-r1', accountId: 'a-1', externalId: 'xr1',
+      date: `${thisMonth}-10`, processedDate: null, amount: 250,
+      currency: 'ILS', description: 'Shufersal — returned items', memo: null,
+      kind: null, status: null, category: 'Other', createdAt: `${thisMonth}-10`,
+    },
+  ],
+};
+const FULL_REFUND = {
+  ...FULL,
+  'GET /api/transactions': () => REFUND_TXNS,
+};
+
+describe('ActivityView — refund linking', () => {
+  it('shows "+ Link a refund or reimbursement" in the sidebar (not a stub)', async () => {
+    const user = userEvent.setup();
+    installFetchMock(FULL_REFUND);
+    renderView();
+    await user.click(await screen.findByText('Shufersal'));
+    const sidebar = screen.getByRole('dialog', { name: /move to category/i });
+    const btn = within(sidebar).getByRole('button', { name: /link a refund/i });
+    expect(btn).not.toBeDisabled();
+  });
+
+  it('clicking + Link opens a refund picker listing positive-amount candidates', async () => {
+    const user = userEvent.setup();
+    installFetchMock(FULL_REFUND);
+    renderView();
+    await user.click(await screen.findByText('Shufersal'));
+    const sidebar = screen.getByRole('dialog', { name: /move to category/i });
+    await user.click(within(sidebar).getByRole('button', { name: /link a refund/i }));
+    // Refund candidate is now visible.
+    expect(await within(sidebar).findByRole('button', {
+      name: /shufersal — returned items/i,
+    })).toBeInTheDocument();
+    // Negative-amount transactions are NOT candidates.
+    expect(within(sidebar).queryByRole('button', { name: /aroma coffee/i }))
+      .not.toBeInTheDocument();
+    // The expense itself is not a candidate either.
+    const candidates = within(sidebar).getAllByRole('button', { name: /shufersal/i });
+    expect(candidates.some((c) => c.textContent === 'Shufersal')).toBe(false);
+  });
+
+  it('picking a candidate PUTs /transactions/:id/link and refetches', async () => {
+    const user = userEvent.setup();
+    const put = vi.fn((_body: unknown) => ({ ok: true, amount: 250 }));
+    const get = vi.fn(() => REFUND_TXNS);
+    installFetchMock({
+      ...FULL_REFUND,
+      'GET /api/transactions': get,
+      'PUT /api/transactions/t-2/link': put,
+    });
+    renderView();
+    await user.click(await screen.findByText('Shufersal'));
+    const sidebar = screen.getByRole('dialog', { name: /move to category/i });
+    await user.click(within(sidebar).getByRole('button', { name: /link a refund/i }));
+    await user.click(await within(sidebar).findByRole('button', {
+      name: /shufersal — returned items/i,
+    }));
+    await waitFor(() => expect(put).toHaveBeenCalled());
+    expect(put.mock.calls[0]?.[0]).toEqual({ refundId: 't-r1' });
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+  });
+
+  it('an already-linked expense shows the linked-refund summary + unlink', async () => {
+    const linkedTxns = {
+      transactions: REFUND_TXNS.transactions.map((t) =>
+        t.id === 't-2' ? { ...t, refundId: 't-r1' } : t,
+      ),
+    };
+    const user = userEvent.setup();
+    installFetchMock({
+      ...FULL_REFUND,
+      'GET /api/transactions': () => linkedTxns,
+    });
+    renderView();
+    await user.click(await screen.findByText('Shufersal'));
+    const sidebar = screen.getByRole('dialog', { name: /move to category/i });
+    // Summary mentions the linked refund.
+    expect(within(sidebar).getByText(/shufersal — returned items/i)).toBeInTheDocument();
+    // Unlink button is present.
+    expect(within(sidebar).getByRole('button', { name: /unlink/i })).toBeInTheDocument();
+  });
+
+  it('Unlink DELETEs /transactions/:id/link and refetches', async () => {
+    const linkedTxns = {
+      transactions: REFUND_TXNS.transactions.map((t) =>
+        t.id === 't-2' ? { ...t, refundId: 't-r1' } : t,
+      ),
+    };
+    const user = userEvent.setup();
+    const del = vi.fn(() => ({ ok: true }));
+    const get = vi.fn(() => linkedTxns);
+    installFetchMock({
+      ...FULL_REFUND,
+      'GET /api/transactions': get,
+      'DELETE /api/transactions/t-2/link': del,
+    });
+    renderView();
+    await user.click(await screen.findByText('Shufersal'));
+    const sidebar = screen.getByRole('dialog', { name: /move to category/i });
+    await user.click(within(sidebar).getByRole('button', { name: /unlink/i }));
+    await waitFor(() => expect(del).toHaveBeenCalled());
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+  });
+});
