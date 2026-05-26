@@ -505,7 +505,10 @@ export async function runInteractiveScrape(
 // --- Normalization ----------------------------------------------------------
 // Minimal shapes for the fields Hon reads from israeli-bank-scrapers output.
 
-interface RawTransaction {
+// Exported for the test suite; the production runtime never references this
+// from outside the module — it's an internal shape mirroring what
+// israeli-bank-scrapers' Transaction type carries.
+export interface RawTransaction {
   type?: string;
   identifier?: string | number;
   date: string;
@@ -621,13 +624,22 @@ function normalizeAccount(
 // to local midnight — in Israel that lands on the previous evening, so storing
 // the raw string files every transaction one calendar day (and 1st-of-month
 // transactions a whole month) early. Reduce to the Asia/Jerusalem calendar date.
-function israelDate(iso: string): string {
+/**
+ * Reduces a UTC ISO timestamp to its Asia/Jerusalem calendar date.
+ * israeli-bank-scrapers reports dates as UTC midnight, which lands on the
+ * previous evening in Israel — storing the raw string would file every
+ * transaction one calendar day (and 1st-of-month transactions a whole
+ * month) early. Exported so the test suite can pin the DST + crossover
+ * cases. */
+export function israelDate(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' });
 }
 
-function normalizeTransaction(txn: RawTransaction): NormalizedTransaction {
+// Exported for the test suite — the rest of the code path runs it via
+// normalizeAccount (which iterates a raw account's txns and maps each).
+export function normalizeTransaction(txn: RawTransaction): NormalizedTransaction {
   const date = israelDate(txn.date);
   // An institution's identifier is not unique on its own: banks reuse a
   // reference number across recurring deposits, and card installments share

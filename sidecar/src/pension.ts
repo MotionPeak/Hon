@@ -233,6 +233,36 @@ function debugSibling(screenshotPath: string | undefined, suffix: string): strin
 }
 
 /**
+ * "Still on the login form" detection used by the captcha-walled poll
+ * loop. The poll loop must NEVER call readBalances while this is true
+ * — readMeitavBalances navigates the page to /lobbymanager and
+ * readMenoraBalances has similar moves, which would yank the user off
+ * the form they're typing into ("the page keeps refreshing while I
+ * sign in"). Match generously:
+ *
+ *   - any segment containing login/signin/sign-in (covers Meitav's
+ *     /v2/login/loginAmit, Menora's /customer-login/, generic /Login)
+ *   - any auth/otp/verify/sso step
+ *   - hash-routed equivalents (#/login, #!/login)
+ *   - the literal `loginamit` route name
+ *
+ * The login family uses `.includes`-style matching (no word boundary
+ * before "login") so portals that prefix the path with a noun like
+ * `customer-login` or `member-login` still match. A false positive
+ * (user navigates to /login-help) just keeps the poll quiet for a few
+ * extra cycles — harmless. A false negative is what we're guarding
+ * against, so the bias is intentional.
+ *
+ * Exported so the test suite can pin this matcher against the URLs of
+ * every pension fund we support — the previous regression (`\b` after
+ * `login` excluding `customer-login`) would have been caught by such
+ * a test before deploy.
+ */
+export function isPensionLoginUrl(url: string): boolean {
+  return /[\/#](v\d+\/)?[a-z-]*(login|signin|sign-in)|[\/#](auth|otp|verify|sso)\b|loginamit/i.test(url);
+}
+
+/**
  * Removes the four lock files Chrome writes when it boots a profile (and
  * normally removes on clean shutdown). When a previous pension launch was
  * killed before the close hook ran, these files remain and the next launch
@@ -482,30 +512,7 @@ export async function runPensionScrape(
       onProgress?.('Waiting for you to finish signing in…');
       const deadline = Date.now() + INTERACTIVE_LOGIN_TIMEOUT_MS;
       let accounts: NormalizedAccount[] = [];
-      // "Still on the login form" detection. The poll loop must NEVER call
-      // readBalances while this is true — readMeitavBalances navigates to
-      // /lobbymanager and readMenoraBalances has similar moves, which would
-      // yank the user off the form they're typing into ("the page keeps
-      // refreshing while I try to sign in"). Match generously:
-      //   - any segment containing login/signin/customer-login (Meitav:
-      //     /v2/login/loginAmit, Menora: /customer-login/, generic: /Login)
-      //   - any auth/otp/verify/sso step
-      //   - hash-routed equivalents (#/login, #!/login)
-      //   - the literal `loginamit` route name
-      // The login family uses `.includes`-style matching (no word boundary
-      // before) so portals that prefix the path with a noun like
-      // `customer-login` or `member-login` still match. A false positive
-      // (user navigates to /login-help) just keeps the poll quiet for a
-      // few extra cycles — harmless. A false negative is what we're
-      // guarding against, so the bias is intentional.
-      //
-      // Earlier version used `\b` before "login" which excluded
-      // `customer-login` (the hyphen isn't a word boundary in the regex
-      // engine's eyes when adjacent to a letter). Found by code review on
-      // 2026-05-26 — Menora users would have hit the original
-      // "page keeps refreshing while I sign in" bug despite the fix.
-      const onLoginPage = (url: string): boolean =>
-        /[\/#](v\d+\/)?[a-z-]*(login|signin|sign-in)|[\/#](auth|otp|verify|sso)\b|loginamit/i.test(url);
+      // See `isPensionLoginUrl` (exported) for the matcher and rationale.
       let lastReportedUrl = '';
       while (Date.now() < deadline) {
         await delay(5000);
@@ -517,10 +524,10 @@ export async function runPensionScrape(
         // noticed" complaints without the user pasting screenshots.
         if (currentUrl !== lastReportedUrl) {
           plog(`${companyId}: url changed → ${currentUrl} ` +
-            `(onLoginPage=${onLoginPage(currentUrl)})`);
+            `(onLoginPage=${isPensionLoginUrl(currentUrl)})`);
           lastReportedUrl = currentUrl;
         }
-        if (onLoginPage(currentUrl)) continue;
+        if (isPensionLoginUrl(currentUrl)) continue;
         try {
           accounts = await readBalances(companyId, page, screenshotPath, extras);
         } catch {
