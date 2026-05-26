@@ -40,4 +40,21 @@ describe('App — tab routing', () => {
     expect(screen.queryByText(/connected to hon-sidecar/i)).not.toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /settings/i })).toHaveAttribute('aria-selected', 'true');
   });
+
+  it('switches to the Accounts tab on click', async () => {
+    withToken();
+    installFetchMock({
+      'GET /api/health': () => HEALTH,
+      'GET /api/companies': () => ({ companies: [] }),
+      'GET /api/connections': () => ({ connections: [] }),
+      'GET /api/accounts': () => ({ accounts: [] }),
+      'GET /api/assets': () => ({ assets: [] }),
+      'GET /api/loans': () => ({ loans: [] }),
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole('tab', { name: /accounts/i }));
+    expect(await screen.findByRole('heading', { level: 1, name: /assets/i })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /accounts/i })).toHaveAttribute('aria-selected', 'true');
+  });
 });
