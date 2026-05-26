@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { api, ApiError } from '../api';
 import { money } from '../format';
 import type {
-  Account, AssetSectionKey, Company, Connection, Loan, ManualAsset,
+  Account, AssetSectionKey, Company, Connection, Holding, Loan, ManualAsset,
 } from './types';
 
 // Polling interval while a scrape is in-flight. Short enough that tests
@@ -65,6 +65,28 @@ interface AccountsData {
   accounts: Account[];
   assets: ManualAsset[];
   loans: Loan[];
+  holdings: Holding[];
+}
+
+/** Value/gain math for one holding. Mirrors holdingStats() in app.html. */
+function holdingStats(h: Holding): {
+  value: number | null; cost: number | null;
+  gain: number | null; gainPct: number | null;
+} {
+  const value = h.value != null
+    ? h.value
+    : h.price != null ? h.units * h.price : null;
+  const cost = h.costBasis != null ? h.units * h.costBasis : null;
+  const gain = value != null && cost != null
+    ? value - cost
+    : h.openPnl;
+  const gainPct = gain != null && cost ? (gain / Math.abs(cost)) * 100 : null;
+  return { value, cost, gain, gainPct };
+}
+
+function fmtUnits(n: number): string {
+  const r = Math.round(n * 1e6) / 1e6;
+  return Number.isInteger(r) ? String(r) : r.toFixed(4).replace(/0+$/, '');
 }
 
 export function AccountsView() {
@@ -73,25 +95,33 @@ export function AccountsView() {
   const [removingConnection, setRemovingConnection] = useState<Connection | null>(null);
   const [editingCredentials, setEditingCredentials] = useState<Connection | null>(null);
   const [syncStates, setSyncStates] = useState<Record<string, SyncState>>({});
+  const [expandedHoldings, setExpandedHoldings] = useState<Record<string, boolean>>({});
+
+  const toggleHoldings = useCallback((accountId: string) => {
+    setExpandedHoldings((prev) => ({ ...prev, [accountId]: !prev[accountId] }));
+  }, []);
   // Active polling timers per connection — kept in a ref so re-renders don't
   // forget pending intervals when a sync transitions states.
   const pollTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   const refresh = useCallback(async () => {
     try {
-      const [c, conn, acc, ast, l] = await Promise.all([
+      const [c, conn, acc, ast, l, brk] = await Promise.all([
         api<{ companies: Company[] }>('/companies'),
         api<{ connections: Connection[] }>('/connections'),
         api<{ accounts: Account[] }>('/accounts'),
         api<{ assets: ManualAsset[] }>('/assets'),
         api<{ loans: Loan[] }>('/loans'),
+        api<{ holdings: Holding[] }>('/brokerage'),
       ]);
       setData({
         companies: c.companies, connections: conn.connections, accounts: acc.accounts,
-        assets: ast.assets, loans: l.loans,
+        assets: ast.assets, loans: l.loans, holdings: brk.holdings,
       });
     } catch {
-      setData({ companies: [], connections: [], accounts: [], assets: [], loans: [] });
+      setData({
+        companies: [], connections: [], accounts: [], assets: [], loans: [], holdings: [],
+      });
     }
   }, []);
 
@@ -240,7 +270,10 @@ export function AccountsView() {
                   onRemoveConnection: setRemovingConnection,
                   onSetCredentials: setEditingCredentials,
                   onSync: startSync,
+                  onToggleHoldings: toggleHoldings,
                   syncStates,
+                  holdings: data.holdings,
+                  expandedHoldings,
                 })}
               </div>
             </section>
@@ -300,7 +333,10 @@ interface RowCallbacks {
   onRemoveConnection: (connection: Connection) => void;
   onSetCredentials: (connection: Connection) => void;
   onSync: (connection: Connection) => void;
+  onToggleHoldings: (accountId: string) => void;
   syncStates: Record<string, SyncState>;
+  holdings: Holding[];
+  expandedHoldings: Record<string, boolean>;
 }
 
 function renderSectionItems(key: AssetSectionKey, data: AccountsData, cb: RowCallbacks) {
@@ -394,9 +430,24 @@ function ConnectionCard({ connection, company, accounts, callbacks }: Connection
       <ul className="conn-accounts">
         {accounts.map((a) => {
           const negative = a.balance != null && a.balance < 0;
+          const holdings = callbacks.holdings.filter((h) => h.accountId === a.id);
+          const expanded = !!callbacks.expandedHoldings[a.id];
           return (
             <li key={a.id} className={`conn-account${a.excluded ? ' nw-off' : ''}`}>
-              <span className="conn-account-label">{a.label || a.accountNumber}</span>
+              <span className="conn-account-label">
+                {holdings.length > 0 && (
+                  <button
+                    type="button"
+                    className="holds-toggle"
+                    aria-label={expanded ? 'Collapse holdings' : 'Expand holdings'}
+                    aria-expanded={expanded}
+                    onClick={() => callbacks.onToggleHoldings(a.id)}
+                  >
+                    {expanded ? '▾' : '▸'}
+                  </button>
+                )}
+                {a.label || a.accountNumber}
+              </span>
               <NetWorthPill
                 excluded={a.excluded}
                 onChange={(next) => callbacks.onToggleAccountExcluded(a, next)}
@@ -409,6 +460,9 @@ function ConnectionCard({ connection, company, accounts, callbacks }: Connection
               >
                 {money(a.balance, a.currency)}
               </button>
+              {expanded && holdings.length > 0 && (
+                <HoldingsList holdings={holdings} />
+              )}
             </li>
           );
         })}
@@ -615,6 +669,39 @@ function CredentialsModal({ connection, company, onClose, onSaved }: Credentials
         </div>
       </div>
     </ModalPortal>
+  );
+}
+
+function HoldingsList({ holdings }: { holdings: Holding[] }) {
+  return (
+    <div className="holds-list">
+      {holdings.map((h) => {
+        const s = holdingStats(h);
+        const gainCls = s.gain == null ? 'flat' : s.gain >= 0 ? 'good' : 'bad';
+        return (
+          <div key={h.symbol} className="hold-row">
+            <div className="hold-sym">
+              <span className="hold-tk">{h.symbol}</span>
+              {h.description && <span className="hold-desc">{h.description}</span>}
+            </div>
+            <div className="hold-end">
+              <span className="hold-val">
+                {s.value != null ? money(s.value, h.currency) : '—'}
+              </span>
+              <span className="hold-units">
+                {fmtUnits(h.units)} @ {h.price != null ? money(h.price, h.currency) : '—'}
+              </span>
+              {s.gainPct != null && (
+                <span className={`hold-gain ${gainCls}`}>
+                  {s.gain != null && s.gain >= 0 ? '↑' : '↓'}{' '}
+                  {Math.abs(s.gainPct).toFixed(1)}%
+                </span>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 

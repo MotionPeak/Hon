@@ -69,5 +69,21 @@ export interface Loan {
   updatedAt: string;
 }
 
+/** A single brokerage security position. Mirrors HoldingRow in repo.ts. */
+export interface Holding {
+  accountId: string;
+  symbol: string;
+  description: string | null;
+  units: number;
+  price: number | null;
+  currency: string;
+  costBasis: number | null;
+  openPnl: number | null;
+  /** Bank/brokerage-reported market value, when present. Prefer this over
+   *  units*price (Israeli funds quote price in agorot but value in NIS). */
+  value: number | null;
+  updatedAt: string;
+}
+
 /** A "section" in the Accounts view — Banks, Credit cards, etc. */
 export type AssetSectionKey = 'bank' | 'card' | 'brokerage' | 'pension' | 'asset' | 'loan';

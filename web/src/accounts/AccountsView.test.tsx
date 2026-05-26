@@ -48,12 +48,33 @@ const LOANS = {
       createdAt: '2020-01-01', updatedAt: '2026-05-25' },
   ],
 };
+const BROKERAGE = {
+  holdings: [
+    { accountId: 'a-brk-1', symbol: 'AAPL', description: 'Apple Inc.',
+      units: 10, price: 200, currency: 'USD',
+      costBasis: 150, openPnl: null, value: 2000, updatedAt: '2026-05-25' },
+    { accountId: 'a-brk-1', symbol: 'VOO', description: 'Vanguard S&P 500',
+      units: 5, price: 460, currency: 'USD',
+      costBasis: 400, openPnl: null, value: 2300, updatedAt: '2026-05-25' },
+  ],
+  snapshots: [], holdingSnapshots: [], performance: [], ilsRates: null,
+};
+const ACCOUNTS_WITH_BROKERAGE = {
+  accounts: [
+    ...ACCOUNTS.accounts,
+    { id: 'a-brk-1', connectionId: 'c-brk-1', companyId: 'snaptrade',
+      connectionName: 'IBKR', accountNumber: 'IBKR-001',
+      label: 'IBKR Main', balance: 4300, currency: 'USD',
+      updatedAt: '2026-05-25', excluded: false, inceptionDate: null },
+  ],
+};
 const FULL = {
   'GET /api/companies': () => COMPANIES,
   'GET /api/connections': () => CONNECTIONS,
   'GET /api/accounts': () => ACCOUNTS,
   'GET /api/assets': () => ASSETS,
   'GET /api/loans': () => LOANS,
+  'GET /api/brokerage': () => BROKERAGE,
 };
 
 describe('AccountsView — section grouping', () => {
@@ -498,6 +519,62 @@ describe('AccountsView — sync flow', () => {
     await user.click(within(otpDialog).getByRole('button', { name: /submit/i }));
     await waitFor(() => expect(submitOtp).toHaveBeenCalledTimes(1));
     expect(submitOtp.mock.calls[0]?.[0]).toEqual({ code: '123456' });
+  });
+});
+
+describe('AccountsView — brokerage holdings', () => {
+  it('shows an expand toggle on brokerage account rows when holdings exist', async () => {
+    installFetchMock({
+      ...FULL,
+      'GET /api/accounts': () => ACCOUNTS_WITH_BROKERAGE,
+    });
+    render(<AccountsView />);
+    const ibkr = await screen.findByText('IBKR Main');
+    const row = ibkr.closest('li')!;
+    expect(within(row).getByRole('button', { name: /expand holdings/i })).toBeInTheDocument();
+  });
+
+  it('does not show an expand toggle on bank/card account rows', async () => {
+    installFetchMock(FULL);
+    render(<AccountsView />);
+    const checking = await screen.findByText('Checking');
+    const row = checking.closest('li')!;
+    expect(within(row).queryByRole('button', { name: /expand holdings/i })).not.toBeInTheDocument();
+  });
+
+  it('expanding renders each holding with symbol, value, and units', async () => {
+    const user = userEvent.setup();
+    installFetchMock({ ...FULL, 'GET /api/accounts': () => ACCOUNTS_WITH_BROKERAGE });
+    render(<AccountsView />);
+    const ibkr = await screen.findByText('IBKR Main');
+    await user.click(within(ibkr.closest('li')!).getByRole('button', { name: /expand holdings/i }));
+    expect(await screen.findByText('AAPL')).toBeInTheDocument();
+    expect(screen.getByText('VOO')).toBeInTheDocument();
+    // Value, units @ price somewhere on screen for AAPL (10 × $200).
+    expect(screen.getByText(/2,?000/)).toBeInTheDocument();
+  });
+
+  it('shows gain% with the correct sign when cost basis is present', async () => {
+    const user = userEvent.setup();
+    installFetchMock({ ...FULL, 'GET /api/accounts': () => ACCOUNTS_WITH_BROKERAGE });
+    render(<AccountsView />);
+    const ibkr = await screen.findByText('IBKR Main');
+    await user.click(within(ibkr.closest('li')!).getByRole('button', { name: /expand holdings/i }));
+    // AAPL: value 2000, cost 10*150=1500, gain 500, pct = 500/1500 = 33.3%
+    expect(await screen.findByText(/33\.3%/)).toBeInTheDocument();
+  });
+
+  it('collapse toggle hides the holdings list', async () => {
+    const user = userEvent.setup();
+    installFetchMock({ ...FULL, 'GET /api/accounts': () => ACCOUNTS_WITH_BROKERAGE });
+    render(<AccountsView />);
+    const ibkr = await screen.findByText('IBKR Main');
+    const row = ibkr.closest('li')!;
+    const toggle = within(row).getByRole('button', { name: /expand holdings/i });
+    await user.click(toggle);
+    expect(await screen.findByText('AAPL')).toBeInTheDocument();
+    await user.click(within(row).getByRole('button', { name: /collapse holdings/i }));
+    expect(screen.queryByText('AAPL')).not.toBeInTheDocument();
   });
 });
 

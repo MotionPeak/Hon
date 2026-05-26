@@ -441,6 +441,35 @@ input:focus, select:focus, textarea:focus {
 button.mini { padding: 5px 11px; font-size: 12px; }
 .conn-sync-msg { font-size: 12px; color: var(--amber); margin-top: 6px; }
 .conn-sync-err { font-size: 12px; color: var(--red); margin-top: 6px; }
+
+/* --- Brokerage holdings list ------------------------------------------ */
+.holds-toggle {
+  margin-right: 6px; padding: 0; border: 0; background: none;
+  color: var(--accent); font-size: 11.5px; font-weight: 700; cursor: pointer;
+}
+.holds-toggle:hover { color: var(--text); border: 0; }
+.holds-list {
+  grid-column: 1 / -1; /* span the subgrid row so it isn't trapped in col 1 */
+  margin: 8px 0 4px; padding: 8px 10px; background: var(--card-hi);
+  border-radius: 10px; display: flex; flex-direction: column; gap: 7px;
+}
+.hold-row {
+  display: flex; justify-content: space-between; gap: 10px;
+  align-items: flex-start;
+}
+.hold-sym { min-width: 0; }
+.hold-tk { font-size: 12.5px; font-weight: 700; }
+.hold-desc { font-size: 10.5px; color: var(--faint); margin-left: 5px; }
+.hold-end {
+  text-align: right; white-space: nowrap; flex: 0 0 auto;
+  display: flex; flex-direction: column; gap: 1px;
+}
+.hold-val { font: 700 12.5px/1 ui-rounded, "SF Pro Rounded", system-ui; }
+.hold-units { font-size: 10.5px; color: var(--faint); }
+.hold-gain { font-size: 10.5px; font-weight: 700; }
+.hold-gain.good { color: var(--green); }
+.hold-gain.bad { color: var(--red); }
+.hold-gain.flat { color: var(--faint); }
 .conn-accounts {
   list-style: none; padding: 0; margin: 12px 0 0;
   /* Three-column grid shared by every row via subgrid below, so the pill
