@@ -196,3 +196,75 @@ describe('ActivityView — category move', () => {
   });
 });
 
+describe('ActivityView — search', () => {
+  it('renders a search input in the header', async () => {
+    installFetchMock(FULL);
+    renderView();
+    expect(await screen.findByPlaceholderText(/search transactions/i)).toBeInTheDocument();
+  });
+
+  it('typing a query switches to a cross-month flat list', async () => {
+    const user = userEvent.setup();
+    installFetchMock(FULL);
+    renderView();
+    await screen.findByText('Pay Cheque');
+    expect(screen.queryByText('Old purchase')).not.toBeInTheDocument(); // hidden by month picker
+    await user.type(screen.getByPlaceholderText(/search transactions/i), 'purchase');
+    expect(await screen.findByText('Old purchase')).toBeInTheDocument();
+    // Category group headings should NOT render in search mode.
+    expect(screen.queryByRole('heading', { name: /salary/i })).not.toBeInTheDocument();
+  });
+
+  it('search matches descriptions case-insensitively', async () => {
+    const user = userEvent.setup();
+    installFetchMock(FULL);
+    renderView();
+    await screen.findByText('Pay Cheque');
+    await user.type(screen.getByPlaceholderText(/search transactions/i), 'AROMA');
+    expect(await screen.findByText('Aroma Coffee')).toBeInTheDocument();
+    expect(screen.queryByText('Shufersal')).not.toBeInTheDocument();
+  });
+
+  it('search matches the account label', async () => {
+    const user = userEvent.setup();
+    installFetchMock(FULL);
+    renderView();
+    await screen.findByText('Pay Cheque');
+    await user.type(screen.getByPlaceholderText(/search transactions/i), 'checking');
+    // "Checking" matches the account label → every row shows up.
+    expect(await screen.findByText('Aroma Coffee')).toBeInTheDocument();
+    expect(screen.getByText('Shufersal')).toBeInTheDocument();
+  });
+
+  it('search matches a numeric amount', async () => {
+    const user = userEvent.setup();
+    installFetchMock(FULL);
+    renderView();
+    await screen.findByText('Pay Cheque');
+    await user.type(screen.getByPlaceholderText(/search transactions/i), '250');
+    expect(await screen.findByText('Shufersal')).toBeInTheDocument();
+    expect(screen.queryByText('Aroma Coffee')).not.toBeInTheDocument();
+  });
+
+  it('shows a no-matches message when the query matches nothing', async () => {
+    const user = userEvent.setup();
+    installFetchMock(FULL);
+    renderView();
+    await screen.findByText('Pay Cheque');
+    await user.type(screen.getByPlaceholderText(/search transactions/i), 'qqqqqq');
+    expect(await screen.findByText(/no matching transactions/i)).toBeInTheDocument();
+  });
+
+  it('clearing the search returns to grouped month view', async () => {
+    const user = userEvent.setup();
+    installFetchMock(FULL);
+    renderView();
+    const input = await screen.findByPlaceholderText(/search transactions/i);
+    await user.type(input, 'aroma');
+    await screen.findByText('Aroma Coffee');
+    await user.clear(input);
+    // Month picker label is back.
+    expect(await screen.findByRole('heading', { name: /salary/i })).toBeInTheDocument();
+  });
+});
+

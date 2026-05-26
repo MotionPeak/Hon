@@ -18,6 +18,27 @@ function fmtDate(dateStr: string): string {
   return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
 }
 
+/** Match a transaction against a lowercase search query. Mirrors the legacy
+ *  txnMatchesSearch — description, category, date, account label, or amount. */
+function txnMatchesSearch(
+  t: Transaction, accounts: Map<string, Account>, q: string,
+): boolean {
+  if (!q) return true;
+  if ((t.description || '').toLowerCase().includes(q)) return true;
+  if ((t.category || '').toLowerCase().includes(q)) return true;
+  if (t.date && t.date.includes(q)) return true;
+  const acct = accounts.get(t.accountId);
+  if (acct) {
+    if ((acct.label || '').toLowerCase().includes(q)) return true;
+    if ((acct.connectionName || '').toLowerCase().includes(q)) return true;
+  }
+  const num = parseFloat(q.replace(/[^0-9.\-]/g, ''));
+  if (Number.isFinite(num) && num !== 0) {
+    if (Math.abs(Math.abs(t.amount) - Math.abs(num)) < 0.5) return true;
+  }
+  return false;
+}
+
 export function ActivityView() {
   const [settings] = useSettings();
   const [transactions, setTransactions] = useState<Transaction[] | null>(null);
@@ -25,6 +46,7 @@ export function ActivityView() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [month, setMonth] = useState<string | null>(null);
   const [moving, setMoving] = useState<Transaction | null>(null);
+  const [search, setSearch] = useState('');
 
   const refresh = useCallback(async () => {
     try {
@@ -75,6 +97,22 @@ export function ActivityView() {
     );
   }
 
+  const accountById = new Map<string, Account>();
+  for (const a of accounts) accountById.set(a.id, a);
+  const categoryByName = new Map<string, Category>();
+  for (const c of categories) categoryByName.set(c.name, c);
+
+  const searchQ = search.trim().toLowerCase();
+  const inSearchMode = searchQ.length > 0;
+
+  // Search mode: flat cross-month list, newest first, with the same
+  // refundForId / card-bill folding as the grouped view.
+  const searchResults = inSearchMode
+    ? transactions
+        .filter((t) => !t.refundForId && txnMatchesSearch(t, accountById, searchQ))
+        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+    : [];
+
   const monthTxns = transactions.filter((t) =>
     !t.refundForId && cycleKey(t.date, settings.monthStartDay) === activeMonth,
   );
@@ -99,11 +137,6 @@ export function ActivityView() {
       .sort(),
   ];
 
-  const accountById = new Map<string, Account>();
-  for (const a of accounts) accountById.set(a.id, a);
-  const categoryByName = new Map<string, Category>();
-  for (const c of categories) categoryByName.set(c.name, c);
-
   const monthIdx = activeMonth ? monthsWithTxns.indexOf(activeMonth) : -1;
   const canPrev = monthIdx >= 0 && monthIdx < monthsWithTxns.length - 1;
   const canNext = monthIdx > 0;
@@ -112,31 +145,109 @@ export function ActivityView() {
     <div className="activity-view">
       <div className="activity-head">
         <h1>Activity</h1>
-        <div className="month-pick">
-          <button
-            type="button"
-            className="icon-btn"
-            aria-label="Previous month"
-            disabled={!canPrev}
-            onClick={() => canPrev && setMonth(monthsWithTxns[monthIdx + 1])}
-          >‹</button>
-          <span className="month-label">
-            {activeMonth ? cycleLabel(activeMonth) : ''}
-          </span>
-          <button
-            type="button"
-            className="icon-btn"
-            aria-label="Next month"
-            disabled={!canNext}
-            onClick={() => canNext && setMonth(monthsWithTxns[monthIdx - 1])}
-          >›</button>
+        {!inSearchMode && (
+          <div className="month-pick">
+            <button
+              type="button"
+              className="icon-btn"
+              aria-label="Previous month"
+              disabled={!canPrev}
+              onClick={() => canPrev && setMonth(monthsWithTxns[monthIdx + 1])}
+            >‹</button>
+            <span className="month-label">
+              {activeMonth ? cycleLabel(activeMonth) : ''}
+            </span>
+            <button
+              type="button"
+              className="icon-btn"
+              aria-label="Next month"
+              disabled={!canNext}
+              onClick={() => canNext && setMonth(monthsWithTxns[monthIdx - 1])}
+            >›</button>
+          </div>
+        )}
+        <div className="act-search">
+          <span className="act-search-ico">⌕</span>
+          <input
+            type="search"
+            placeholder="Search transactions…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          {search && (
+            <button
+              type="button"
+              className="act-search-clear"
+              aria-label="Clear search"
+              onClick={() => setSearch('')}
+            >×</button>
+          )}
         </div>
         <span className="spacer" />
         <span className="act-count">
-          {monthTxns.length} transaction{monthTxns.length === 1 ? '' : 's'}
+          {inSearchMode
+            ? `${searchResults.length} match${searchResults.length === 1 ? '' : 'es'}`
+            : `${monthTxns.length} transaction${monthTxns.length === 1 ? '' : 's'}`}
         </span>
       </div>
-      {monthTxns.length === 0 ? (
+      {inSearchMode ? (
+        searchResults.length === 0 ? (
+          <p className="blank">No matching transactions.</p>
+        ) : (
+          <section className="cat-section-act">
+            <ul className="txn-list">
+              {searchResults.map((t) => {
+                const cat = categoryByName.get(t.category || '');
+                const acct = accountById.get(t.accountId);
+                const pos = t.amount > 0;
+                return (
+                  <li
+                    key={t.id}
+                    className="txn"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setMoving(t)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setMoving(t);
+                      }
+                    }}
+                  >
+                    <span
+                      className="txn-icon"
+                      style={{ background: cat ? cat.color + '22' : 'var(--card-hi)' }}
+                    >
+                      {cat?.emoji ?? '▫️'}
+                    </span>
+                    <div className="txn-main">
+                      <div className="txn-name">{t.description}</div>
+                      <div className="txn-sub">
+                        {fmtDate(t.date)}
+                        {acct && (
+                          <>
+                            <span className="sep"> · </span>
+                            {acct.label || acct.connectionName}
+                          </>
+                        )}
+                        {t.category && (
+                          <>
+                            <span className="sep"> · </span>
+                            {t.category}
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    <div className={`txn-amt${pos ? ' pos' : ''}`}>
+                      {money(t.amount, t.currency)}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        )
+      ) : monthTxns.length === 0 ? (
         <p className="blank">
           No transactions in {activeMonth ? cycleLabel(activeMonth) : 'this period'}.
         </p>

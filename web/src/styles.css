@@ -472,6 +472,24 @@ button.mini { padding: 5px 11px; font-size: 12px; }
 .activity-head .spacer { flex: 1; }
 .act-count { color: var(--muted); font-size: 12.5px; font-weight: 600; }
 
+.act-search {
+  display: flex; align-items: center; gap: 6px;
+  background: var(--card-hi); border-radius: 999px; padding: 5px 12px;
+  flex: 0 1 260px; min-width: 0;
+}
+.act-search-ico { color: var(--muted); font-size: 14px; line-height: 1; }
+.act-search input {
+  width: 100%; background: transparent; border: 0; padding: 0;
+  color: var(--text); font-size: 12.5px; outline: none;
+}
+.act-search input::placeholder { color: var(--muted); }
+.act-search input::-webkit-search-cancel-button { display: none; }
+.act-search-clear {
+  background: transparent; border: 0; color: var(--muted);
+  cursor: pointer; padding: 0; font-size: 16px; line-height: 1;
+}
+.act-search-clear:hover { color: var(--text); }
+
 .cat-stack { display: flex; flex-direction: column; gap: 18px; }
 .cat-section-act {
   background: var(--card); border: 1px solid var(--hairline);
