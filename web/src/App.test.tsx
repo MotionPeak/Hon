@@ -78,6 +78,18 @@ describe('App — tab routing', () => {
       .toHaveAttribute('aria-selected', 'true');
   });
 
+  it('switches to the Subscriptions tab on click', async () => {
+    withToken();
+    installFetchMock(EMPTY);
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole('tab', { name: /subscriptions/i }));
+    expect(await screen.findByRole('heading', { level: 1, name: /subscriptions/i }))
+      .toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /subscriptions/i }))
+      .toHaveAttribute('aria-selected', 'true');
+  });
+
   it('switches to the Piggy banks tab on click', async () => {
     withToken();
     installFetchMock(EMPTY);
