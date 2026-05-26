@@ -100,6 +100,9 @@ export function AccountsView() {
   const [removingAsset, setRemovingAsset] = useState<ManualAsset | null>(null);
   const [editingLoan, setEditingLoan] = useState<Loan | null>(null);
   const [removingLoan, setRemovingLoan] = useState<Loan | null>(null);
+  // Add-connection flow: null = closed; 'picker' = list of companies;
+  // a Company = chosen, showing the credential form for that company.
+  const [addFlow, setAddFlow] = useState<null | 'picker' | Company>(null);
 
   const toggleHoldings = useCallback((accountId: string) => {
     setExpandedHoldings((prev) => ({ ...prev, [accountId]: !prev[accountId] }));
@@ -253,7 +256,12 @@ export function AccountsView() {
 
   return (
     <div className="accounts-view">
-      <h1>Assets</h1>
+      <div className="accounts-head">
+        <h1>Assets</h1>
+        <button type="button" className="mini" onClick={() => setAddFlow('picker')}>
+          + Add asset
+        </button>
+      </div>
       <div className="assets-grid">
         {SECTIONS.map((s) => {
           const count = sectionCount(s.key);
@@ -346,6 +354,20 @@ export function AccountsView() {
             setRemovingLoan(null);
             await refresh();
           }}
+        />
+      )}
+      {addFlow === 'picker' && (
+        <AddConnectionPicker
+          companies={data.companies}
+          onPick={(c) => setAddFlow(c)}
+          onClose={() => setAddFlow(null)}
+        />
+      )}
+      {addFlow !== null && addFlow !== 'picker' && (
+        <AddConnectionForm
+          company={addFlow}
+          onClose={() => setAddFlow(null)}
+          onSaved={async () => { setAddFlow(null); await refresh(); }}
         />
       )}
       {(() => {
@@ -903,6 +925,131 @@ function ConfirmRemoveDialog({ title, body, onClose, onConfirmed }: ConfirmRemov
           <div className="modal-actions">
             <button type="button" onClick={onClose}>Cancel</button>
             <button type="button" className="danger" onClick={confirm}>Confirm remove</button>
+          </div>
+        </div>
+      </div>
+    </ModalPortal>
+  );
+}
+
+interface AddConnectionPickerProps {
+  companies: Company[];
+  onPick: (company: Company) => void;
+  onClose: () => void;
+}
+
+function AddConnectionPicker({ companies, onPick, onClose }: AddConnectionPickerProps) {
+  const [query, setQuery] = useState('');
+  // Only bank + card flows are handled here; brokerage (SnapTrade) and
+  // pension have their own multi-step flows that land in later sessions.
+  const supported = companies.filter((c) => c.type === 'bank' || c.type === 'card');
+  const filtered = supported.filter((c) =>
+    c.name.toLowerCase().includes(query.toLowerCase()),
+  );
+  return (
+    <ModalPortal>
+      <div className="overlay">
+        <div role="dialog" aria-label="Add an asset" className="modal">
+          <h2>Add an asset</h2>
+          <p>Pick a bank or credit-card provider.</p>
+          <label className="field">
+            <span>Search</span>
+            <input
+              type="text"
+              placeholder="Search providers…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              autoFocus
+            />
+          </label>
+          <ul className="add-picker">
+            {filtered.map((c) => (
+              <li key={c.id}>
+                <button type="button" className="add-picker-row" onClick={() => onPick(c)}>
+                  <span className="add-picker-emoji">
+                    {c.type === 'card' ? '💳' : '🏦'}
+                  </span>
+                  <span className="add-picker-name">{c.name}</span>
+                </button>
+              </li>
+            ))}
+            {filtered.length === 0 && (
+              <li className="add-picker-empty">No providers match.</li>
+            )}
+          </ul>
+          <div className="modal-actions">
+            <button type="button" onClick={onClose}>Cancel</button>
+          </div>
+        </div>
+      </div>
+    </ModalPortal>
+  );
+}
+
+interface AddConnectionFormProps {
+  company: Company;
+  onClose: () => void;
+  onSaved: () => void | Promise<void>;
+}
+
+function AddConnectionForm({ company, onClose, onSaved }: AddConnectionFormProps) {
+  const [displayName, setDisplayName] = useState(company.name);
+  const [credentials, setCredentials] = useState<Record<string, string>>(() =>
+    Object.fromEntries(company.loginFields.map((f) => [f, ''])),
+  );
+  const [error, setError] = useState<string | null>(null);
+  const submit = async () => {
+    setError(null);
+    if (!displayName.trim()) { setError('Display name is required.'); return; }
+    if (company.loginFields.some((f) => !credentials[f])) {
+      setError('Fill every credential field.');
+      return;
+    }
+    try {
+      await api('/connections', 'POST', {
+        companyId: company.id,
+        displayName: displayName.trim(),
+        credentials,
+      });
+      await onSaved();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e));
+    }
+  };
+  return (
+    <ModalPortal>
+      <div className="overlay">
+        <div role="dialog" aria-label={`Add ${company.name}`} className="modal">
+          <h2>Add {company.name}</h2>
+          <p>
+            Credentials are encrypted in the local vault and never sent
+            anywhere except {company.name}'s own site when a scrape runs.
+          </p>
+          <label className="field">
+            <span>Display name</span>
+            <input
+              type="text"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+            />
+          </label>
+          {company.loginFields.map((f) => (
+            <label key={f} className="field">
+              <span>{f}</span>
+              <input
+                type={f.toLowerCase().includes('password') ? 'password' : 'text'}
+                value={credentials[f] ?? ''}
+                onChange={(e) =>
+                  setCredentials((prev) => ({ ...prev, [f]: e.target.value }))
+                }
+                autoComplete="off"
+              />
+            </label>
+          ))}
+          {error && <div className="modal-err">{error}</div>}
+          <div className="modal-actions">
+            <button type="button" onClick={onClose}>Cancel</button>
+            <button type="button" className="primary" onClick={submit}>Add</button>
           </div>
         </div>
       </div>

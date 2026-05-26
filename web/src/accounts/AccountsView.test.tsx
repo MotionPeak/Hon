@@ -593,6 +593,110 @@ describe('AccountsView — assets + loans', () => {
   });
 });
 
+describe('AccountsView — add connection (picker + bank/card form)', () => {
+  const COMPANIES_FULL = {
+    companies: [
+      { id: 'hapoalim', name: 'Bank Hapoalim',
+        loginFields: ['userCode', 'password'], type: 'bank', domain: 'bankhapoalim.co.il' },
+      { id: 'leumi', name: 'Bank Leumi',
+        loginFields: ['username', 'password'], type: 'bank', domain: 'leumi.co.il' },
+      { id: 'max', name: 'Max',
+        loginFields: ['username', 'password'], type: 'card', domain: 'max.co.il' },
+      { id: 'snaptrade', name: 'SnapTrade',
+        loginFields: [], type: 'brokerage' },
+      { id: 'harel', name: 'Harel',
+        loginFields: ['id'], type: 'pension' },
+    ],
+  };
+
+  it('renders an "Add asset" button in the header', async () => {
+    installFetchMock(FULL);
+    render(<AccountsView />);
+    await screen.findByText('Hapoalim main');
+    expect(screen.getByRole('button', { name: /add asset/i })).toBeInTheDocument();
+  });
+
+  it('clicking + Add asset opens a picker listing bank and card companies', async () => {
+    const user = userEvent.setup();
+    installFetchMock({ ...FULL, 'GET /api/companies': () => COMPANIES_FULL });
+    render(<AccountsView />);
+    await user.click(await screen.findByRole('button', { name: /add asset/i }));
+    const dialog = screen.getByRole('dialog', { name: /add an asset/i });
+    expect(within(dialog).getByText('Bank Hapoalim')).toBeInTheDocument();
+    expect(within(dialog).getByText('Bank Leumi')).toBeInTheDocument();
+    expect(within(dialog).getByText('Max')).toBeInTheDocument();
+  });
+
+  it('the picker hides brokerage and pension companies (separate flows)', async () => {
+    const user = userEvent.setup();
+    installFetchMock({ ...FULL, 'GET /api/companies': () => COMPANIES_FULL });
+    render(<AccountsView />);
+    await user.click(await screen.findByRole('button', { name: /add asset/i }));
+    const dialog = screen.getByRole('dialog', { name: /add an asset/i });
+    expect(within(dialog).queryByText('SnapTrade')).not.toBeInTheDocument();
+    expect(within(dialog).queryByText('Harel')).not.toBeInTheDocument();
+  });
+
+  it('the picker search filters the list', async () => {
+    const user = userEvent.setup();
+    installFetchMock({ ...FULL, 'GET /api/companies': () => COMPANIES_FULL });
+    render(<AccountsView />);
+    await user.click(await screen.findByRole('button', { name: /add asset/i }));
+    const dialog = screen.getByRole('dialog', { name: /add an asset/i });
+    await user.type(within(dialog).getByPlaceholderText(/search/i), 'leumi');
+    expect(within(dialog).getByText('Bank Leumi')).toBeInTheDocument();
+    expect(within(dialog).queryByText('Bank Hapoalim')).not.toBeInTheDocument();
+    expect(within(dialog).queryByText('Max')).not.toBeInTheDocument();
+  });
+
+  it('picking a bank opens a credential form with display name + login fields', async () => {
+    const user = userEvent.setup();
+    installFetchMock({ ...FULL, 'GET /api/companies': () => COMPANIES_FULL });
+    render(<AccountsView />);
+    await user.click(await screen.findByRole('button', { name: /add asset/i }));
+    const picker = screen.getByRole('dialog', { name: /add an asset/i });
+    await user.click(within(picker).getByText('Bank Hapoalim'));
+    const dialog = screen.getByRole('dialog', { name: /add bank hapoalim/i });
+    const displayName = within(dialog).getByLabelText(/display name/i) as HTMLInputElement;
+    expect(displayName.value).toBe('Bank Hapoalim');
+    expect(within(dialog).getByLabelText(/userCode/i)).toBeInTheDocument();
+    expect(within(dialog).getByLabelText(/password/i)).toBeInTheDocument();
+  });
+
+  it('save POSTs /connections with companyId + displayName + credentials, then refetches', async () => {
+    const user = userEvent.setup();
+    const post = vi.fn((_body: unknown) => ({ connection: {
+      id: 'new-1', companyId: 'hapoalim', displayName: 'My Hapoalim',
+      createdAt: '2026-05-26', lastScrapeAt: null, lastStatus: null, hasCredentials: true,
+    } }));
+    const get = vi.fn(() => CONNECTIONS);
+    installFetchMock({
+      ...FULL,
+      'GET /api/companies': () => COMPANIES_FULL,
+      'GET /api/connections': get,
+      'POST /api/connections': post,
+    });
+    render(<AccountsView />);
+    await user.click(await screen.findByRole('button', { name: /add asset/i }));
+    const picker = screen.getByRole('dialog', { name: /add an asset/i });
+    await user.click(within(picker).getByText('Bank Hapoalim'));
+    const dialog = screen.getByRole('dialog', { name: /add bank hapoalim/i });
+    const displayName = within(dialog).getByLabelText(/display name/i);
+    await user.clear(displayName);
+    await user.type(displayName, 'My Hapoalim');
+    await user.type(within(dialog).getByLabelText(/userCode/i), '12345');
+    await user.type(within(dialog).getByLabelText(/password/i), 'secret');
+    await user.click(within(dialog).getByRole('button', { name: /add$/i }));
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+    expect(post.mock.calls[0]?.[0]).toEqual({
+      companyId: 'hapoalim',
+      displayName: 'My Hapoalim',
+      credentials: { userCode: '12345', password: 'secret' },
+    });
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+  });
+});
+
 describe('AccountsView — asset edit + remove', () => {
   it('opens an edit modal pre-filled with the asset name and value', async () => {
     const user = userEvent.setup();

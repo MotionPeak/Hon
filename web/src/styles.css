@@ -442,6 +442,33 @@ button.mini { padding: 5px 11px; font-size: 12px; }
 .conn-sync-msg { font-size: 12px; color: var(--amber); margin-top: 6px; }
 .conn-sync-err { font-size: 12px; color: var(--red); margin-top: 6px; }
 
+/* --- Add-connection picker -------------------------------------------- */
+.accounts-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 18px;
+}
+.add-picker {
+  list-style: none; padding: 0; margin: 0;
+  display: flex; flex-direction: column; gap: 4px;
+  max-height: 320px; overflow-y: auto;
+}
+.add-picker-row {
+  display: flex; align-items: center; gap: 12px;
+  width: 100%; padding: 10px 12px; text-align: left;
+  background: var(--card-hi); border: 1px solid transparent;
+  border-radius: 10px; color: var(--text);
+  font-size: 14px; font-weight: 500; cursor: pointer;
+  transition: border-color .14s, background-color .14s;
+}
+.add-picker-row:hover {
+  border-color: var(--accent); background: var(--card);
+}
+.add-picker-emoji { font-size: 18px; line-height: 1; }
+.add-picker-name { flex: 1; min-width: 0; }
+.add-picker-empty {
+  padding: 14px 2px; color: var(--muted); text-align: center; font-size: 13px;
+}
+
 /* --- Brokerage holdings list ------------------------------------------ */
 .holds-toggle {
   margin-right: 6px; padding: 0; border: 0; background: none;
