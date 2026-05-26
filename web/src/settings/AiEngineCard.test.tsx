@@ -154,6 +154,66 @@ describe('AiEngineCard', () => {
     expect(body.ollamaKey).toBe('secret');
   });
 
+  it('shows a Categorize-all panel when the engine is ready', async () => {
+    installFetchMock({
+      'GET /api/llm': () => statusResponse({
+        state: 'ready', modelId: 'qwen2.5-3b',
+        modelName: 'Qwen2.5 3B Instruct', ready: true,
+      }),
+      'GET /api/categorize': () => ({
+        state: 'idle', total: 0, done: 0, message: 'Not run yet.',
+      }),
+    });
+    render(<AiEngineCard />);
+    expect(await screen.findByRole('button', { name: /categorize all/i }))
+      .toBeInTheDocument();
+  });
+
+  it('clicking Categorize all POSTs /categorize and polls status', async () => {
+    const user = userEvent.setup();
+    const post = vi.fn(() => ({ ok: true }));
+    let calls = 0;
+    installFetchMock({
+      'GET /api/llm': () => statusResponse({
+        state: 'ready', modelId: 'qwen2.5-3b',
+        modelName: 'Qwen2.5 3B Instruct', ready: true,
+      }),
+      'GET /api/categorize': () => {
+        calls += 1;
+        if (calls === 1) return { state: 'idle', total: 0, done: 0, message: '' };
+        if (calls === 2) return {
+          state: 'running', total: 100, done: 42,
+          message: 'Categorising 42/100…',
+        };
+        return {
+          state: 'done', total: 100, done: 100,
+          message: 'Categorised 100 transactions.',
+        };
+      },
+      'POST /api/categorize': post,
+    });
+    render(<AiEngineCard />);
+    await user.click(await screen.findByRole('button', { name: /categorize all/i }));
+    await waitFor(() => expect(post).toHaveBeenCalled());
+    // Progress display surfaces during running state.
+    expect(await screen.findByText(/42\s*\/\s*100/i, {}, { timeout: 4000 }))
+      .toBeInTheDocument();
+    // Done message lands once polling sees state=done.
+    expect(await screen.findByText(/categorised 100/i, {}, { timeout: 4000 }))
+      .toBeInTheDocument();
+  });
+
+  it('hides Categorize all when the engine is not ready', async () => {
+    installFetchMock({
+      'GET /api/llm': () => statusResponse({ ready: false }),
+      'GET /api/categorize': () => ({ state: 'idle', total: 0, done: 0, message: '' }),
+    });
+    render(<AiEngineCard />);
+    await screen.findByRole('button', { name: /^On-device$/i });
+    expect(screen.queryByRole('button', { name: /categorize all/i }))
+      .not.toBeInTheDocument();
+  });
+
   it('Save in Ollama mode POSTs /llm/provider with mode=ollama + fields', async () => {
     const user = userEvent.setup();
     const post = vi.fn((_body: unknown) => statusResponse({ mode: 'ollama' }));

@@ -1711,6 +1711,25 @@ button.mini { padding: 5px 11px; font-size: 12px; }
   font-variant-numeric: tabular-nums; margin-bottom: 10px;
 }
 
+/* Categorize-all panel — appears at the bottom of the AI engine card
+   whenever inference is ready (any provider). */
+.ai-categorize {
+  margin-top: 16px; padding-top: 14px;
+  border-top: 1px solid var(--hairline);
+}
+.ai-cat-head {
+  display: flex; align-items: flex-start; gap: 12px; margin-bottom: 8px;
+}
+.ai-cat-head > div:first-child { flex: 1; min-width: 0; }
+.ai-cat-title {
+  font: 700 13.5px/1.3 ui-rounded, "SF Pro Rounded", system-ui;
+  color: var(--text);
+}
+.ai-cat-sub {
+  font-size: 11.5px; color: var(--muted); line-height: 1.5;
+  margin-top: 3px;
+}
+
 /* Remote provider (Ollama / API) — vertical form. */
 .ai-remote { display: flex; flex-direction: column; gap: 10px; }
 .ai-remote input {

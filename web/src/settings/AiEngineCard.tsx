@@ -115,7 +115,89 @@ export function AiEngineCard() {
       {status.mode === 'api' && (
         <ApiPanel status={status} onChange={refresh} />
       )}
+
+      {status.ready && <CategorizeAllPanel />}
     </section>
+  );
+}
+
+interface CategorizeStatus {
+  state: 'idle' | 'running' | 'done' | 'error';
+  total: number;
+  done: number;
+  message: string;
+}
+
+function CategorizeAllPanel() {
+  const [status, setStatus] = useState<CategorizeStatus | null>(null);
+
+  const refresh = useCallback(async (): Promise<void> => {
+    try {
+      const s = await api<CategorizeStatus>('/categorize');
+      setStatus(s);
+    } catch { /* keep prior */ }
+  }, []);
+
+  useEffect(() => { void refresh(); }, [refresh]);
+
+  // Poll while categorisation is running.
+  useEffect(() => {
+    if (status?.state !== 'running') return;
+    const h = setInterval(() => { void refresh(); }, 1500);
+    return () => clearInterval(h);
+  }, [status?.state, refresh]);
+
+  const start = async (): Promise<void> => {
+    try {
+      await api('/categorize', 'POST');
+      setStatus({ state: 'running', total: 0, done: 0, message: 'Starting…' });
+      await refresh();
+    } catch { /* best effort */ }
+  };
+
+  const running = status?.state === 'running';
+  const done = status?.state === 'done';
+  const pct = status && status.total > 0
+    ? Math.min(100, Math.round((status.done / status.total) * 100))
+    : 0;
+
+  return (
+    <div className="ai-categorize">
+      <div className="ai-cat-head">
+        <div>
+          <div className="ai-cat-title">Re-categorize every transaction</div>
+          <div className="ai-cat-sub">
+            Runs the on-device model over every uncategorised + "Other"
+            transaction. Existing manual category moves are preserved.
+          </div>
+        </div>
+        <button
+          type="button"
+          className="btn-primary"
+          disabled={running}
+          onClick={() => void start()}
+        >{running ? 'Running…' : 'Categorize all'}</button>
+      </div>
+      {running && (
+        <>
+          <div className="ai-progress">
+            <span
+              className="ai-progress-fill"
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+          <div className="ai-progress-meta">
+            {status.done} / {status.total} · {status.message}
+          </div>
+        </>
+      )}
+      {done && status.message && (
+        <p className="form-ok">{status.message}</p>
+      )}
+      {status?.state === 'error' && (
+        <p className="form-error">{status.message}</p>
+      )}
+    </div>
   );
 }
 

@@ -38,6 +38,18 @@ export const MODEL_CATALOG: ModelCatalogEntry[] = [
     approxSizeBytes: 4_700_000_000,
     recommended: false,
   },
+  {
+    id: 'dictalm2-7b',
+    name: 'DictaLM 2.0 (Hebrew-focused)',
+    // Mistral 7B continued-pre-trained on a large Hebrew corpus + instruct-
+    // tuned by Dicta (Israeli NLP lab). Strongest Hebrew comprehension at
+    // this size — pays off on Hebrew merchant strings and Hebrew chat,
+    // slightly weaker than Qwen on English & code.
+    description: 'Mistral 7B fine-tuned on Hebrew by Dicta — best Hebrew comprehension at this size; ~4 GB.',
+    uri: 'hf:dicta-il/dictalm2.0-instruct-GGUF:Q4_K_M',
+    approxSizeBytes: 4_100_000_000,
+    recommended: false,
+  },
 ];
 
 export type LlmState =
