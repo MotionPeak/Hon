@@ -41,6 +41,23 @@ describe('App — tab routing', () => {
     expect(screen.getByRole('tab', { name: /settings/i })).toHaveAttribute('aria-selected', 'true');
   });
 
+  it('switches to the Activity tab on click', async () => {
+    withToken();
+    installFetchMock({
+      'GET /api/health': () => HEALTH,
+      'GET /api/transactions': () => ({ transactions: [] }),
+      'GET /api/accounts': () => ({ accounts: [] }),
+      'GET /api/categories': () => ({ categories: [] }),
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole('tab', { name: /activity/i }));
+    expect(await screen.findByRole('heading', { level: 1, name: /activity/i }))
+      .toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /activity/i }))
+      .toHaveAttribute('aria-selected', 'true');
+  });
+
   it('switches to the Loans tab on click', async () => {
     withToken();
     installFetchMock({

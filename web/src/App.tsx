@@ -1,15 +1,18 @@
 import { useEffect, useState } from 'react';
 import { AccountsView } from './accounts/AccountsView';
+import { ActivityView } from './activity/ActivityView';
 import { api, ApiError, hasToken } from './api';
 import { LoansView } from './loans/LoansView';
+import { SettingsProvider } from './settings/useSettings';
 import { SettingsView } from './settings/SettingsView';
 import { VouchersView } from './vouchers/VouchersView';
 
-type Tab = 'health' | 'accounts' | 'vouchers' | 'loans' | 'settings';
+type Tab = 'health' | 'accounts' | 'activity' | 'vouchers' | 'loans' | 'settings';
 
 const TABS: Array<[Tab, string]> = [
   ['health', 'Health'],
   ['accounts', 'Accounts'],
+  ['activity', 'Activity'],
   ['vouchers', 'Vouchers'],
   ['loans', 'Loans'],
   ['settings', 'Settings'],
@@ -39,6 +42,11 @@ export function App() {
       <div role="tabpanel">
         {tab === 'health' && <HealthView />}
         {tab === 'accounts' && <AccountsView />}
+        {tab === 'activity' && (
+          <SettingsProvider>
+            <ActivityView />
+          </SettingsProvider>
+        )}
         {tab === 'vouchers' && <VouchersView />}
         {tab === 'loans' && <LoansView />}
         {tab === 'settings' && <SettingsView />}
