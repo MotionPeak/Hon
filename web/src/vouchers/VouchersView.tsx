@@ -1,17 +1,26 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import * as Dialog from '@radix-ui/react-dialog';
 import { api, ApiError } from '../api';
 import { money } from '../format';
 import type { Voucher } from './types';
 
+type SyncProviderId = 'shufersal' | 'buyme' | 'htzone';
 type AddMode =
   | { kind: 'closed' }
   | { kind: 'picker' }
   | { kind: 'custom' }
-  | { kind: 'shufersal' }
-  | { kind: 'buyme' }
-  | { kind: 'htzone' };
+  | { kind: SyncProviderId; autoStart?: boolean };
+
+/** Map an existing voucher's provider string back to a sync ProviderId
+ *  so the card-level Sync button knows which flow to re-run. */
+function syncProviderFor(provider: string): SyncProviderId | null {
+  const p = provider.toLowerCase();
+  if (p.includes('shufersal')) return 'shufersal';
+  if (p.includes('buyme')) return 'buyme';
+  if (p.includes('hi-tech') || p.includes('htzone') || p.includes('hi tech')) return 'htzone';
+  return null;
+}
 
 interface VoucherProvider {
   id: 'shufersal' | 'buyme' | 'htzone' | 'pluxee' | 'cibus';
@@ -171,6 +180,7 @@ export function VouchersView() {
             onEdit={() => setEditing(v)}
             onToggleExcluded={() => toggleExcluded(v)}
             onDelete={() => setDeleting(v)}
+            onSync={(providerId) => setAddMode({ kind: providerId, autoStart: true })}
           />
         ))}
       </div>
@@ -223,9 +233,13 @@ interface VoucherCardProps {
   onEdit: () => void;
   onToggleExcluded: () => void;
   onDelete: () => void;
+  onSync: (providerId: SyncProviderId) => void;
 }
 
-function VoucherCard({ voucher, onEdit, onToggleExcluded, onDelete }: VoucherCardProps) {
+function VoucherCard({
+  voucher, onEdit, onToggleExcluded, onDelete, onSync,
+}: VoucherCardProps) {
+  const syncProvider = syncProviderFor(voucher.provider);
   const split = splitTitle(voucher.name);
   const days = daysUntil(voucher.expiresOn);
   let expiry: React.ReactNode = null;
@@ -277,6 +291,15 @@ function VoucherCard({ voucher, onEdit, onToggleExcluded, onDelete }: VoucherCar
       {voucher.notes && <div className="voucher-notes">{voucher.notes}</div>}
       {expiry}
       <div className="voucher-actions">
+        {syncProvider && (
+          <button
+            type="button"
+            className="mini primary"
+            aria-label="Sync"
+            onClick={() => onSync(syncProvider)}
+            title="Re-fetch this voucher's balance from the provider"
+          >↻ Sync</button>
+        )}
         <button type="button" className="mini" onClick={onEdit}>Edit</button>
         <button type="button" className="mini" onClick={onToggleExcluded}>
           {voucher.excluded ? 'Include' : 'Exclude'}
@@ -309,13 +332,13 @@ function AddVoucherFlow({
         <VoucherFormModal onClose={onClose} onSaved={onSaved} />
       )}
       {mode.kind === 'shufersal' && (
-        <ShufersalSyncDialog onClose={onClose} onSaved={onSaved} />
+        <ShufersalSyncDialog onClose={onClose} onSaved={onSaved} autoStart={!!mode.autoStart} />
       )}
       {mode.kind === 'buyme' && (
-        <BuyMeSyncDialog onClose={onClose} onSaved={onSaved} />
+        <BuyMeSyncDialog onClose={onClose} onSaved={onSaved} autoStart={!!mode.autoStart} />
       )}
       {mode.kind === 'htzone' && (
-        <HtzoneSyncDialog onClose={onClose} onSaved={onSaved} />
+        <HtzoneSyncDialog onClose={onClose} onSaved={onSaved} autoStart={!!mode.autoStart} />
       )}
     </>
   );
@@ -509,25 +532,31 @@ const PROVIDER_CONFIGS: Record<'shufersal' | 'buyme' | 'htzone', ProviderConfig>
   },
 };
 
-function ShufersalSyncDialog(p: { onClose: () => void; onSaved: () => void | Promise<void> }) {
+interface SyncDialogProps {
+  onClose: () => void;
+  onSaved: () => void | Promise<void>;
+  autoStart?: boolean;
+}
+function ShufersalSyncDialog(p: SyncDialogProps) {
   return <ProviderSyncDialog cfg={PROVIDER_CONFIGS.shufersal} {...p} />;
 }
-function BuyMeSyncDialog(p: { onClose: () => void; onSaved: () => void | Promise<void> }) {
+function BuyMeSyncDialog(p: SyncDialogProps) {
   return <ProviderSyncDialog cfg={PROVIDER_CONFIGS.buyme} {...p} />;
 }
-function HtzoneSyncDialog(p: { onClose: () => void; onSaved: () => void | Promise<void> }) {
+function HtzoneSyncDialog(p: SyncDialogProps) {
   return <ProviderSyncDialog cfg={PROVIDER_CONFIGS.htzone} {...p} />;
 }
 
 function ProviderSyncDialog({
-  cfg, onClose, onSaved,
+  cfg, onClose, onSaved, autoStart = false,
 }: {
   cfg: ProviderConfig;
   onClose: () => void;
   onSaved: () => void | Promise<void>;
+  autoStart?: boolean;
 }) {
   const [credential, setCredential] = useState('');
-  const [remember, setRemember] = useState(true);
+  const [credentialLoaded, setCredentialLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [syncId, setSyncId] = useState<string | null>(null);
   const [status, setStatus] = useState<SyncStatus | null>(null);
@@ -543,8 +572,9 @@ function ProviderSyncDialog({
         if (!cancelled) {
           const saved = r[cfg.credentialKey];
           if (saved) setCredential(saved);
+          setCredentialLoaded(true);
         }
-      } catch { /* fine — no saved value */ }
+      } catch { if (!cancelled) setCredentialLoaded(true); }
     })();
     return () => { cancelled = true; };
   }, [cfg.savedPath, cfg.credentialKey]);
@@ -571,7 +601,11 @@ function ProviderSyncDialog({
     const vErr = cfg.validate(credential);
     if (vErr) { setError(vErr); return; }
     try {
-      const body: Record<string, unknown> = { remember };
+      // remember is always true — we silently encrypt + persist the
+      // credential so the card-level Sync button can re-run without
+      // re-prompting. The "Remember this for next time" checkbox is
+      // gone; the only escape hatch is to clear the vault entry.
+      const body: Record<string, unknown> = { remember: true };
       body[cfg.credentialKey] = credential.trim();
       const r = await api<{ syncId: string }>(
         `/vouchers/sync/${cfg.id}/start`, 'POST', body,
@@ -590,6 +624,19 @@ function ProviderSyncDialog({
       setError(e instanceof ApiError ? e.message : String(e));
     }
   };
+
+  // Auto-start the moment the saved credential lands when the card-level
+  // Sync button opened the dialog. Falls back to the manual form if no
+  // saved credential exists for the provider.
+  const autoStartedRef = useRef(false);
+  useEffect(() => {
+    if (!autoStart || autoStartedRef.current) return;
+    if (!credentialLoaded || syncId) return;
+    if (!credential || cfg.validate(credential)) return;
+    autoStartedRef.current = true;
+    void start();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoStart, credentialLoaded, credential, syncId]);
 
   const submitOtp = async (): Promise<void> => {
     if (!syncId) return;
@@ -646,14 +693,6 @@ function ProviderSyncDialog({
                 onChange={(e) => setCredential(e.target.value)}
                 autoFocus
               />
-              <label className="vc-remember">
-                <input
-                  type="checkbox"
-                  checked={remember}
-                  onChange={(e) => setRemember(e.target.checked)}
-                />
-                Remember this for next time
-              </label>
               {error && <p className="form-error">{error}</p>}
               <div className="form-actions">
                 <Dialog.Close asChild>

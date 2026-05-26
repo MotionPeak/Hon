@@ -203,6 +203,60 @@ describe('VouchersView — CRUD', () => {
     expect(within(shuf).getAllByText(/SMS|text/i).length).toBeGreaterThan(0);
   });
 
+  it('a synced voucher card shows a Sync button that re-runs the provider flow', async () => {
+    installFetchMock({
+      'GET /api/vouchers': () => fixture(),
+      'GET /api/vouchers/sync/shufersal/saved-phone': () => ({ phone: '0501234567' }),
+    });
+    render(<VouchersView />);
+    // Tav HaZahav is provided by Shufersal in the fixture.
+    const card = (await screen.findByText('Tav HaZahav')).closest('.voucher-card')!;
+    expect(within(card as HTMLElement).getByRole('button', { name: /^sync$/i }))
+      .toBeInTheDocument();
+  });
+
+  it('card-level Sync auto-starts using the saved credential (no manual form)', async () => {
+    const user = userEvent.setup();
+    const post = vi.fn((_body: unknown) => ({ syncId: 'sync-card-1' }));
+    installFetchMock({
+      'GET /api/vouchers': () => fixture(),
+      'GET /api/vouchers/sync/shufersal/saved-phone': () => ({ phone: '0501234567' }),
+      'POST /api/vouchers/sync/shufersal/start': post,
+      'GET /api/vouchers/sync/shufersal/status/sync-card-1': () => ({
+        status: 'signing-in', message: 'Opening…', error: null,
+        vouchers: null, finished: false,
+      }),
+    });
+    render(<VouchersView />);
+    const card = (await screen.findByText('Tav HaZahav')).closest('.voucher-card')!;
+    await user.click(within(card as HTMLElement).getByRole('button', { name: /^sync$/i }));
+    // POSTed without the user touching the credential input — saved phone wins.
+    await waitFor(() => expect(post).toHaveBeenCalled());
+    const body = post.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(body.phone).toBe('0501234567');
+    expect(body.remember).toBe(true);
+  });
+
+  it('always passes remember: true (no opt-in checkbox)', async () => {
+    const user = userEvent.setup();
+    const post = vi.fn((_body: unknown) => ({ syncId: 'sync-nochk' }));
+    installFetchMock({
+      'GET /api/vouchers': () => fixture(),
+      'GET /api/vouchers/sync/htzone/saved-code': () => ({ code: null }),
+      'POST /api/vouchers/sync/htzone/start': post,
+    });
+    render(<VouchersView />);
+    await user.click(await screen.findByRole('button', { name: /add voucher/i }));
+    await user.click(await screen.findByRole('button', { name: /hi-?tech zone/i }));
+    const dialog = await screen.findByRole('dialog', { name: /sync hi-?tech zone/i });
+    // No "Remember this for next time" checkbox.
+    expect(within(dialog).queryByLabelText(/remember/i)).not.toBeInTheDocument();
+    await user.type(within(dialog).getByLabelText(/digital code/i), '12345678');
+    await user.click(within(dialog).getByRole('button', { name: /^sync$/i }));
+    await waitFor(() => expect(post).toHaveBeenCalled());
+    expect((post.mock.calls[0]?.[0] as Record<string, unknown>).remember).toBe(true);
+  });
+
   it('Hi-Tech Zone sync validates the 8–9 digit code before POSTing', async () => {
     const user = userEvent.setup();
     const post = vi.fn(() => ({ syncId: 'sync-h' }));
