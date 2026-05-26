@@ -288,6 +288,124 @@ describe('AccountsView — net-worth toggle', () => {
   });
 });
 
+describe('AccountsView — remove connection', () => {
+  it('renders a "Remove" button on every connection card', async () => {
+    installFetchMock(FULL);
+    render(<AccountsView />);
+    await screen.findByText('Hapoalim main');
+    expect(screen.getAllByRole('button', { name: /^remove$/i }).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('clicking remove opens a confirmation dialog naming the connection', async () => {
+    const user = userEvent.setup();
+    installFetchMock(FULL);
+    render(<AccountsView />);
+    const card = (await screen.findByText('Hapoalim main')).closest('.conn-card')!;
+    await user.click(within(card as HTMLElement).getByRole('button', { name: /^remove$/i }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByRole('heading', { name: /hapoalim main/i })).toBeInTheDocument();
+  });
+
+  it('cancel closes without calling the engine', async () => {
+    const user = userEvent.setup();
+    const del = vi.fn();
+    installFetchMock({ ...FULL, 'DELETE /api/connections/c-bank-1': del });
+    render(<AccountsView />);
+    const card = (await screen.findByText('Hapoalim main')).closest('.conn-card')!;
+    await user.click(within(card as HTMLElement).getByRole('button', { name: /^remove$/i }));
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: /cancel/i }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(del).not.toHaveBeenCalled();
+  });
+
+  it('confirm DELETEs /connections/:id and refetches', async () => {
+    const user = userEvent.setup();
+    const del = vi.fn(() => ({ ok: true }));
+    const get = vi.fn(() => CONNECTIONS);
+    installFetchMock({
+      ...FULL,
+      'GET /api/connections': get,
+      'DELETE /api/connections/c-bank-1': del,
+    });
+    render(<AccountsView />);
+    const card = (await screen.findByText('Hapoalim main')).closest('.conn-card')!;
+    await user.click(within(card as HTMLElement).getByRole('button', { name: /^remove$/i }));
+    await user.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: /confirm remove/i }),
+    );
+    await waitFor(() => expect(del).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+});
+
+describe('AccountsView — set credentials', () => {
+  const COMPANIES_WITH_LOGIN = {
+    companies: [{
+      id: 'hapoalim', name: 'Bank Hapoalim',
+      loginFields: ['userCode', 'password'],
+      type: 'bank' as const, domain: 'bankhapoalim.co.il',
+    }, ...COMPANIES.companies.slice(1)],
+  };
+  const NO_CREDS = {
+    connections: [{ ...CONNECTIONS.connections[0], hasCredentials: false },
+      ...CONNECTIONS.connections.slice(1)],
+  };
+
+  it('shows "Set credentials" only when hasCredentials is false', async () => {
+    installFetchMock({
+      ...FULL,
+      'GET /api/companies': () => COMPANIES_WITH_LOGIN,
+      'GET /api/connections': () => NO_CREDS,
+    });
+    render(<AccountsView />);
+    const card = (await screen.findByText('Hapoalim main')).closest('.conn-card')!;
+    expect(within(card as HTMLElement).getByRole('button', { name: /set credentials/i }))
+      .toBeInTheDocument();
+    // The other connections (Max, IBKR, Harel) have hasCredentials: true.
+    const maxCard = screen.getByText('Max card').closest('.conn-card')!;
+    expect(within(maxCard as HTMLElement).queryByRole('button', { name: /set credentials/i }))
+      .not.toBeInTheDocument();
+  });
+
+  it('clicking opens a form with one input per loginField from the company catalog', async () => {
+    const user = userEvent.setup();
+    installFetchMock({
+      ...FULL,
+      'GET /api/companies': () => COMPANIES_WITH_LOGIN,
+      'GET /api/connections': () => NO_CREDS,
+    });
+    render(<AccountsView />);
+    const card = (await screen.findByText('Hapoalim main')).closest('.conn-card')!;
+    await user.click(within(card as HTMLElement).getByRole('button', { name: /set credentials/i }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByLabelText(/userCode/i)).toBeInTheDocument();
+    expect(within(dialog).getByLabelText(/password/i)).toBeInTheDocument();
+  });
+
+  it('save PUTs /connections/:id/credentials with a credentials map', async () => {
+    const user = userEvent.setup();
+    const put = vi.fn((_body: unknown) => ({ ok: true }));
+    installFetchMock({
+      ...FULL,
+      'GET /api/companies': () => COMPANIES_WITH_LOGIN,
+      'GET /api/connections': () => NO_CREDS,
+      'PUT /api/connections/c-bank-1/credentials': put,
+    });
+    render(<AccountsView />);
+    const card = (await screen.findByText('Hapoalim main')).closest('.conn-card')!;
+    await user.click(within(card as HTMLElement).getByRole('button', { name: /set credentials/i }));
+    const dialog = screen.getByRole('dialog');
+    await user.type(within(dialog).getByLabelText(/userCode/i), '12345');
+    await user.type(within(dialog).getByLabelText(/password/i), 'secret');
+    await user.click(within(dialog).getByRole('button', { name: /save/i }));
+    await waitFor(() => expect(put).toHaveBeenCalledTimes(1));
+    expect(put.mock.calls[0]?.[0]).toEqual({
+      credentials: { userCode: '12345', password: 'secret' },
+    });
+  });
+});
+
 describe('AccountsView — assets + loans', () => {
   it('renders each manual asset by name in the Other assets section', async () => {
     installFetchMock(FULL);

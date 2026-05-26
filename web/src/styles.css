@@ -432,8 +432,13 @@ input:focus, select:focus, textarea:focus {
   border-radius: 14px; padding: 16px 18px; box-shadow: var(--shadow-sm);
 }
 .conn-head { display: flex; flex-direction: column; gap: 2px; }
+.conn-title-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+}
+.conn-buttons { display: flex; gap: 6px; flex-wrap: wrap; flex: none; }
 .conn-title { font-size: 15px; font-weight: 700; color: var(--text); }
 .conn-meta { font-size: 12.5px; color: var(--muted); }
+button.mini { padding: 5px 11px; font-size: 12px; }
 .conn-accounts {
   list-style: none; padding: 0; margin: 12px 0 0;
   /* Three-column grid shared by every row via subgrid below, so the pill

@@ -47,6 +47,8 @@ interface AccountsData {
 export function AccountsView() {
   const [data, setData] = useState<AccountsData | null>(null);
   const [editingBalance, setEditingBalance] = useState<Account | null>(null);
+  const [removingConnection, setRemovingConnection] = useState<Connection | null>(null);
+  const [editingCredentials, setEditingCredentials] = useState<Connection | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -137,6 +139,8 @@ export function AccountsView() {
                   onToggleAccountExcluded: toggleAccountExcluded,
                   onToggleAssetExcluded: toggleAssetExcluded,
                   onToggleLoanExcluded: toggleLoanExcluded,
+                  onRemoveConnection: setRemovingConnection,
+                  onSetCredentials: setEditingCredentials,
                 })}
               </div>
             </section>
@@ -150,6 +154,21 @@ export function AccountsView() {
           onSaved={async () => { setEditingBalance(null); await refresh(); }}
         />
       )}
+      {removingConnection && (
+        <RemoveConnectionDialog
+          connection={removingConnection}
+          onClose={() => setRemovingConnection(null)}
+          onConfirmed={async () => { setRemovingConnection(null); await refresh(); }}
+        />
+      )}
+      {editingCredentials && (
+        <CredentialsModal
+          connection={editingCredentials}
+          company={data.companies.find((c) => c.id === editingCredentials.companyId)}
+          onClose={() => setEditingCredentials(null)}
+          onSaved={async () => { setEditingCredentials(null); await refresh(); }}
+        />
+      )}
     </div>
   );
 }
@@ -159,6 +178,8 @@ interface RowCallbacks {
   onToggleAccountExcluded: (account: Account, excluded: boolean) => void | Promise<void>;
   onToggleAssetExcluded: (asset: ManualAsset, excluded: boolean) => void | Promise<void>;
   onToggleLoanExcluded: (loan: Loan, excluded: boolean) => void | Promise<void>;
+  onRemoveConnection: (connection: Connection) => void;
+  onSetCredentials: (connection: Connection) => void;
 }
 
 function renderSectionItems(key: AssetSectionKey, data: AccountsData, cb: RowCallbacks) {
@@ -207,7 +228,27 @@ function ConnectionCard({ connection, company, accounts, callbacks }: Connection
   return (
     <article className="conn-card">
       <header className="conn-head">
-        <div className="conn-title">{connection.displayName}</div>
+        <div className="conn-title-row">
+          <div className="conn-title">{connection.displayName}</div>
+          <div className="conn-buttons">
+            {!connection.hasCredentials && (
+              <button
+                type="button"
+                className="mini primary"
+                onClick={() => callbacks.onSetCredentials(connection)}
+              >
+                Set credentials
+              </button>
+            )}
+            <button
+              type="button"
+              className="mini danger"
+              onClick={() => callbacks.onRemoveConnection(connection)}
+            >
+              Remove
+            </button>
+          </div>
+        </div>
         <div className="conn-meta">{meta}</div>
       </header>
       <ul className="conn-accounts">
@@ -333,6 +374,107 @@ function LoanCard({ loan, callbacks }: { loan: Loan; callbacks: RowCallbacks }) 
       </div>
       <div className="amount neg">{money(loan.principal, loan.currency)}</div>
     </article>
+  );
+}
+
+interface RemoveConnectionDialogProps {
+  connection: Connection;
+  onClose: () => void;
+  onConfirmed: () => void | Promise<void>;
+}
+
+function RemoveConnectionDialog({ connection, onClose, onConfirmed }: RemoveConnectionDialogProps) {
+  const [error, setError] = useState<string | null>(null);
+  const confirm = async () => {
+    setError(null);
+    try {
+      await api(`/connections/${encodeURIComponent(connection.id)}`, 'DELETE');
+      await onConfirmed();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e));
+    }
+  };
+  return (
+    <ModalPortal>
+      <div className="overlay">
+        <div role="dialog" aria-label={`Remove ${connection.displayName}`} className="modal">
+          <h2>{connection.displayName}</h2>
+          <p>
+            Remove this connection and every account, transaction, and saved
+            session belonging to it. Manual edits stay; bank-pulled data is
+            gone. This cannot be undone.
+          </p>
+          {error && <div className="modal-err">{error}</div>}
+          <div className="modal-actions">
+            <button type="button" onClick={onClose}>Cancel</button>
+            <button type="button" className="danger" onClick={confirm}>
+              Confirm remove
+            </button>
+          </div>
+        </div>
+      </div>
+    </ModalPortal>
+  );
+}
+
+interface CredentialsModalProps {
+  connection: Connection;
+  company?: Company;
+  onClose: () => void;
+  onSaved: () => void | Promise<void>;
+}
+
+function CredentialsModal({ connection, company, onClose, onSaved }: CredentialsModalProps) {
+  const fields = company?.loginFields ?? [];
+  const [values, setValues] = useState<Record<string, string>>(() =>
+    Object.fromEntries(fields.map((f) => [f, ''])),
+  );
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async () => {
+    setError(null);
+    if (fields.some((f) => !values[f])) {
+      setError('Fill every field.');
+      return;
+    }
+    try {
+      await api(`/connections/${encodeURIComponent(connection.id)}/credentials`, 'PUT', {
+        credentials: values,
+      });
+      await onSaved();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e));
+    }
+  };
+
+  return (
+    <ModalPortal>
+      <div className="overlay">
+        <div role="dialog" aria-label="Set credentials" className="modal">
+          <h2>Credentials for {connection.displayName}</h2>
+          <p>
+            Stored encrypted in the local vault; never sent anywhere except
+            the bank's own site when a scrape runs.
+          </p>
+          {fields.map((f) => (
+            <label key={f} className="field">
+              <span>{f}</span>
+              <input
+                type={f.toLowerCase().includes('password') ? 'password' : 'text'}
+                value={values[f] ?? ''}
+                onChange={(e) => setValues((prev) => ({ ...prev, [f]: e.target.value }))}
+                autoComplete="off"
+              />
+            </label>
+          ))}
+          {error && <div className="modal-err">{error}</div>}
+          <div className="modal-actions">
+            <button type="button" onClick={onClose}>Cancel</button>
+            <button type="button" className="primary" onClick={submit}>Save</button>
+          </div>
+        </div>
+      </div>
+    </ModalPortal>
   );
 }
 
