@@ -9,6 +9,19 @@ const HEALTH = {
   uptimeMs: 1234, db: 'ok', pid: 999,
 };
 
+const EMPTY = {
+  'GET /api/health': () => HEALTH,
+  'GET /api/companies': () => ({ companies: [] }),
+  'GET /api/connections': () => ({ connections: [] }),
+  'GET /api/accounts': () => ({ accounts: [] }),
+  'GET /api/assets': () => ({ assets: [] }),
+  'GET /api/loans': () => ({ loans: [], rates: { prime: null, cpiNow: null } }),
+  'GET /api/brokerage': () => ({ holdings: [] }),
+  'GET /api/transactions': () => ({ transactions: [] }),
+  'GET /api/categories': () => ({ categories: [] }),
+  'GET /api/vouchers': () => ({ vouchers: [] }),
+};
+
 function withToken(): void {
   window.location.hash = 'token=test-token';
 }
@@ -19,36 +32,36 @@ describe('App — tab routing', () => {
     expect(screen.getByText(/no access token/i)).toBeInTheDocument();
   });
 
-  it('defaults to the Health tab when a token is present', async () => {
+  it('defaults to the Assets tab when a token is present', async () => {
     withToken();
-    installFetchMock({ 'GET /api/health': () => HEALTH });
+    installFetchMock(EMPTY);
     render(<App />);
-    expect(await screen.findByText(/connected to hon-sidecar/i)).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: /health/i })).toHaveAttribute('aria-selected', 'true');
+    expect(await screen.findByRole('tab', { name: /assets/i }))
+      .toHaveAttribute('aria-selected', 'true');
+    // Assets heading from AccountsView is "Assets".
+    expect(screen.getByRole('heading', { level: 1, name: /assets/i })).toBeInTheDocument();
+  });
+
+  it('shows the engine version in the header', async () => {
+    withToken();
+    installFetchMock(EMPTY);
+    render(<App />);
+    expect(await screen.findByText(/engine v0\.3\.0/i)).toBeInTheDocument();
   });
 
   it('switches to the Settings tab on click', async () => {
     withToken();
-    installFetchMock({
-      'GET /api/health': () => HEALTH,
-      'GET /api/categories': () => ({ categories: [] }),
-    });
+    installFetchMock(EMPTY);
     const user = userEvent.setup();
     render(<App />);
     await user.click(screen.getByRole('tab', { name: /settings/i }));
     expect(await screen.findByRole('heading', { level: 1, name: /settings/i })).toBeInTheDocument();
-    expect(screen.queryByText(/connected to hon-sidecar/i)).not.toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /settings/i })).toHaveAttribute('aria-selected', 'true');
   });
 
   it('switches to the Activity tab on click', async () => {
     withToken();
-    installFetchMock({
-      'GET /api/health': () => HEALTH,
-      'GET /api/transactions': () => ({ transactions: [] }),
-      'GET /api/accounts': () => ({ accounts: [] }),
-      'GET /api/categories': () => ({ categories: [] }),
-    });
+    installFetchMock(EMPTY);
     const user = userEvent.setup();
     render(<App />);
     await user.click(screen.getByRole('tab', { name: /activity/i }));
@@ -60,10 +73,7 @@ describe('App — tab routing', () => {
 
   it('switches to the Loans tab on click', async () => {
     withToken();
-    installFetchMock({
-      'GET /api/health': () => HEALTH,
-      'GET /api/loans': () => ({ loans: [], rates: { prime: null, cpiNow: null } }),
-    });
+    installFetchMock(EMPTY);
     const user = userEvent.setup();
     render(<App />);
     await user.click(screen.getByRole('tab', { name: /loans/i }));
@@ -75,10 +85,7 @@ describe('App — tab routing', () => {
 
   it('switches to the Vouchers tab on click', async () => {
     withToken();
-    installFetchMock({
-      'GET /api/health': () => HEALTH,
-      'GET /api/vouchers': () => ({ vouchers: [] }),
-    });
+    installFetchMock(EMPTY);
     const user = userEvent.setup();
     render(<App />);
     await user.click(screen.getByRole('tab', { name: /vouchers/i }));
@@ -86,22 +93,5 @@ describe('App — tab routing', () => {
       .toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /vouchers/i }))
       .toHaveAttribute('aria-selected', 'true');
-  });
-
-  it('switches to the Accounts tab on click', async () => {
-    withToken();
-    installFetchMock({
-      'GET /api/health': () => HEALTH,
-      'GET /api/companies': () => ({ companies: [] }),
-      'GET /api/connections': () => ({ connections: [] }),
-      'GET /api/accounts': () => ({ accounts: [] }),
-      'GET /api/assets': () => ({ assets: [] }),
-      'GET /api/loans': () => ({ loans: [] }),
-    });
-    const user = userEvent.setup();
-    render(<App />);
-    await user.click(screen.getByRole('tab', { name: /accounts/i }));
-    expect(await screen.findByRole('heading', { level: 1, name: /assets/i })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: /accounts/i })).toHaveAttribute('aria-selected', 'true');
   });
 });

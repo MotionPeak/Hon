@@ -21,10 +21,12 @@
 * { box-sizing: border-box; margin: 0; }
 html, body { height: 100%; }
 body {
-  background:
-    radial-gradient(1100px 600px at 12% -10%, rgba(252,185,50,0.10), transparent 60%),
-    radial-gradient(900px 500px at 105% 115%, rgba(212,131,26,0.08), transparent 60%),
-    var(--bg);
+  /* The legacy app layered radial amber glows top-left and bottom-right.
+     Both produced visible "edges" on the React port where the gradient
+     terminated mid-viewport (the legacy app likely never tripped this
+     because its sidebar/content layout filled the space differently).
+     Flat background reads cleaner. */
+  background: var(--bg);
   color: var(--text); min-height: 100vh;
   font: 15px/1.5 -apple-system, "SF Pro Text", system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -34,20 +36,99 @@ code, pre {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
-/* --- App shell + tab nav ------------------------------------------------ */
-.app-shell { max-width: 1100px; margin: 0 auto; padding: 24px 26px 48px; }
-.tab-nav {
-  display: flex; gap: 6px; margin-bottom: 22px;
-  border-bottom: 1px solid var(--hairline);
+/* --- App shell + sidebar nav ------------------------------------------- */
+.app { padding: 0 26px 48px; min-height: 100vh; display: flex; flex-direction: column; }
+.app-header {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; align-items: center; gap: 12px;
+  padding: 16px 0 14px; margin-bottom: 8px;
+  background: var(--bg); border-bottom: 1px solid var(--hairline);
 }
-.tab-nav .tab {
-  background: transparent; border: 0; border-bottom: 2px solid transparent;
-  border-radius: 0; padding: 9px 16px; color: var(--muted);
-  font-weight: 600; font-size: 13.5px;
-  transition: color .14s, border-color .14s;
+.brand { display: flex; align-items: center; gap: 11px; }
+.brand-mark {
+  width: 38px; height: 38px; border-radius: 11px;
+  background:
+    radial-gradient(120% 100% at 0% 0%, rgba(255,255,255,0.30), transparent 60%),
+    linear-gradient(135deg, var(--grad-1), var(--grad-2));
+  /* Trimmed shadow — the legacy stack had a wide amber halo that read
+     as a "cutoff" against the dark header on the React port. Keep the
+     subtle inner highlight and a tight outer ring, drop the soft glow. */
+  box-shadow:
+    0 2px 6px rgba(0,0,0,0.25),
+    inset 0 1px 0 rgba(255,255,255,0.30);
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 5px; flex: 0 0 auto;
+  transition: transform .25s cubic-bezier(.2,.8,.2,1);
 }
-.tab-nav .tab:hover { color: var(--text); }
-.tab-nav .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.brand-mark svg { display: block; width: 100%; height: 100%; }
+.brand:hover .brand-mark { transform: rotate(-4deg) scale(1.05); }
+.brand-words { display: flex; flex-direction: column; gap: 1px; line-height: 1; }
+.brand-words h1 {
+  font: 800 22px/1 ui-rounded, "SF Pro Rounded", system-ui;
+  color: var(--brand); letter-spacing: .3px; margin: 0;
+}
+.brand-he {
+  font: 700 14px/1 -apple-system, BlinkMacSystemFont,
+    "SF Hebrew", "Arial Hebrew", "Heebo", "Assistant", system-ui, sans-serif;
+  color: var(--muted); letter-spacing: .3px; direction: rtl; margin-top: 3px;
+}
+.engine-version { color: var(--faint); font-size: 12px; }
+.engine-version.engine-err { color: var(--red); }
+.app-header .spacer { margin-left: auto; }
+.icon-btn {
+  width: 36px; height: 36px; padding: 0; font-size: 15px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.theme-toggle { background: transparent; border: 1px solid var(--hairline-2); }
+.theme-toggle:hover { border-color: var(--accent); }
+
+.shell {
+  display: grid;
+  grid-template-columns: 196px minmax(0, 1fr);
+  gap: 22px; align-items: start; flex: 1;
+}
+.app-nav {
+  display: flex; flex-direction: column; gap: 5px;
+  position: sticky; top: 78px;
+}
+.app-nav .nav-btn {
+  display: flex; align-items: center; gap: 11px; width: 100%;
+  padding: 11px 13px; border-radius: 12px; text-align: left;
+  background: transparent; border: 1px solid transparent;
+  color: var(--muted); font-size: 14px; font-weight: 600; position: relative;
+  transition: color .2s ease, background-color .2s ease, border-color .2s ease,
+    transform .16s ease, box-shadow .2s ease;
+}
+.app-nav .nav-btn .rn-ico {
+  font-size: 17px; line-height: 1;
+  transition: transform .26s cubic-bezier(.34,1.7,.6,1);
+}
+.app-nav .nav-btn::before {
+  content: ""; position: absolute; left: 0; top: 50%;
+  width: 3px; height: 0; border-radius: 0 3px 3px 0;
+  background: var(--accent); transform: translateY(-50%);
+  transition: height .24s ease;
+}
+.app-nav .nav-btn:hover {
+  color: var(--text); background-color: var(--card-hi);
+  border-color: var(--hairline); transform: translateX(4px);
+}
+.app-nav .nav-btn:hover .rn-ico { transform: scale(1.22) rotate(-7deg); }
+.app-nav .nav-btn:hover::before { height: 54%; }
+.app-nav .nav-btn.active {
+  color: #fff; transform: none; border-color: transparent;
+  background: linear-gradient(135deg, var(--accent), #d4831a);
+  box-shadow: 0 8px 20px var(--accent-soft);
+}
+.app-nav .nav-btn.active::before { height: 0; }
+.app-nav .nav-btn.active .rn-ico { transform: scale(1.08); }
+
+.app-content { min-width: 0; }
+
+@media (max-width: 860px) {
+  .shell { grid-template-columns: 1fr; }
+  .app-nav { position: static; flex-direction: row; flex-wrap: wrap; }
+}
 
 /* --- Buttons ------------------------------------------------------------ */
 button {
