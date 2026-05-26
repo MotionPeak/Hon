@@ -215,6 +215,35 @@ describe('VouchersView — CRUD', () => {
       .toBeInTheDocument();
   });
 
+  it('Hi-Tech Zone card-level Sync extracts the code from externalId — no vault needed', async () => {
+    const user = userEvent.setup();
+    const post = vi.fn((_body: unknown) => ({ syncId: 'sync-htz-card' }));
+    const htzFixture = () => ({
+      vouchers: [{
+        id: 'v-htz', name: 'HTZ — gift', provider: 'Hi-Tech Zone',
+        balance: 470, currency: 'ILS',
+        notes: null, expiresOn: null, externalId: 'htz-12345678',
+        excluded: false, createdAt: '2026-05-01', updatedAt: '2026-05-01',
+      }],
+    });
+    // Note: NO saved-code mock. The flow should not call it.
+    installFetchMock({
+      'GET /api/vouchers': htzFixture,
+      'POST /api/vouchers/sync/htzone/start': post,
+      'GET /api/vouchers/sync/htzone/status/sync-htz-card': () => ({
+        status: 'awaiting-user-action', message: 'Opening…', error: null,
+        vouchers: null, finished: false,
+      }),
+    });
+    render(<VouchersView />);
+    const card = (await screen.findByText('HTZ — gift')).closest('.voucher-card')!;
+    await user.click(within(card as HTMLElement).getByRole('button', { name: /^sync$/i }));
+    await waitFor(() => expect(post).toHaveBeenCalled());
+    const body = post.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(body.code).toBe('12345678');
+    expect(body.remember).toBe(true);
+  });
+
   it('card-level Sync auto-starts using the saved credential (no manual form)', async () => {
     const user = userEvent.setup();
     const post = vi.fn((_body: unknown) => ({ syncId: 'sync-card-1' }));

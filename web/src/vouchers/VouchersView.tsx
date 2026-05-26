@@ -10,7 +10,7 @@ type AddMode =
   | { kind: 'closed' }
   | { kind: 'picker' }
   | { kind: 'custom' }
-  | { kind: SyncProviderId; autoStart?: boolean };
+  | { kind: SyncProviderId; autoStart?: boolean; prefill?: string };
 
 /** Map an existing voucher's provider string back to a sync ProviderId
  *  so the card-level Sync button knows which flow to re-run. */
@@ -19,6 +19,24 @@ function syncProviderFor(provider: string): SyncProviderId | null {
   if (p.includes('shufersal')) return 'shufersal';
   if (p.includes('buyme')) return 'buyme';
   if (p.includes('hi-tech') || p.includes('htzone') || p.includes('hi tech')) return 'htzone';
+  return null;
+}
+
+/** Extract a re-syncable credential from the voucher itself when possible —
+ *  the engine's HTZ scraper encodes the digital code in externalId as
+ *  `htz-<code>`, so a one-click re-sync needs no vault round-trip and no
+ *  prompt. Shufersal / BuyMe encode the card identifier (not the user's
+ *  phone / email), so this returns null for them — those still rely on the
+ *  vault's saved credential. */
+function credentialFromVoucher(
+  providerId: SyncProviderId,
+  externalId: string | null,
+): string | null {
+  if (!externalId) return null;
+  if (providerId === 'htzone') {
+    const m = externalId.match(/^htz-(\d{8,9})$/);
+    return m?.[1] ?? null;
+  }
   return null;
 }
 
@@ -180,7 +198,14 @@ export function VouchersView() {
             onEdit={() => setEditing(v)}
             onToggleExcluded={() => toggleExcluded(v)}
             onDelete={() => setDeleting(v)}
-            onSync={(providerId) => setAddMode({ kind: providerId, autoStart: true })}
+            onSync={(providerId) => {
+              const prefill = credentialFromVoucher(providerId, v.externalId);
+              setAddMode({
+                kind: providerId,
+                autoStart: true,
+                prefill: prefill ?? undefined,
+              });
+            }}
           />
         ))}
       </div>
@@ -332,13 +357,16 @@ function AddVoucherFlow({
         <VoucherFormModal onClose={onClose} onSaved={onSaved} />
       )}
       {mode.kind === 'shufersal' && (
-        <ShufersalSyncDialog onClose={onClose} onSaved={onSaved} autoStart={!!mode.autoStart} />
+        <ShufersalSyncDialog onClose={onClose} onSaved={onSaved}
+          autoStart={!!mode.autoStart} prefill={mode.prefill} />
       )}
       {mode.kind === 'buyme' && (
-        <BuyMeSyncDialog onClose={onClose} onSaved={onSaved} autoStart={!!mode.autoStart} />
+        <BuyMeSyncDialog onClose={onClose} onSaved={onSaved}
+          autoStart={!!mode.autoStart} prefill={mode.prefill} />
       )}
       {mode.kind === 'htzone' && (
-        <HtzoneSyncDialog onClose={onClose} onSaved={onSaved} autoStart={!!mode.autoStart} />
+        <HtzoneSyncDialog onClose={onClose} onSaved={onSaved}
+          autoStart={!!mode.autoStart} prefill={mode.prefill} />
       )}
     </>
   );
@@ -536,6 +564,10 @@ interface SyncDialogProps {
   onClose: () => void;
   onSaved: () => void | Promise<void>;
   autoStart?: boolean;
+  /** Credential to use without round-tripping the vault. The card-level
+   *  ↻ Sync passes this when it can derive the credential from the
+   *  voucher itself (e.g. HTZ's `htz-<code>` externalId). */
+  prefill?: string;
 }
 function ShufersalSyncDialog(p: SyncDialogProps) {
   return <ProviderSyncDialog cfg={PROVIDER_CONFIGS.shufersal} {...p} />;
@@ -548,23 +580,28 @@ function HtzoneSyncDialog(p: SyncDialogProps) {
 }
 
 function ProviderSyncDialog({
-  cfg, onClose, onSaved, autoStart = false,
+  cfg, onClose, onSaved, autoStart = false, prefill,
 }: {
   cfg: ProviderConfig;
   onClose: () => void;
   onSaved: () => void | Promise<void>;
   autoStart?: boolean;
+  prefill?: string;
 }) {
-  const [credential, setCredential] = useState('');
-  const [credentialLoaded, setCredentialLoaded] = useState(false);
+  const [credential, setCredential] = useState(prefill ?? '');
+  const [credentialLoaded, setCredentialLoaded] = useState(!!prefill);
   const [error, setError] = useState<string | null>(null);
   const [syncId, setSyncId] = useState<string | null>(null);
   const [status, setStatus] = useState<SyncStatus | null>(null);
   const [otp, setOtp] = useState('');
   const [otpSubmitting, setOtpSubmitting] = useState(false);
 
-  // Best-effort pre-fill of the credential from the vault.
+  // Best-effort pre-fill of the credential from the vault. Skipped when
+  // the caller passed an inline `prefill` (e.g. HTZ derived the code from
+  // voucher.externalId) — saves a round-trip and works even when the
+  // vault is locked.
   useEffect(() => {
+    if (prefill) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -577,7 +614,7 @@ function ProviderSyncDialog({
       } catch { if (!cancelled) setCredentialLoaded(true); }
     })();
     return () => { cancelled = true; };
-  }, [cfg.savedPath, cfg.credentialKey]);
+  }, [cfg.savedPath, cfg.credentialKey, prefill]);
 
   // Poll status while a sync is running.
   useEffect(() => {
