@@ -15,7 +15,8 @@
 //   7. Parse each visible card tile (brand, balance, last-4, expiry)
 
 import puppeteer, { type Browser, type Page } from 'puppeteer';
-import { mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
+import { join as joinPath } from 'node:path';
 import { join } from 'node:path';
 import { makeLog } from './log.js';
 
@@ -679,6 +680,18 @@ export async function scrapeBuyMeGiftCards(
   if (options.userDataDir) {
     try { mkdirSync(options.userDataDir, { recursive: true }); } catch {/* best effort */}
     sweepStaleProfileLocks(options.userDataDir);
+    // Identity check BEFORE the launch: if the profile carries cookies
+    // for a *different* email than what the user just supplied, the
+    // fastpath would silently harvest the OTHER account's cards. Wipe
+    // the profile so the engine is forced through the email + OTP
+    // login on the new account.
+    const emailMarkerPath = joinPath(options.userDataDir, 'last-email');
+    const lastEmail = readMarker(emailMarkerPath);
+    if (lastEmail && lastEmail !== normalisedEmail) {
+      buymeLog.info('profile.email.mismatch', { wipingProfile: true });
+      try { rmSync(options.userDataDir, { recursive: true, force: true }); } catch { /* best effort */ }
+      try { mkdirSync(options.userDataDir, { recursive: true }); } catch { /* best effort */ }
+    }
   }
   const browser: Browser = await puppeteer.launch({
     headless: options.headless ?? true,
@@ -707,9 +720,10 @@ export async function scrapeBuyMeGiftCards(
     });
 
     // Fast path: when the profile already has a valid BuyMe session,
-    // navigating to the wallet renders the gifts table directly. We try
-    // that first; if we land on a logged-out state (no table within a few
-    // seconds), fall through to the full email + OTP flow.
+    // navigating to the wallet renders the gifts table directly. The
+    // pre-launch identity check above wipes the profile when the email
+    // changed, so reaching this point with cookies implies the cookies
+    // belong to `normalisedEmail`.
     if (options.userDataDir) {
       buymeLog.info('fastpath.try', { url: BUYME_WALLET_URL });
       try {
@@ -732,6 +746,11 @@ export async function scrapeBuyMeGiftCards(
       }).catch(() => false);
       if (loggedIn) {
         buymeLog.info('fastpath.success');
+        // Refresh the email marker — same email, valid session.
+        writeMarker(
+          joinPath(options.userDataDir, 'last-email'),
+          normalisedEmail,
+        );
         return await harvestCardsAndFinish(page, options, done);
       }
       buymeLog.info('fastpath.miss', { landedUrl: page.url() });
@@ -908,6 +927,16 @@ export async function scrapeBuyMeGiftCards(
       buymeLog.warn('wallet.header.missing');
     }
 
+    // Full email + OTP login just completed and the wallet rendered —
+    // record which email the profile is now authenticated for so the
+    // next sync's pre-launch identity check (cf. above) can decide
+    // whether to keep the cookies or wipe and re-login.
+    if (options.userDataDir) {
+      writeMarker(
+        joinPath(options.userDataDir, 'last-email'),
+        normalisedEmail,
+      );
+    }
     return await harvestCardsAndFinish(page, options, done);
   } catch (err) {
     buymeLog.error('scrape.threw', {
@@ -948,6 +977,23 @@ async function harvestCardsAndFinish(
 // clean shutdown. A crashed/killed previous run leaves them behind and the
 // next launch errors with "browser is already running for <dir>". Sweep
 // unconditionally — if Chrome IS still running it'll recreate them.
+/** Read a small one-line marker file (e.g. the last-used credential
+ *  for a scraper profile). Returns null when missing or unreadable. */
+function readMarker(path: string): string | null {
+  try {
+    const v = readFileSync(path, 'utf8').trim();
+    return v || null;
+  } catch { return null; }
+}
+
+/** Write a one-line marker file. Best-effort: a failure only means the
+ *  next run won't be able to compare identity (worst case: cookies get
+ *  reused once with a mismatched email — caught by the next run anyway
+ *  once writeMarker succeeds). */
+function writeMarker(path: string, value: string): void {
+  try { writeFileSync(path, value, 'utf8'); } catch { /* best effort */ }
+}
+
 function sweepStaleProfileLocks(profileDir: string): void {
   const targets = [
     'DevToolsActivePort',
