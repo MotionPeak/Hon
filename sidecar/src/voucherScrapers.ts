@@ -1180,12 +1180,24 @@ export async function scrapeHitechZoneBalance(
     ...(process.env.HON_BROWSER_NO_SANDBOX === '1'
       ? ['--no-sandbox', '--disable-setuid-sandbox'] : []),
     '--window-size=900,720',
+    // Hide the "Chrome is being controlled by automated test software"
+    // banner AND the navigator.webdriver=true signal that Cloudflare's
+    // Turnstile checks. Without these, htz.mltp.co.il (now Cloudflare-
+    // protected) parks the browser on the "Performing security
+    // verification" interstitial indefinitely and #eightDigit never
+    // renders. The flag has been in stable Chrome since 89.
+    '--disable-blink-features=AutomationControlled',
   ];
   const launchOpts = {
     headless: false as const,
     defaultViewport: null,
     userDataDir: options.userDataDir,
     args: launchArgs,
+    // Drop the default --enable-automation switch so the info bar and
+    // the related JS flags (navigator.webdriver, window.cdc_*) are not
+    // injected. Combined with the args flag above this matches what
+    // most "stealth" plugins do as their first step.
+    ignoreDefaultArgs: ['--enable-automation'],
   };
   let browser: Browser;
   try {
@@ -1215,6 +1227,16 @@ export async function scrapeHitechZoneBalance(
         // @ts-expect-error — runtime polyfill
         globalThis.__name = (fn: unknown) => fn;
       }
+    });
+    // Cloudflare's Turnstile reads navigator.webdriver before letting the
+    // page render — the launch-args trick covers most Chrome builds but
+    // some versions still expose the getter. Override it here too.
+    await page.evaluateOnNewDocument(() => {
+      try {
+        Object.defineProperty(Navigator.prototype, 'webdriver', {
+          get: () => undefined, configurable: true,
+        });
+      } catch { /* property already shadowed */ }
     });
 
     htzLog.info('navigate', { url: HTZ_GETBALANCE_URL });
