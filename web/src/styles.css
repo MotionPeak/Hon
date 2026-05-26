@@ -515,6 +515,47 @@ button.mini { padding: 5px 11px; font-size: 12px; }
   color: var(--red); white-space: nowrap; flex: none;
 }
 .txn-amt.pos { color: var(--green); }
+.txn[role="button"] { cursor: pointer; transition: background-color .14s; }
+.txn[role="button"]:hover { background-color: var(--card-hi); }
+.txn[role="button"]:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 8px;
+}
+
+.cat-pick-section + .cat-pick-section { margin-top: 14px; }
+.cat-pick-head {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--muted); margin-bottom: 7px;
+}
+.cat-pick-grid {
+  display: grid; gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+}
+.cat-pick-tile {
+  display: flex; flex-direction: column; align-items: center; gap: 5px;
+  padding: 11px 6px 9px; border-radius: 12px;
+  background: var(--card-hi); border: 1px solid transparent;
+  border-top: 3px solid var(--cat-color, var(--hairline-2));
+  color: var(--text); cursor: pointer; user-select: none;
+  transition: border-color .14s, transform .14s, background-color .14s;
+}
+.cat-pick-tile:hover {
+  border-color: var(--indigo); transform: translateY(-1px);
+  background: var(--card);
+}
+.cat-pick-tile.on {
+  border-color: var(--indigo); background: var(--indigo-soft);
+}
+.cat-pick-emoji {
+  width: 32px; height: 32px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--cat-color) 18%, transparent);
+  font-size: 17px; line-height: 1;
+}
+.cat-pick-name {
+  font-size: 11.5px; font-weight: 600; text-align: center;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  max-width: 100%;
+}
 
 /* --- Loans view ------------------------------------------------------- */
 .loans-view { max-width: 1100px; margin: 0 auto; }

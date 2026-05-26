@@ -1,11 +1,16 @@
-import { useEffect, useMemo, useState } from 'react';
-import { api } from '../api';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+import { api, ApiError } from '../api';
 import { cycleKey, cycleLabel, currentCycleKey } from '../cycle';
 import { money } from '../format';
 import { useSettings } from '../settings/useSettings';
 import type { Account } from '../accounts/types';
 import type { Category } from '../settings/CategoriesPanel';
 import type { Transaction } from './types';
+
+function ModalPortal({ children }: { children: ReactNode }) {
+  return createPortal(children, document.body);
+}
 
 function fmtDate(dateStr: string): string {
   const d = new Date(dateStr);
@@ -19,20 +24,24 @@ export function ActivityView() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [month, setMonth] = useState<string | null>(null);
+  const [moving, setMoving] = useState<Transaction | null>(null);
 
-  useEffect(() => {
-    Promise.all([
-      api<{ transactions: Transaction[] }>('/transactions'),
-      api<{ accounts: Account[] }>('/accounts'),
-      api<{ categories: Category[] }>('/categories'),
-    ]).then(([t, a, c]) => {
+  const refresh = useCallback(async () => {
+    try {
+      const [t, a, c] = await Promise.all([
+        api<{ transactions: Transaction[] }>('/transactions'),
+        api<{ accounts: Account[] }>('/accounts'),
+        api<{ categories: Category[] }>('/categories'),
+      ]);
       setTransactions(t.transactions);
       setAccounts(a.accounts);
       setCategories(c.categories);
-    }).catch(() => {
+    } catch {
       setTransactions([]);
-    });
+    }
   }, []);
+
+  useEffect(() => { void refresh(); }, [refresh]);
 
   // The list of months that actually have transactions, newest first. Refund
   // rows (refundForId) and card-bill totals are excluded — same logic as the
@@ -153,7 +162,19 @@ export function ActivityView() {
                     const acct = accountById.get(t.accountId);
                     const pos = t.amount > 0;
                     return (
-                      <li key={t.id} className="txn">
+                      <li
+                        key={t.id}
+                        className="txn"
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => setMoving(t)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            setMoving(t);
+                          }
+                        }}
+                      >
                         <span
                           className="txn-icon"
                           style={{ background: cat ? cat.color + '22' : 'var(--card-hi)' }}
@@ -184,6 +205,98 @@ export function ActivityView() {
           })}
         </div>
       )}
+      {moving && (
+        <CategoryPickerModal
+          transaction={moving}
+          categories={categories}
+          onClose={() => setMoving(null)}
+          onPicked={async (cat) => {
+            await api(
+              `/transactions/${encodeURIComponent(moving.id)}/category`,
+              'PATCH',
+              { category: cat },
+            );
+            setMoving(null);
+            await refresh();
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+interface CategoryPickerProps {
+  transaction: Transaction;
+  categories: Category[];
+  onClose: () => void;
+  onPicked: (category: string) => void | Promise<void>;
+}
+
+function CategoryPickerModal(
+  { transaction, categories, onClose, onPicked }: CategoryPickerProps,
+) {
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const current = transaction.category ?? 'Other';
+
+  // Group by catGroup; render in income → essential → fixed → variable order.
+  const groupOrder: Category['catGroup'][] = ['income', 'essential', 'fixed', 'variable'];
+  const grouped: Record<Category['catGroup'], Category[]> = {
+    income: [], essential: [], fixed: [], variable: [],
+  };
+  for (const c of categories) grouped[c.catGroup].push(c);
+  for (const g of groupOrder) {
+    grouped[g].sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
+  }
+  const pick = async (name: string) => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await onPicked(name);
+    } catch (e) {
+      setBusy(false);
+      setError(e instanceof ApiError ? e.message : String(e));
+    }
+  };
+  return (
+    <ModalPortal>
+      <div className="overlay">
+        <div role="dialog" aria-label="Move to category" className="modal">
+          <h2>Move to category</h2>
+          <p>
+            <strong>{transaction.description}</strong> · {money(transaction.amount, transaction.currency)}
+          </p>
+          {groupOrder.map((g) => grouped[g].length === 0 ? null : (
+            <div key={g} className="cat-pick-section">
+              <div className="cat-pick-head">{g}</div>
+              <div className="cat-pick-grid">
+                {grouped[g].map((c) => {
+                  const selected = c.name === current;
+                  return (
+                    <button
+                      key={c.name}
+                      type="button"
+                      className={`cat-pick-tile${selected ? ' on' : ''}`}
+                      aria-pressed={selected}
+                      style={{ '--cat-color': c.color } as React.CSSProperties}
+                      onClick={() => void pick(c.name)}
+                      disabled={busy}
+                    >
+                      <span className="cat-pick-emoji">{c.emoji}</span>
+                      <span className="cat-pick-name">{c.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+          {error && <div className="modal-err">{error}</div>}
+          <div className="modal-actions">
+            <button type="button" onClick={onClose}>Cancel</button>
+          </div>
+        </div>
+      </div>
+    </ModalPortal>
   );
 }

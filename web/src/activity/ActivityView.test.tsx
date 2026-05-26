@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ActivityView } from './ActivityView';
 import { SettingsProvider } from '../settings/useSettings';
@@ -139,3 +139,60 @@ describe('ActivityView — read-only', () => {
     expect(screen.getByRole('heading', { name: /other/i })).toBeInTheDocument();
   });
 });
+
+describe('ActivityView — category move', () => {
+  it('clicking a row opens a category picker showing all categories', async () => {
+    const user = userEvent.setup();
+    installFetchMock(FULL);
+    renderView();
+    await user.click(await screen.findByText('Aroma Coffee'));
+    const dialog = screen.getByRole('dialog', { name: /move to category/i });
+    expect(within(dialog).getByRole('button', { name: /Groceries/ })).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: /Coffee/ })).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: /Salary/ })).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: /Other/ })).toBeInTheDocument();
+  });
+
+  it('marks the current category as selected in the picker', async () => {
+    const user = userEvent.setup();
+    installFetchMock(FULL);
+    renderView();
+    await user.click(await screen.findByText('Aroma Coffee'));
+    const dialog = screen.getByRole('dialog', { name: /move to category/i });
+    expect(within(dialog).getByRole('button', { name: /Coffee/ }))
+      .toHaveAttribute('aria-pressed', 'true');
+    expect(within(dialog).getByRole('button', { name: /Groceries/ }))
+      .toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('picking a category PATCHes /transactions/:id/category and refetches', async () => {
+    const user = userEvent.setup();
+    const patch = vi.fn((_body: unknown) => ({ ok: true }));
+    const get = vi.fn(() => TXNS);
+    installFetchMock({
+      ...FULL,
+      'GET /api/transactions': get,
+      'PATCH /api/transactions/t-1/category': patch,
+    });
+    renderView();
+    await user.click(await screen.findByText('Aroma Coffee'));
+    const dialog = screen.getByRole('dialog', { name: /move to category/i });
+    await user.click(within(dialog).getByRole('button', { name: /Groceries/ }));
+    await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
+    expect(patch.mock.calls[0]?.[0]).toEqual({ category: 'Groceries' });
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole('dialog', { name: /move to category/i })).not.toBeInTheDocument();
+  });
+
+  it('cancel closes the picker without calling the engine', async () => {
+    const user = userEvent.setup();
+    const patch = vi.fn();
+    installFetchMock({ ...FULL, 'PATCH /api/transactions/t-1/category': patch });
+    renderView();
+    await user.click(await screen.findByText('Aroma Coffee'));
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: /cancel/i }));
+    expect(screen.queryByRole('dialog', { name: /move to category/i })).not.toBeInTheDocument();
+    expect(patch).not.toHaveBeenCalled();
+  });
+});
+
