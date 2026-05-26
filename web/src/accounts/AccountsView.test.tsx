@@ -686,6 +686,72 @@ describe('AccountsView — add connection (picker + bank/card form)', () => {
     expect(within(form).getByLabelText(/currency/i)).toBeInTheDocument();
   });
 
+  it('the picker has a "Manual loan" option', async () => {
+    const user = userEvent.setup();
+    installFetchMock({ ...FULL, 'GET /api/companies': () => COMPANIES_FULL });
+    render(<AccountsView />);
+    await user.click(await screen.findByRole('button', { name: /add asset/i }));
+    const dialog = screen.getByRole('dialog', { name: /add an asset/i });
+    expect(within(dialog).getByText(/manual loan/i)).toBeInTheDocument();
+  });
+
+  it('picking manual loan opens a form with required fields', async () => {
+    const user = userEvent.setup();
+    installFetchMock({ ...FULL, 'GET /api/companies': () => COMPANIES_FULL });
+    render(<AccountsView />);
+    await user.click(await screen.findByRole('button', { name: /add asset/i }));
+    const picker = screen.getByRole('dialog', { name: /add an asset/i });
+    await user.click(within(picker).getByText(/manual loan/i));
+    const form = screen.getByRole('dialog', { name: /add a loan/i });
+    expect(within(form).getByLabelText(/name/i)).toBeInTheDocument();
+    expect(within(form).getByLabelText('Principal')).toBeInTheDocument();
+    expect(within(form).getByLabelText(/start date/i)).toBeInTheDocument();
+    expect(within(form).getByLabelText(/term/i)).toBeInTheDocument();
+    expect(within(form).getByLabelText(/rate.*%/i)).toBeInTheDocument();
+    // Rate-track radios — all four engine-supported tracks.
+    expect(within(form).getByRole('radio', { name: 'Fixed' })).toBeInTheDocument();
+    expect(within(form).getByRole('radio', { name: 'Prime' })).toBeInTheDocument();
+    expect(within(form).getByRole('radio', { name: 'CPI-linked fixed' })).toBeInTheDocument();
+    expect(within(form).getByRole('radio', { name: 'CPI-linked prime' })).toBeInTheDocument();
+  });
+
+  it('save POSTs /loans with the full body and refetches', async () => {
+    const user = userEvent.setup();
+    const post = vi.fn((_body: unknown) => ({ loan: { id: 'new-l' } }));
+    const get = vi.fn(() => LOANS);
+    installFetchMock({
+      ...FULL,
+      'GET /api/companies': () => COMPANIES_FULL,
+      'GET /api/loans': get,
+      'POST /api/loans': post,
+    });
+    render(<AccountsView />);
+    await user.click(await screen.findByRole('button', { name: /add asset/i }));
+    const picker = screen.getByRole('dialog', { name: /add an asset/i });
+    await user.click(within(picker).getByText(/manual loan/i));
+    const form = screen.getByRole('dialog', { name: /add a loan/i });
+    await user.type(within(form).getByLabelText(/name/i), 'Car loan');
+    await user.type(within(form).getByLabelText('Principal'), '60000');
+    await user.clear(within(form).getByLabelText(/start date/i));
+    await user.type(within(form).getByLabelText(/start date/i), '2024-01-01');
+    await user.clear(within(form).getByLabelText(/term/i));
+    await user.type(within(form).getByLabelText(/term/i), '36');
+    await user.click(within(form).getByRole('radio', { name: 'Prime' }));
+    await user.type(within(form).getByLabelText(/rate.*%/i), '1.5');
+    await user.click(within(form).getByRole('button', { name: /add$/i }));
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+    expect(post.mock.calls[0]?.[0]).toMatchObject({
+      name: 'Car loan',
+      principal: 60000,
+      startDate: '2024-01-01',
+      termMonths: 36,
+      rateType: 'prime',
+      rateValue: 1.5,
+      currency: 'ILS',
+    });
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+  });
+
   it('save POSTs /assets with kind/name/value/currency and refetches', async () => {
     const user = userEvent.setup();
     const post = vi.fn((_body: unknown) => ({ asset: {

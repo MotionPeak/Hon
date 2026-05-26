@@ -101,11 +101,13 @@ export function AccountsView() {
   const [editingLoan, setEditingLoan] = useState<Loan | null>(null);
   const [removingLoan, setRemovingLoan] = useState<Loan | null>(null);
   // Add-asset flow:
-  //   null         — closed
-  //   'picker'     — list of companies + a "Manual asset" row
-  //   Company      — credential form for a bank/card provider
-  //   'manual'     — form for a hand-entered asset (car/property/cash/etc)
-  const [addFlow, setAddFlow] = useState<null | 'picker' | 'manual' | Company>(null);
+  //   null            — closed
+  //   'picker'        — list of companies + manual-asset / manual-loan rows
+  //   Company         — credential form for a bank/card provider
+  //   'manual-asset'  — form for a hand-entered asset (car/property/cash/…)
+  //   'manual-loan'   — form for a hand-entered loan (Spitzer amortisation)
+  type AddFlow = null | 'picker' | 'manual-asset' | 'manual-loan' | Company;
+  const [addFlow, setAddFlow] = useState<AddFlow>(null);
 
   const toggleHoldings = useCallback((accountId: string) => {
     setExpandedHoldings((prev) => ({ ...prev, [accountId]: !prev[accountId] }));
@@ -363,17 +365,24 @@ export function AccountsView() {
         <AddConnectionPicker
           companies={data.companies}
           onPickCompany={(c) => setAddFlow(c)}
-          onPickManual={() => setAddFlow('manual')}
+          onPickManualAsset={() => setAddFlow('manual-asset')}
+          onPickManualLoan={() => setAddFlow('manual-loan')}
           onClose={() => setAddFlow(null)}
         />
       )}
-      {addFlow === 'manual' && (
+      {addFlow === 'manual-asset' && (
         <AddManualAssetForm
           onClose={() => setAddFlow(null)}
           onSaved={async () => { setAddFlow(null); await refresh(); }}
         />
       )}
-      {addFlow !== null && addFlow !== 'picker' && addFlow !== 'manual' && (
+      {addFlow === 'manual-loan' && (
+        <AddManualLoanForm
+          onClose={() => setAddFlow(null)}
+          onSaved={async () => { setAddFlow(null); await refresh(); }}
+        />
+      )}
+      {typeof addFlow === 'object' && addFlow !== null && (
         <AddConnectionForm
           company={addFlow}
           onClose={() => setAddFlow(null)}
@@ -945,12 +954,14 @@ function ConfirmRemoveDialog({ title, body, onClose, onConfirmed }: ConfirmRemov
 interface AddConnectionPickerProps {
   companies: Company[];
   onPickCompany: (company: Company) => void;
-  onPickManual: () => void;
+  onPickManualAsset: () => void;
+  onPickManualLoan: () => void;
   onClose: () => void;
 }
 
 function AddConnectionPicker(
-  { companies, onPickCompany, onPickManual, onClose }: AddConnectionPickerProps,
+  { companies, onPickCompany, onPickManualAsset, onPickManualLoan, onClose }:
+    AddConnectionPickerProps,
 ) {
   const [query, setQuery] = useState('');
   // Only bank + card flows are handled here; brokerage (SnapTrade) and
@@ -958,15 +969,16 @@ function AddConnectionPicker(
   const supported = companies.filter((c) => c.type === 'bank' || c.type === 'card');
   const q = query.toLowerCase();
   const filtered = supported.filter((c) => c.name.toLowerCase().includes(q));
-  // Show the manual-asset row when the query matches "manual" / "asset" /
-  // empty, so the search filter doesn't hide it confusingly.
-  const showManual = q === '' || 'manual asset'.includes(q);
+  // Show the manual-asset / manual-loan rows when the query matches
+  // "manual"/"asset"/"loan"/empty, so the filter doesn't hide them.
+  const showManualAsset = q === '' || 'manual asset'.includes(q);
+  const showManualLoan = q === '' || 'manual loan'.includes(q);
   return (
     <ModalPortal>
       <div className="overlay">
         <div role="dialog" aria-label="Add an asset" className="modal">
           <h2>Add an asset</h2>
-          <p>Pick a provider, or add a hand-entered asset.</p>
+          <p>Pick a provider, or add a hand-entered asset or loan.</p>
           <label className="field">
             <span>Search</span>
             <input
@@ -992,12 +1004,12 @@ function AddConnectionPicker(
                 </button>
               </li>
             ))}
-            {showManual && (
+            {showManualAsset && (
               <li>
                 <button
                   type="button"
                   className="add-picker-row"
-                  onClick={onPickManual}
+                  onClick={onPickManualAsset}
                 >
                   <span className="add-picker-emoji">💎</span>
                   <span className="add-picker-name">Manual asset</span>
@@ -1005,7 +1017,20 @@ function AddConnectionPicker(
                 </button>
               </li>
             )}
-            {filtered.length === 0 && !showManual && (
+            {showManualLoan && (
+              <li>
+                <button
+                  type="button"
+                  className="add-picker-row"
+                  onClick={onPickManualLoan}
+                >
+                  <span className="add-picker-emoji">📉</span>
+                  <span className="add-picker-name">Manual loan</span>
+                  <span className="add-picker-sub">fixed · prime · CPI-linked</span>
+                </button>
+              </li>
+            )}
+            {filtered.length === 0 && !showManualAsset && !showManualLoan && (
               <li className="add-picker-empty">No providers match.</li>
             )}
           </ul>
@@ -1167,6 +1192,163 @@ function AddConnectionForm({ company, onClose, onSaved }: AddConnectionFormProps
               />
             </label>
           ))}
+          {error && <div className="modal-err">{error}</div>}
+          <div className="modal-actions">
+            <button type="button" onClick={onClose}>Cancel</button>
+            <button type="button" className="primary" onClick={submit}>Add</button>
+          </div>
+        </div>
+      </div>
+    </ModalPortal>
+  );
+}
+
+type RateType = 'fixed' | 'prime' | 'cpi-fixed' | 'cpi-prime';
+const RATE_TRACKS: Array<[RateType, string, string]> = [
+  ['fixed',     'Fixed',          'A fixed annual rate, not linked to anything.'],
+  ['prime',     'Prime',          'Margin over the Bank of Israel prime rate.'],
+  ['cpi-fixed', 'CPI-linked fixed', 'Principal indexed to CPI; fixed-rate spread on top.'],
+  ['cpi-prime', 'CPI-linked prime', 'Principal indexed to CPI; prime+margin on top.'],
+];
+
+interface AddManualLoanFormProps {
+  onClose: () => void;
+  onSaved: () => void | Promise<void>;
+}
+
+function AddManualLoanForm({ onClose, onSaved }: AddManualLoanFormProps) {
+  const today = new Date().toISOString().slice(0, 10);
+  const [name, setName] = useState('');
+  const [principal, setPrincipal] = useState('');
+  const [startDate, setStartDate] = useState(today);
+  const [termMonths, setTermMonths] = useState('');
+  const [rateType, setRateType] = useState<RateType>('fixed');
+  const [rateValue, setRateValue] = useState('');
+  const [currency, setCurrency] = useState('ILS');
+  const [notes, setNotes] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const submit = async () => {
+    setError(null);
+    if (!name.trim()) { setError('Name is required.'); return; }
+    const p = Number(principal);
+    if (!Number.isFinite(p) || p <= 0) { setError('Principal must be a positive number.'); return; }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate)) {
+      setError('Start date must be YYYY-MM-DD.'); return;
+    }
+    const t = Math.round(Number(termMonths));
+    if (!Number.isFinite(t) || t <= 0) { setError('Term must be a positive integer.'); return; }
+    const r = Number(rateValue);
+    if (!Number.isFinite(r)) { setError('Rate must be a number.'); return; }
+    try {
+      await api('/loans', 'POST', {
+        name: name.trim(),
+        principal: p,
+        startDate,
+        termMonths: t,
+        rateType,
+        rateValue: r,
+        currency,
+        notes: notes.trim() || null,
+      });
+      await onSaved();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e));
+    }
+  };
+  return (
+    <ModalPortal>
+      <div className="overlay">
+        <div role="dialog" aria-label="Add a loan" className="modal">
+          <h2>Add a loan</h2>
+          <p>
+            Hon computes the Spitzer schedule, monthly payment, and payoff
+            date from the principal, term, and rate.
+          </p>
+          <label className="field">
+            <span>Name</span>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Mortgage, car loan…"
+              autoComplete="off"
+            />
+          </label>
+          <label className="field">
+            <span>Principal</span>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              value={principal}
+              onChange={(e) => setPrincipal(e.target.value)}
+              placeholder="0"
+            />
+          </label>
+          <label className="field">
+            <span>Start date</span>
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+            />
+          </label>
+          <label className="field">
+            <span>Term (months)</span>
+            <input
+              type="number"
+              step="1"
+              min="1"
+              value={termMonths}
+              onChange={(e) => setTermMonths(e.target.value)}
+              placeholder="240"
+            />
+          </label>
+          <fieldset className="field">
+            <legend>Track</legend>
+            {RATE_TRACKS.map(([id, label, sub]) => (
+              <label key={id} className={`ce-group${rateType === id ? ' on' : ''}`}>
+                <input
+                  type="radio"
+                  name="rate-track"
+                  value={id}
+                  checked={rateType === id}
+                  onChange={() => setRateType(id)}
+                  aria-label={label}
+                />
+                <span className="ce-group-name">{label}</span>
+                <span className="ce-group-sub">{sub}</span>
+              </label>
+            ))}
+          </fieldset>
+          <label className="field">
+            <span>Rate (% annual)</span>
+            <input
+              type="number"
+              step="0.01"
+              value={rateValue}
+              onChange={(e) => setRateValue(e.target.value)}
+              placeholder={rateType === 'prime' || rateType === 'cpi-prime'
+                ? 'Margin over prime'
+                : 'Annual %'}
+            />
+          </label>
+          <label className="field">
+            <span>Currency</span>
+            <select value={currency} onChange={(e) => setCurrency(e.target.value)}>
+              <option>ILS</option><option>USD</option>
+              <option>EUR</option><option>GBP</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>Notes</span>
+            <input
+              type="text"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Optional"
+            />
+          </label>
           {error && <div className="modal-err">{error}</div>}
           <div className="modal-actions">
             <button type="button" onClick={onClose}>Cancel</button>
