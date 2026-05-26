@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+import { render, screen, within, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { InsightsView } from './InsightsView';
 import { SettingsProvider } from '../settings/useSettings';
@@ -239,6 +239,99 @@ const EMPTY_BROKERAGE = {
     performance: [], ilsRates: { USD: 3.7, EUR: 4.05 },
   }),
 };
+
+describe('InsightsView — AI analysis card', () => {
+  it('renders an AI analysis card with a Generate button in idle state', async () => {
+    installFetchMock({
+      'GET /api/transactions': () => ({
+        transactions: [tx({ id: 't1', amount: -250 })],
+      }),
+      'GET /api/categories': () => CATEGORIES,
+      'GET /api/insights': () => ({
+        state: 'idle', text: '', generatedAt: null,
+        message: 'No insights generated yet.',
+      }),
+    });
+    renderView();
+    const card = await screen.findByTestId('ai-analysis');
+    expect(within(card).getByText(/AI analysis/i)).toBeInTheDocument();
+    expect(within(card).getByRole('button', { name: /^Generate$/i })).toBeInTheDocument();
+    expect(within(card).getByText(/no analysis yet/i)).toBeInTheDocument();
+  });
+
+  it('clicking Generate POSTs /api/insights and starts polling', async () => {
+    const user = userEvent.setup();
+    const post = vi.fn(() => ({ ok: true }));
+    let statusCalls = 0;
+    installFetchMock({
+      'GET /api/transactions': () => ({
+        transactions: [tx({ id: 't1', amount: -250 })],
+      }),
+      'GET /api/categories': () => CATEGORIES,
+      'GET /api/insights': () => {
+        statusCalls += 1;
+        if (statusCalls === 1) {
+          return { state: 'idle', text: '', generatedAt: null, message: '' };
+        }
+        return {
+          state: 'ready', generatedAt: '2026-05-27T00:00:00Z', message: '',
+          text: 'WIN: Groceries are down 20% vs last month.\n' +
+                'WATCH: Dining jumped 40%.\n' +
+                'TIP: Set a Dining budget around 800 ILS.',
+        };
+      },
+      'POST /api/insights': post,
+    });
+    renderView();
+    const card = await screen.findByTestId('ai-analysis');
+    await user.click(within(card).getByRole('button', { name: /^Generate$/i }));
+    await waitFor(() => expect(post).toHaveBeenCalled());
+    // Poll picks up the ready state.
+    expect(
+      await within(card).findByText(/Groceries are down 20%/i, {}, { timeout: 4000 }),
+    ).toBeInTheDocument();
+    expect(within(card).getByText(/Dining jumped 40%/i)).toBeInTheDocument();
+    expect(within(card).getByText(/Set a Dining budget/i)).toBeInTheDocument();
+    // Button reads "Regenerate" once ready.
+    expect(within(card).getByRole('button', { name: /Regenerate/i })).toBeInTheDocument();
+  });
+
+  it('shows a shimmer skeleton while the model is generating', async () => {
+    installFetchMock({
+      'GET /api/transactions': () => ({
+        transactions: [tx({ id: 't1', amount: -250 })],
+      }),
+      'GET /api/categories': () => CATEGORIES,
+      'GET /api/insights': () => ({
+        state: 'generating', text: '', generatedAt: null,
+        message: 'Generating insights…',
+      }),
+    });
+    renderView();
+    const card = await screen.findByTestId('ai-analysis');
+    expect(await within(card).findByTestId('ai-skeleton')).toBeInTheDocument();
+    // Generate button is disabled while generating.
+    expect(within(card).getByRole('button', { name: /^Generate$/i })).toBeDisabled();
+  });
+
+  it('error state surfaces the engine message', async () => {
+    installFetchMock({
+      'GET /api/transactions': () => ({
+        transactions: [tx({ id: 't1', amount: -250 })],
+      }),
+      'GET /api/categories': () => CATEGORIES,
+      'GET /api/insights': () => ({
+        state: 'error', text: '', generatedAt: null,
+        message: 'Set up an AI model first to generate insights.',
+      }),
+    });
+    renderView();
+    const card = await screen.findByTestId('ai-analysis');
+    expect(
+      await within(card).findByText(/set up an AI model first/i),
+    ).toBeInTheDocument();
+  });
+});
 
 describe('InsightsView — Brokerage sub-tab', () => {
   it('renders a tabs strip with Spending and Brokerage', async () => {

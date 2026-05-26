@@ -1635,6 +1635,57 @@ button.mini { padding: 5px 11px; font-size: 12px; }
   font-size: 11px; color: var(--faint); margin: 6px 0 0;
 }
 
+/* --- Insights AI analysis card (lifted from legacy app.html) -------- */
+.ai-card-wrap .ai-head {
+  display: flex; align-items: center; gap: 10px;
+}
+.ai-list {
+  display: flex; flex-direction: column; gap: 9px; margin-top: 13px;
+}
+.ai-card {
+  display: flex; gap: 11px; padding: 11px 13px; border-radius: 12px;
+  background: var(--card-hi); border-left: 3px solid var(--faint);
+  animation: ai-in .45s cubic-bezier(.2,.8,.2,1) both;
+}
+.ai-card.win   { border-left-color: var(--green); }
+.ai-card.watch { border-left-color: var(--red); }
+.ai-card.trend { border-left-color: var(--accent); }
+.ai-card.tip   { border-left-color: var(--amber); }
+.ai-ico {
+  width: 27px; height: 27px; border-radius: 8px; flex: 0 0 auto;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px;
+}
+.ai-card.win   .ai-ico { background: rgba(61,220,132,0.16); }
+.ai-card.watch .ai-ico { background: rgba(244,104,90,0.16); }
+.ai-card.trend .ai-ico { background: var(--accent-soft); }
+.ai-card.tip   .ai-ico { background: rgba(245,181,74,0.18); }
+.ai-text {
+  font-size: 12.8px; line-height: 1.5; align-self: center;
+}
+.ai-empty {
+  text-align: center; padding: 18px 12px; color: var(--faint);
+  font-size: 12.5px; line-height: 1.55;
+}
+.ai-skel {
+  display: flex; flex-direction: column; gap: 9px; margin-top: 13px;
+}
+.ai-skel-row {
+  height: 49px; border-radius: 12px;
+  background: linear-gradient(90deg,
+    var(--card-hi) 25%, var(--bg-elev) 50%, var(--card-hi) 75%);
+  background-size: 300% 100%;
+  animation: ai-shimmer 1.3s linear infinite;
+}
+@keyframes ai-shimmer {
+  from { background-position: 150% 0; }
+  to   { background-position: -150% 0; }
+}
+@keyframes ai-in {
+  from { opacity: 0; transform: translateY(7px); }
+  to   { opacity: 1; transform: none; }
+}
+
 /* --- Voucher source picker + provider sync dialog ------------------- */
 .vc-pick-list {
   list-style: none; padding: 0; margin: 0;

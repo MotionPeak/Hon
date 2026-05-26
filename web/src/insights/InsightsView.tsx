@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import { cycleKey, cycleLabel } from '../cycle';
 import { money } from '../format';
@@ -92,8 +92,133 @@ export function InsightsView() {
           monthStartDay={settings.monthStartDay}
         />
       )}
+      {subTab === 'spending' && <AiAnalysisCard />}
       {subTab === 'brokerage' && <BrokerageSubTab />}
     </div>
+  );
+}
+
+interface InsightsStatus {
+  state: 'idle' | 'generating' | 'ready' | 'error';
+  text: string;
+  generatedAt: string | null;
+  message: string;
+}
+
+type InsightKind = 'win' | 'watch' | 'trend' | 'tip';
+const AI_ICON: Record<InsightKind, string> = {
+  win: '🎉', watch: '⚠️', trend: '📈', tip: '💡',
+};
+const AI_TAG_MAP: Record<string, InsightKind> = {
+  WIN: 'win', WATCH: 'watch', TREND: 'trend', TIP: 'tip',
+};
+
+function inferInsightKind(s: string): InsightKind {
+  const t = s.toLowerCase();
+  if (/over budget|overspent|overspend|exceeded|spike|jumped|climbed|increase|higher|rose|watch out/.test(t)) return 'watch';
+  if (/under budget|saved|still left|on track|good job|well done|nicely|great|dropped|reduced|lower than|less than/.test(t)) return 'win';
+  if (/\btry |\bconsider|\bcould |\bsuggest|\brecommend|set a budget|cut back|aim to/.test(t)) return 'tip';
+  return 'trend';
+}
+
+function parseInsights(text: string): { kind: InsightKind; text: string }[] {
+  return String(text).split(/\n+/).map((raw) => {
+    const s = raw.trim().replace(/^[-•*\d.)\s]+/, '').trim();
+    if (!s) return null;
+    const m = s.match(/^([A-Za-z]{3,6})\s*[:.—-]\s+(.+)$/);
+    if (m && AI_TAG_MAP[m[1]!.toUpperCase()]) {
+      return { kind: AI_TAG_MAP[m[1]!.toUpperCase()]!, text: m[2]!.trim() };
+    }
+    return { kind: inferInsightKind(s), text: s };
+  }).filter((x): x is { kind: InsightKind; text: string } => x !== null);
+}
+
+function AiAnalysisCard() {
+  const [status, setStatus] = useState<InsightsStatus | null>(null);
+
+  const fetchStatus = useCallback(async () => {
+    try {
+      const s = await api<InsightsStatus>('/insights');
+      setStatus(s);
+      return s;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  useEffect(() => { void fetchStatus(); }, [fetchStatus]);
+
+  // Poll while the model is mid-generation.
+  useEffect(() => {
+    if (status?.state !== 'generating') return;
+    const handle = setInterval(() => { void fetchStatus(); }, 1500);
+    return () => clearInterval(handle);
+  }, [status?.state, fetchStatus]);
+
+  const generate = async (): Promise<void> => {
+    try {
+      await api('/insights', 'POST');
+      // Optimistically flip to generating so the shimmer renders
+      // immediately; the first poll will pick up the real state.
+      setStatus((s) => ({
+        state: 'generating', text: s?.text ?? '',
+        generatedAt: s?.generatedAt ?? null,
+        message: 'Generating insights…',
+      }));
+      await fetchStatus();
+    } catch { /* keep prior state */ }
+  };
+
+  const generating = status?.state === 'generating';
+  const ready = status?.state === 'ready' && status.text;
+  const errored = status?.state === 'error';
+  const cards = ready ? parseInsights(status.text) : [];
+
+  return (
+    <section className="ins-card ai-card-wrap" data-testid="ai-analysis">
+      <header className="ins-card-head ai-head">
+        <div className="label">AI analysis</div>
+        <span className="spacer" />
+        <button
+          type="button"
+          className="btn-primary"
+          disabled={!!generating}
+          onClick={() => void generate()}
+        >{ready ? 'Regenerate' : 'Generate'}</button>
+      </header>
+      {generating && (
+        <div className="ai-skel" data-testid="ai-skeleton">
+          <div className="ai-skel-row" />
+          <div className="ai-skel-row" />
+          <div className="ai-skel-row" />
+          <div className="ai-skel-row" />
+        </div>
+      )}
+      {ready && cards.length > 0 && (
+        <div className="ai-list">
+          {cards.map((c, i) => (
+            <div
+              key={i}
+              className={`ai-card ${c.kind}`}
+              style={{ animationDelay: `${i * 70}ms` }}
+            >
+              <span className="ai-ico">{AI_ICON[c.kind]}</span>
+              <span className="ai-text">{c.text}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {ready && cards.length === 0 && (
+        <div className="ai-empty">{status.text}</div>
+      )}
+      {errored && <div className="ai-empty">{status.message}</div>}
+      {!generating && !ready && !errored && (
+        <div className="ai-empty">
+          No analysis yet — tap Generate for an AI read on this month's
+          spending, budgets and trends.
+        </div>
+      )}
+    </section>
   );
 }
 
