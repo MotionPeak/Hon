@@ -5368,8 +5368,32 @@ function hitechzoneSyncModal() {
   openModal(async (modal) => {
     let syncId = null;
     let pollTimer = null;
+    // `cancelled` is the single source of truth that the user has
+    // walked away from this sync. cleanup() sets it true and stops
+    // the polling timer; every async callback that's already in
+    // flight (status polls, handleFinish, /vouchers refresh) checks
+    // it before touching state — so a late-resolving promise can't
+    // mutate state.vouchers or pop a success toast on a closed modal.
+    let cancelled = false;
     const stopPolling = () => { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } };
-    const cleanup = () => { stopPolling(); };
+    const cleanup = () => { cancelled = true; stopPolling(); };
+
+    // Watch the overlays container so cleanup runs whether the user
+    // dismissed the modal via the Cancel button, the backdrop click,
+    // or anything else that nukes the overlay (a navigation, a
+    // programmatic closeOverlay). Without this, closing via backdrop
+    // leaks pollTimer indefinitely. The observer disconnects itself
+    // once the watched overlay is gone, so there's nothing to leak.
+    const overlay = modal.parentElement; // openModal wraps modal in overlay
+    if (overlay && overlay.parentElement) {
+      const observer = new MutationObserver(() => {
+        if (!overlay.isConnected) {
+          cleanup();
+          observer.disconnect();
+        }
+      });
+      observer.observe(overlay.parentElement, { childList: true });
+    }
 
     let savedCode = "";
     try {
@@ -5439,6 +5463,12 @@ function hitechzoneSyncModal() {
       pollTimer = setInterval(async () => {
         try {
           const s = await api("/vouchers/sync/htzone/status/" + syncId);
+          // A poll request can resolve after the user clicked Cancel
+          // (or otherwise dismissed the modal). When that happens the
+          // setInterval has been cleared, but THIS specific awaited
+          // promise is already in flight — guard against it touching
+          // anything before bailing.
+          if (cancelled) return;
           if (s.message) status.textContent = s.message;
           if (s.finished) {
             stopPolling();
@@ -5449,10 +5479,17 @@ function hitechzoneSyncModal() {
     };
 
     const handleFinish = async (s) => {
+      if (cancelled) return; // same guard — late /status can still race here
       if (s.status === "success") {
         const fresh = await api("/vouchers").catch(() => ({ vouchers: state.vouchers }));
+        // Re-check after each await — cancellation may have arrived
+        // while /vouchers was in flight. Without this guard, a slow
+        // /vouchers response (or a manual cancel mid-fetch) still
+        // rewrites state.vouchers and pops the success toast.
+        if (cancelled) return;
         state.vouchers = fresh.vouchers || [];
         try { state.summary = (await api("/summary")).summary; } catch (e) {}
+        if (cancelled) return;
         render();
         const n = (s.vouchers || []).length;
         toast("Hi-Tech Zone: synced " + n + " card" + (n === 1 ? "" : "s") + ".");
@@ -5466,6 +5503,11 @@ function hitechzoneSyncModal() {
           + '<button class="primary" id="htz-retry">Try again</button></div>';
         modal.querySelector('[data-x="close"]').addEventListener("click", closeOverlay);
         modal.querySelector("#htz-retry").addEventListener("click", () => {
+          // Retry creates a fresh sync — un-cancel the closure so the
+          // new flow can complete normally. (Without this, the second
+          // attempt's poll/handleFinish would still see cancelled=true
+          // from the first attempt and silently no-op.)
+          cancelled = false;
           syncId = null;
           showCodeStep();
         });
