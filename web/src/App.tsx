@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { AccountsView } from './accounts/AccountsView';
 import { ActivityView } from './activity/ActivityView';
 import { api, ApiError, hasToken } from './api';
+import { InsightsView } from './insights/InsightsView';
 import { LoansView } from './loans/LoansView';
 import { PiggyView } from './piggy/PiggyView';
 import { RecurringView } from './recurring/RecurringView';
@@ -12,7 +13,7 @@ import { VouchersView } from './vouchers/VouchersView';
 
 type Tab =
   | 'accounts' | 'activity' | 'recurring' | 'subscriptions'
-  | 'piggy' | 'vouchers' | 'loans' | 'settings';
+  | 'piggy' | 'vouchers' | 'loans' | 'insights' | 'settings';
 
 interface TabDef {
   id: Tab;
@@ -28,6 +29,7 @@ const TABS: TabDef[] = [
   { id: 'piggy',         label: 'Piggy banks',   emoji: '🐷' },
   { id: 'loans',     label: 'Loans',       emoji: '📉' },
   { id: 'vouchers',  label: 'Vouchers',    emoji: '🎟️' },
+  { id: 'insights',  label: 'Insights',    emoji: '💡' },
   { id: 'settings',  label: 'Settings',    emoji: '⚙️' },
 ];
 
@@ -130,6 +132,7 @@ export function App() {
             {tab === 'piggy' && <PiggyView />}
             {tab === 'vouchers' && <VouchersView />}
             {tab === 'loans' && <LoansView />}
+            {tab === 'insights' && <InsightsView />}
             {tab === 'settings' && <SettingsView />}
           </div>
         </div>

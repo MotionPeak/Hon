@@ -33,3 +33,13 @@ export function cycleLabel(key: string): string {
 export function currentCycleKey(monthStartDay: number): string {
   return cycleKey(new Date().toISOString().slice(0, 10), monthStartDay);
 }
+
+/** The cycle that comes one calendar month before this one. */
+export function prevCycleKey(key: string): string {
+  const [yStr, mStr] = key.split('-');
+  let y = Number(yStr);
+  let m = Number(mStr) - 1; // 0-based
+  m -= 1;
+  if (m < 0) { m = 11; y -= 1; }
+  return `${y}-${String(m + 1).padStart(2, '0')}`;
+}

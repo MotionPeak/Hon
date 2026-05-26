@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cycleKey, cycleLabel, currentCycleKey } from './cycle';
+import { cycleKey, cycleLabel, currentCycleKey, prevCycleKey } from './cycle';
 
 describe('cycleKey', () => {
   it('returns the calendar YYYY-MM when monthStartDay is 1', () => {
@@ -31,6 +31,17 @@ describe('cycleLabel', () => {
   it('formats YYYY-MM as a long month + year', () => {
     expect(cycleLabel('2026-05')).toMatch(/May 2026/);
     expect(cycleLabel('2025-12')).toMatch(/December 2025/);
+  });
+});
+
+describe('prevCycleKey', () => {
+  it('subtracts one calendar month within a year', () => {
+    expect(prevCycleKey('2026-05')).toBe('2026-04');
+    expect(prevCycleKey('2026-12')).toBe('2026-11');
+  });
+
+  it('wraps across the year boundary', () => {
+    expect(prevCycleKey('2026-01')).toBe('2025-12');
   });
 });
 

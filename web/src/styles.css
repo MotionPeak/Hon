@@ -650,6 +650,85 @@ button.mini { padding: 5px 11px; font-size: 12px; }
 .rec-tag-warn { background: rgba(245,152,66,0.16); color: var(--amber); }
 .rec-tag-muted { background: var(--card-hi); color: var(--muted); }
 
+/* --- Insights view ---------------------------------------------------- */
+.insights-view { max-width: 1000px; margin: 0 auto; }
+.insights-view h1 {
+  font: 800 22px/1 ui-rounded, "SF Pro Rounded", system-ui;
+  color: var(--text); letter-spacing: -.2px; margin-bottom: 14px;
+}
+.ins-card {
+  background: var(--card); border: 1px solid var(--hairline);
+  border-radius: 16px; padding: 18px 20px; margin-bottom: 18px;
+  box-shadow: var(--shadow-sm);
+}
+.ins-card-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 12px; }
+.ins-card-head h2 {
+  font: 800 18px/1 ui-rounded, "SF Pro Rounded", system-ui;
+  color: var(--text);
+}
+.ins-sub { color: var(--muted); font-size: 12px; }
+.ins-totals { margin-left: auto; display: flex; gap: 14px; font-size: 13px; color: var(--muted); }
+.ins-totals b {
+  color: var(--text); font-weight: 700; margin-left: 4px;
+  font-variant-numeric: tabular-nums;
+}
+.ins-income b { color: var(--green); }
+
+.mini-bars {
+  display: grid; grid-template-columns: repeat(12, 1fr); gap: 6px;
+  align-items: end; height: 120px; margin: 4px 0 8px;
+}
+.mb-col {
+  position: relative; display: flex; flex-direction: column;
+  align-items: stretch; justify-content: flex-end;
+  background: transparent; border: 0; padding: 0; cursor: pointer;
+  height: 100%; border-radius: 6px 6px 4px 4px;
+  transition: background-color .14s;
+}
+.mb-col:hover { background-color: var(--card-hi); }
+.mb-col.sel { background-color: var(--accent-soft); }
+.mb-fill {
+  display: block; background: var(--accent);
+  border-radius: 4px 4px 2px 2px;
+  transition: height .3s cubic-bezier(.2,.7,.2,1);
+  margin: 0 2px;
+}
+.mb-col.sel .mb-fill { background: var(--accent); box-shadow: 0 4px 12px var(--accent-soft); }
+.mb-x {
+  font-size: 10px; font-weight: 700; color: var(--muted);
+  text-align: center; margin-top: 4px;
+}
+.mb-col.sel .mb-x { color: var(--accent); }
+
+.ins-cat-list { list-style: none; padding: 0; margin: 0; }
+.ins-cat-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 0; border-top: 1px solid var(--hairline);
+}
+.ins-cat-row:first-child { border-top: 0; }
+.ins-cat-emoji {
+  width: 32px; height: 32px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 15px; flex: none;
+}
+.ins-cat-main { flex: 1; min-width: 0; }
+.ins-cat-name {
+  font-size: 13px; font-weight: 600; color: var(--text);
+  margin-bottom: 4px;
+}
+.ins-cat-bar {
+  height: 6px; background: var(--card-hi); border-radius: 999px; overflow: hidden;
+}
+.ins-cat-bar-fill {
+  display: block; height: 100%; border-radius: 999px;
+  transition: width .35s cubic-bezier(.2,.7,.2,1);
+}
+.ins-cat-amt {
+  font: 700 14px/1 ui-rounded, "SF Pro Rounded", system-ui;
+  color: var(--text); white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
 /* --- Piggy banks view ------------------------------------------------- */
 .piggy-view { max-width: 1100px; margin: 0 auto; }
 .piggy-view h1 {

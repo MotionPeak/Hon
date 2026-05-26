@@ -78,6 +78,18 @@ describe('App — tab routing', () => {
       .toHaveAttribute('aria-selected', 'true');
   });
 
+  it('switches to the Insights tab on click', async () => {
+    withToken();
+    installFetchMock(EMPTY);
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole('tab', { name: /insights/i }));
+    expect(await screen.findByRole('heading', { level: 1, name: /insights/i }))
+      .toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /insights/i }))
+      .toHaveAttribute('aria-selected', 'true');
+  });
+
   it('switches to the Subscriptions tab on click', async () => {
     withToken();
     installFetchMock(EMPTY);
