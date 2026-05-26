@@ -1222,9 +1222,15 @@ export async function scrapeHitechZoneBalance(
     htzLog.info('navigate.done', { landedUrl: page.url() });
 
     // Sometimes the persistent profile carries a session that lets us skip
-    // straight to /Ballance — if so, harvest and return.
+    // straight to /Ballance — if so, harvest and return. Wait for the
+    // balance LINE to be present first; landing on /Ballance only means
+    // the route's HTML shell loaded, not that the SPA has finished
+    // rendering the balance text. (Previously: harvest fired on
+    // domcontentloaded, returned null, surfaced as "layout may have
+    // changed" on a perfectly healthy session.)
     if (/\/Ballance/i.test(page.url())) {
       htzLog.info('fastpath.balance.already');
+      await waitForHtzBalanceLine(page, 20_000).catch(() => {});
       return await harvestHtzAndFinish(page, options, done, code);
     }
 
@@ -1238,18 +1244,15 @@ export async function scrapeHitechZoneBalance(
     htzLog.info('code.filled');
 
     // Now wait for the user to solve the CAPTCHA and click שלח themselves.
-    // Detect completion by either a URL change to /Ballance OR the
-    // "יתרתך:" balance line appearing on the current page (in case it's
-    // rendered inline without a full navigation).
+    // The condition matches the full balance LINE shape (יתרתך: <number> ₪)
+    // rather than just the substring 'יתרתך' — a header/marketing/skeleton
+    // mention of the word would otherwise satisfy the wait before the real
+    // balance was computed, and the subsequent extract would return null.
     const wait = options.userActionTimeoutMs ?? 180_000;
     htzLog.info('awaiting.user.action', { timeoutMs: wait });
     try {
-      await page.waitForFunction(
-        () => /\/Ballance/i.test(location.href)
-          || ((document.body?.innerText || '').includes('יתרתך')),
-        { timeout: wait, polling: 1000 },
-      );
-    } catch (err) {
+      await waitForHtzBalanceLine(page, wait);
+    } catch {
       if (options.debugDumpPath) {
         try { writeFileSync(options.debugDumpPath, await page.content(), 'utf8'); }
         catch {/* best effort */}
@@ -1289,20 +1292,83 @@ async function harvestHtzAndFinish(
       htzLog.info('debug.dump', { path: options.debugDumpPath });
     } catch {/* best effort */}
   }
-  const parsed = await extractHtzBalance(page, code);
+  // Retry the extract a few times with short delays. The fastpath path
+  // hits this before the SPA has fully painted; the post-CAPTCHA path
+  // can also race a navigation/repaint. A 3×500ms loop is enough for
+  // any normal render without slowing successful runs noticeably.
+  let parsed = await extractHtzBalance(page, code);
+  for (let attempt = 0; attempt < 3 && !parsed; attempt += 1) {
+    await new Promise((r) => setTimeout(r, 500));
+    parsed = await extractHtzBalance(page, code);
+  }
   htzLog.info('balance.extracted', {
     found: !!parsed,
     balance: parsed?.balance ?? null,
   });
   if (!parsed) {
-    done({ result: 'no-balance' });
+    // Distinguish "wrong/expired code" from "layout actually changed"
+    // by sniffing for HTZ's known error strings on the result page.
+    // A user mistyping the code is by far the more common failure;
+    // surfacing the right cause shortens the support loop.
+    const errorHint = await detectHtzErrorMessage(page).catch(() => null);
+    done({ result: 'no-balance', errorHint: errorHint ?? null });
     throw new Error(
-      'Could not read the Hi-Tech Zone balance from the result page. '
-      + 'The layout may have changed — see debug HTML dump.',
+      errorHint
+        ? `Hi-Tech Zone rejected the lookup: ${errorHint}. Double-check the digital code.`
+        : 'Could not read the Hi-Tech Zone balance from the result page. '
+          + 'The layout may have changed — see debug HTML dump.',
     );
   }
   done({ result: 'ok', cards: 1 });
   return [parsed];
+}
+
+/**
+ * Returns a short Hebrew error string when the /Ballance page shows
+ * one of HTZ's known rejection messages (invalid code, expired, etc.)
+ * rather than a balance. Null when no known error pattern matches —
+ * which is the "we honestly don't know what's on the page" case.
+ */
+async function detectHtzErrorMessage(page: Page): Promise<string | null> {
+  return await page.evaluate(() => {
+    const text = (document.body?.innerText || '').replace(/\s+/g, ' ');
+    // Known patterns observed live and reported in the wild. Order
+    // matters only for which one we surface — all map to "the code
+    // wasn't accepted, the layout is fine."
+    const patterns: { re: RegExp; label: string }[] = [
+      { re: /הקוד\s+אינו\s+תקין/, label: 'הקוד אינו תקין' },
+      { re: /הקוד\s+לא\s+נמצא/, label: 'הקוד לא נמצא' },
+      { re: /קוד\s+שגוי/, label: 'קוד שגוי' },
+      { re: /(פג|פגה)\s+תוקף/, label: 'התוקף פג' },
+      { re: /הכרטיס\s+אינו\s+פעיל/, label: 'הכרטיס אינו פעיל' },
+    ];
+    for (const { re, label } of patterns) {
+      if (re.test(text)) return label;
+    }
+    return null;
+  });
+}
+
+/**
+ * Waits for the actual balance line to render in the page body. The
+ * predicate matches the full shape `יתרתך: <number> ₪` rather than the
+ * substring `יתרתך` alone — header/marketing/skeleton text containing
+ * the word would otherwise satisfy the wait before the SPA had painted
+ * the number, leading to a null read in extractHtzBalance and a
+ * misleading "layout may have changed" error.
+ *
+ * Throws on timeout; callers wrap with `.catch(() => {})` when the wait
+ * is best-effort (fastpath) and re-throw when the wait is required
+ * (post-CAPTCHA).
+ */
+async function waitForHtzBalanceLine(page: Page, timeoutMs: number): Promise<void> {
+  await page.waitForFunction(
+    () => {
+      const text = (document.body?.innerText || '').replace(/\s+/g, ' ');
+      return /יתרתך\s*[:：]?\s*[\d,.]+\s*₪/.test(text);
+    },
+    { timeout: timeoutMs, polling: 1000 },
+  );
 }
 
 // Parses the /Ballance text. The whole result is in body text, e.g.:
