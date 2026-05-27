@@ -666,6 +666,37 @@ describe('InsightsView — brokerage account pills', () => {
     expect(brokerageCalls).toBeGreaterThan(1);
   });
 
+  it('drops snapshots before account.inceptionDate when a focused account has an inception', async () => {
+    // a-vg has inceptionDate '2024-06-01' but a snapshot at '2024-01-01'.
+    // Focusing Vanguard should drop the pre-inception snapshot. We
+    // can't read the SVG path coords reliably, but the chart's dots
+    // re-render once per snapshot — so the count of <circle> drops
+    // from 3 (full Vanguard series) to 2 (post-inception).
+    installFetchMock({
+      ...baseMocks,
+      'GET /api/brokerage': () => ({
+        ...brokerageResp,
+        snapshots: brokerageResp.snapshots.filter((s) => s.accountId === 'a-vg'),
+      }),
+    });
+    const user = userEvent.setup();
+    await openBrokerage(user);
+    const group = await screen.findByRole('group', { name: /accounts/i });
+    await user.click(within(group).getByRole('button', { name: /Vanguard/ }));
+    const chart = await screen.findByTestId('brokerage-chart');
+    const dots = chart.querySelectorAll('circle');
+    // 3 snapshots total for a-vg; one is pre-inception (2024-01-01);
+    // we expect 2 after the cutoff. (Range pill defaults to 1Y which
+    // would also clip to ~1 year back from latest, but 2026-01-01 is
+    // within 1Y of latest = 2026-01-01, and 2025-01-01 is at the
+    // 1Y edge. Use ALL to remove the range filter from the picture.)
+    await user.click(screen.getByRole('button', { name: /^ALL$/ }));
+    const dotsAll = (await screen.findByTestId('brokerage-chart'))
+      .querySelectorAll('circle');
+    expect(dotsAll.length).toBe(2);
+    expect(dots.length).toBeGreaterThan(0);
+  });
+
   it('clearing the inception PATCHes with null', async () => {
     const patch = vi.fn((_b: unknown) => ({ ok: true }));
     installFetchMock({
