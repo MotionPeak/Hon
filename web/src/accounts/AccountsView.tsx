@@ -1143,40 +1143,87 @@ interface AddConnectionPickerProps {
   onClose: () => void;
 }
 
+type PickerCategory = 'bank' | 'card' | 'brokerage' | 'loan' | 'asset';
+
+interface CategoryTile {
+  key: PickerCategory;
+  label: string;
+  emoji: string;
+  /** When set, fires immediately on click (leaf tile — no drilldown). */
+  leaf?: 'manual-asset' | 'manual-loan';
+  /** Static sub-label when the count would be misleading (e.g. SnapTrade). */
+  subOverride?: string;
+}
+
+const PICKER_TILES: CategoryTile[] = [
+  { key: 'bank', label: 'Banks', emoji: '🏦' },
+  { key: 'card', label: 'Credit cards', emoji: '💳' },
+  { key: 'brokerage', label: 'Brokerages', emoji: '📈', subOverride: 'via SnapTrade' },
+  { key: 'loan', label: 'Loan', emoji: '📉', leaf: 'manual-loan',
+    subOverride: 'mortgage, car loan, prime / CPI-linked' },
+  { key: 'asset', label: 'Other asset', emoji: '💎', leaf: 'manual-asset',
+    subOverride: 'cash, property…' },
+];
+
 function AddConnectionPicker(
   { companies, onPickCompany, onPickManualAsset, onPickManualLoan, onClose }:
     AddConnectionPickerProps,
 ) {
-  const [query, setQuery] = useState('');
-  // Bank + card + brokerage (SnapTrade) routed here. Pension still uses
-  // its own multi-step flow that lands in a later session.
-  const supported = companies.filter(
-    (c) => c.type === 'bank' || c.type === 'card' || c.type === 'brokerage',
+  // null on the category step; set when drilling into bank/card/brokerage.
+  const [category, setCategory] = useState<'bank' | 'card' | 'brokerage' | null>(null);
+
+  const renderCategoryStep = () => (
+    <>
+      <h2>Add an asset</h2>
+      <p>What would you like to add to Hon?</p>
+      <div className="pick-grid">
+        {PICKER_TILES.map((tile) => {
+          const count = (tile.key === 'bank' || tile.key === 'card' || tile.key === 'brokerage')
+            ? companies.filter((c) => c.type === tile.key).length
+            : null;
+          const sub = tile.subOverride
+            ?? (count !== null ? `${count} ${count === 1 ? 'option' : 'options'}` : '');
+          const onClick = () => {
+            if (tile.leaf === 'manual-asset') { onPickManualAsset(); return; }
+            if (tile.leaf === 'manual-loan')  { onPickManualLoan();  return; }
+            setCategory(tile.key as 'bank' | 'card' | 'brokerage');
+          };
+          return (
+            <button
+              key={tile.key}
+              type="button"
+              className="pick-card"
+              onClick={onClick}
+              data-tile={tile.key}
+              aria-label={tile.label}
+            >
+              <span className="pc-emoji">{tile.emoji}</span>
+              <span className="pc-label">{tile.label}</span>
+              <span className="pc-count">{sub}</span>
+            </button>
+          );
+        })}
+      </div>
+    </>
   );
-  const q = query.toLowerCase();
-  const filtered = supported.filter((c) => c.name.toLowerCase().includes(q));
-  // Show the manual-asset / manual-loan rows when the query matches
-  // "manual"/"asset"/"loan"/empty, so the filter doesn't hide them.
-  const showManualAsset = q === '' || 'manual asset'.includes(q);
-  const showManualLoan = q === '' || 'manual loan'.includes(q);
-  return (
-    <ModalPortal>
-      <div className="overlay">
-        <div role="dialog" aria-label="Add an asset" className="modal">
-          <h2>Add an asset</h2>
-          <p>Pick a provider, or add a hand-entered asset or loan.</p>
-          <label className="field">
-            <span>Search</span>
-            <input
-              type="text"
-              placeholder="Search providers…"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              autoFocus
-            />
-          </label>
+
+  const renderInstitutionStep = () => {
+    if (category === null) return null;
+    const inGroup = companies.filter((c) => c.type === category);
+    const tile = PICKER_TILES.find((t) => t.key === category);
+    return (
+      <>
+        <h2>{tile?.label ?? category}</h2>
+        <button
+          type="button"
+          className="back-btn"
+          onClick={() => setCategory(null)}
+        >‹ All categories</button>
+        {inGroup.length === 0 ? (
+          <p className="hint">No institutions in this category.</p>
+        ) : (
           <ul className="add-picker">
-            {filtered.map((c) => (
+            {inGroup.map((c) => (
               <li key={c.id}>
                 <button
                   type="button"
@@ -1188,36 +1235,17 @@ function AddConnectionPicker(
                 </button>
               </li>
             ))}
-            {showManualAsset && (
-              <li>
-                <button
-                  type="button"
-                  className="add-picker-row"
-                  onClick={onPickManualAsset}
-                >
-                  <span className="add-picker-emoji">💎</span>
-                  <span className="add-picker-name">Manual asset</span>
-                  <span className="add-picker-sub">car · property · cash · crypto · other</span>
-                </button>
-              </li>
-            )}
-            {showManualLoan && (
-              <li>
-                <button
-                  type="button"
-                  className="add-picker-row"
-                  onClick={onPickManualLoan}
-                >
-                  <span className="add-picker-emoji">📉</span>
-                  <span className="add-picker-name">Manual loan</span>
-                  <span className="add-picker-sub">fixed · prime · CPI-linked</span>
-                </button>
-              </li>
-            )}
-            {filtered.length === 0 && !showManualAsset && !showManualLoan && (
-              <li className="add-picker-empty">No providers match.</li>
-            )}
           </ul>
+        )}
+      </>
+    );
+  };
+
+  return (
+    <ModalPortal>
+      <div className="overlay">
+        <div role="dialog" aria-label="Add an asset" className="modal">
+          {category === null ? renderCategoryStep() : renderInstitutionStep()}
           <div className="modal-actions">
             <button type="button" onClick={onClose}>Cancel</button>
           </div>

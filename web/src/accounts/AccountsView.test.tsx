@@ -607,39 +607,46 @@ describe('AccountsView — add connection (picker + bank/card form)', () => {
     expect(screen.getByRole('button', { name: /add asset/i })).toBeInTheDocument();
   });
 
-  it('clicking + Add asset opens a picker listing bank and card companies', async () => {
+  it('clicking + Add asset opens a category-tile picker', async () => {
     const user = userEvent.setup();
     installFetchMock({ ...FULL, 'GET /api/companies': () => COMPANIES_FULL });
     render(<AccountsView />);
     await user.click(await screen.findByRole('button', { name: /add asset/i }));
     const dialog = screen.getByRole('dialog', { name: /add an asset/i });
+    expect(within(dialog).getByRole('button', { name: /banks/i })).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: /credit cards/i })).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: /brokerages/i })).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: /^loan/i })).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: /other asset/i })).toBeInTheDocument();
+  });
+
+  it('the brokerage drilldown shows SnapTrade; pension category is hidden (still a separate flow)', async () => {
+    const user = userEvent.setup();
+    installFetchMock({ ...FULL, 'GET /api/companies': () => COMPANIES_FULL });
+    render(<AccountsView />);
+    await user.click(await screen.findByRole('button', { name: /add asset/i }));
+    const dialog = screen.getByRole('dialog', { name: /add an asset/i });
+    // No Pension tile yet — pension flow lives in a later phase.
+    expect(within(dialog).queryByRole('button', { name: /pension/i })).toBeNull();
+    // Drill into Brokerages → SnapTrade row appears.
+    await user.click(within(dialog).getByRole('button', { name: /brokerages/i }));
+    expect(within(dialog).getByText(/SnapTrade/i)).toBeInTheDocument();
+  });
+
+  it('drilling into Banks shows the bank list and a back button', async () => {
+    const user = userEvent.setup();
+    installFetchMock({ ...FULL, 'GET /api/companies': () => COMPANIES_FULL });
+    render(<AccountsView />);
+    await user.click(await screen.findByRole('button', { name: /add asset/i }));
+    const dialog = screen.getByRole('dialog', { name: /add an asset/i });
+    await user.click(within(dialog).getByRole('button', { name: /banks/i }));
     expect(within(dialog).getByText('Bank Hapoalim')).toBeInTheDocument();
     expect(within(dialog).getByText('Bank Leumi')).toBeInTheDocument();
-    expect(within(dialog).getByText('Max')).toBeInTheDocument();
-  });
-
-  it('the picker hides pension companies (still a separate flow) but shows brokerage (SnapTrade)', async () => {
-    const user = userEvent.setup();
-    installFetchMock({ ...FULL, 'GET /api/companies': () => COMPANIES_FULL });
-    render(<AccountsView />);
-    await user.click(await screen.findByRole('button', { name: /add asset/i }));
-    const dialog = screen.getByRole('dialog', { name: /add an asset/i });
-    // SnapTrade is brokerage and now routes through the link-flow wizard.
-    expect(within(dialog).getByText(/SnapTrade/i)).toBeInTheDocument();
-    // Pension still has its own visible-window flow — keep it out of this picker.
-    expect(within(dialog).queryByText('Harel')).not.toBeInTheDocument();
-  });
-
-  it('the picker search filters the list', async () => {
-    const user = userEvent.setup();
-    installFetchMock({ ...FULL, 'GET /api/companies': () => COMPANIES_FULL });
-    render(<AccountsView />);
-    await user.click(await screen.findByRole('button', { name: /add asset/i }));
-    const dialog = screen.getByRole('dialog', { name: /add an asset/i });
-    await user.type(within(dialog).getByPlaceholderText(/search/i), 'leumi');
-    expect(within(dialog).getByText('Bank Leumi')).toBeInTheDocument();
-    expect(within(dialog).queryByText('Bank Hapoalim')).not.toBeInTheDocument();
-    expect(within(dialog).queryByText('Max')).not.toBeInTheDocument();
+    // Card companies are NOT in the banks drilldown.
+    expect(within(dialog).queryByText('Max')).toBeNull();
+    // Back button returns to the category step.
+    await user.click(within(dialog).getByRole('button', { name: /all categories/i }));
+    expect(within(dialog).getByRole('button', { name: /banks/i })).toBeInTheDocument();
   });
 
   it('picking a bank opens a credential form with display name + login fields', async () => {
@@ -648,6 +655,7 @@ describe('AccountsView — add connection (picker + bank/card form)', () => {
     render(<AccountsView />);
     await user.click(await screen.findByRole('button', { name: /add asset/i }));
     const picker = screen.getByRole('dialog', { name: /add an asset/i });
+    await user.click(within(picker).getByRole('button', { name: /banks/i }));
     await user.click(within(picker).getByText('Bank Hapoalim'));
     const dialog = screen.getByRole('dialog', { name: /add bank hapoalim/i });
     const displayName = within(dialog).getByLabelText(/display name/i) as HTMLInputElement;
@@ -656,22 +664,22 @@ describe('AccountsView — add connection (picker + bank/card form)', () => {
     expect(within(dialog).getByLabelText(/password/i)).toBeInTheDocument();
   });
 
-  it('the picker has a "Manual asset" option (car/property/cash/etc)', async () => {
+  it('the picker has an "Other asset" tile (car/property/cash/etc)', async () => {
     const user = userEvent.setup();
     installFetchMock({ ...FULL, 'GET /api/companies': () => COMPANIES_FULL });
     render(<AccountsView />);
     await user.click(await screen.findByRole('button', { name: /add asset/i }));
     const dialog = screen.getByRole('dialog', { name: /add an asset/i });
-    expect(within(dialog).getByText(/manual asset/i)).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: /other asset/i })).toBeInTheDocument();
   });
 
-  it('picking manual asset opens a form with kind / name / value / currency', async () => {
+  it('picking "Other asset" opens a form with kind / name / value / currency', async () => {
     const user = userEvent.setup();
     installFetchMock({ ...FULL, 'GET /api/companies': () => COMPANIES_FULL });
     render(<AccountsView />);
     await user.click(await screen.findByRole('button', { name: /add asset/i }));
     const picker = screen.getByRole('dialog', { name: /add an asset/i });
-    await user.click(within(picker).getByText(/manual asset/i));
+    await user.click(within(picker).getByRole('button', { name: /other asset/i }));
     const form = screen.getByRole('dialog', { name: /add a manual asset/i });
     expect(within(form).getByLabelText(/kind/i)).toBeInTheDocument();
     expect(within(form).getByLabelText(/name/i)).toBeInTheDocument();
@@ -679,22 +687,22 @@ describe('AccountsView — add connection (picker + bank/card form)', () => {
     expect(within(form).getByLabelText(/currency/i)).toBeInTheDocument();
   });
 
-  it('the picker has a "Manual loan" option', async () => {
+  it('the picker has a "Loan" tile', async () => {
     const user = userEvent.setup();
     installFetchMock({ ...FULL, 'GET /api/companies': () => COMPANIES_FULL });
     render(<AccountsView />);
     await user.click(await screen.findByRole('button', { name: /add asset/i }));
     const dialog = screen.getByRole('dialog', { name: /add an asset/i });
-    expect(within(dialog).getByText(/manual loan/i)).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: /^loan/i })).toBeInTheDocument();
   });
 
-  it('picking manual loan opens a form with required fields', async () => {
+  it('picking "Loan" opens a form with required fields', async () => {
     const user = userEvent.setup();
     installFetchMock({ ...FULL, 'GET /api/companies': () => COMPANIES_FULL });
     render(<AccountsView />);
     await user.click(await screen.findByRole('button', { name: /add asset/i }));
     const picker = screen.getByRole('dialog', { name: /add an asset/i });
-    await user.click(within(picker).getByText(/manual loan/i));
+    await user.click(within(picker).getByRole('button', { name: /^loan/i }));
     const form = screen.getByRole('dialog', { name: /add a loan/i });
     expect(within(form).getByLabelText(/name/i)).toBeInTheDocument();
     expect(within(form).getByLabelText('Principal')).toBeInTheDocument();
@@ -721,7 +729,7 @@ describe('AccountsView — add connection (picker + bank/card form)', () => {
     render(<AccountsView />);
     await user.click(await screen.findByRole('button', { name: /add asset/i }));
     const picker = screen.getByRole('dialog', { name: /add an asset/i });
-    await user.click(within(picker).getByText(/manual loan/i));
+    await user.click(within(picker).getByRole('button', { name: /^loan/i }));
     const form = screen.getByRole('dialog', { name: /add a loan/i });
     await user.type(within(form).getByLabelText(/name/i), 'Car loan');
     await user.type(within(form).getByLabelText('Principal'), '60000');
@@ -761,7 +769,7 @@ describe('AccountsView — add connection (picker + bank/card form)', () => {
     render(<AccountsView />);
     await user.click(await screen.findByRole('button', { name: /add asset/i }));
     const picker = screen.getByRole('dialog', { name: /add an asset/i });
-    await user.click(within(picker).getByText(/manual asset/i));
+    await user.click(within(picker).getByRole('button', { name: /other asset/i }));
     const form = screen.getByRole('dialog', { name: /add a manual asset/i });
     await user.selectOptions(within(form).getByLabelText(/kind/i), 'cash');
     await user.type(within(form).getByLabelText(/name/i), 'Emergency fund');
@@ -790,6 +798,7 @@ describe('AccountsView — add connection (picker + bank/card form)', () => {
     render(<AccountsView />);
     await user.click(await screen.findByRole('button', { name: /add asset/i }));
     const picker = screen.getByRole('dialog', { name: /add an asset/i });
+    await user.click(within(picker).getByRole('button', { name: /banks/i }));
     await user.click(within(picker).getByText('Bank Hapoalim'));
     const dialog = screen.getByRole('dialog', { name: /add bank hapoalim/i });
     const displayName = within(dialog).getByLabelText(/display name/i);
@@ -894,8 +903,9 @@ describe('AccountsView — SnapTrade link flow', () => {
     installFetchMock(SNAPTRADE_ROUTES);
 
     render(<AccountsView />);
-    // Wait for initial fetches, then open the picker.
+    // Wait for initial fetches, then open the picker → Brokerages → SnapTrade.
     await user.click(await screen.findByRole('button', { name: /add asset/i }));
+    await user.click(await screen.findByRole('button', { name: /brokerages/i }));
     await user.click(await screen.findByText(/SnapTrade/i));
 
     // Credentials form for SnapTrade
