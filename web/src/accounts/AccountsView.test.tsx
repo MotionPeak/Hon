@@ -509,6 +509,87 @@ describe('AccountsView — sync flow', () => {
     await waitFor(() => expect(submitOtp).toHaveBeenCalledTimes(1));
     expect(submitOtp.mock.calls[0]?.[0]).toEqual({ code: '123456' });
   });
+
+  it('mounts InteractiveSignInModal while a scrape runs on an interactive pension connection', async () => {
+    const user = userEvent.setup();
+
+    let done = false;
+    installFetchMock({
+      ...FULL,
+      'GET /api/companies': () => ({
+        companies: [
+          { id: 'meitav', name: 'Meitav', loginFields: ['id', 'phone'],
+            type: 'pension', interactive: true },
+        ],
+      }),
+      'GET /api/connections': () => ({
+        connections: [{ id: 'c-meitav-1', companyId: 'meitav',
+          displayName: 'Meitav', createdAt: '2026-01-01',
+          lastScrapeAt: null, lastStatus: null, hasCredentials: true }],
+      }),
+      'GET /api/accounts': () => ({ accounts: [] }),
+      'POST /api/connections/c-meitav-1/scrape': () => ({ runId: 'r-meitav' }),
+      'GET /api/scrape/r-meitav': () =>
+        done
+          ? ({ run: { status: 'success', message: 'ok' } })
+          : ({ run: { status: 'running', message: 'signing in' } }),
+    });
+
+    render(<AccountsView />);
+    // Use getAllByText because 'Meitav' appears both as connection name and company meta.
+    await screen.findAllByText('Meitav');
+
+    const card = screen.getAllByText('Meitav')[0].closest('.conn-card')!;
+    await user.click(within(card as HTMLElement).getByRole('button', { name: /^sync$/i }));
+
+    expect(await screen.findByRole('dialog', { name: /sign in.*meitav/i }))
+      .toBeInTheDocument();
+
+    done = true;
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: /sign in.*meitav/i }))
+        .not.toBeInTheDocument();
+    });
+  });
+
+  it('Close button hides InteractiveSignInModal without cancelling the scrape', async () => {
+    const user = userEvent.setup();
+    installFetchMock({
+      ...FULL,
+      'GET /api/companies': () => ({
+        companies: [
+          { id: 'meitav', name: 'Meitav', loginFields: ['id', 'phone'],
+            type: 'pension', interactive: true },
+        ],
+      }),
+      'GET /api/connections': () => ({
+        connections: [{ id: 'c-meitav-1', companyId: 'meitav',
+          displayName: 'Meitav', createdAt: '2026-01-01',
+          lastScrapeAt: null, lastStatus: null, hasCredentials: true }],
+      }),
+      'GET /api/accounts': () => ({ accounts: [] }),
+      'POST /api/connections/c-meitav-1/scrape': () => ({ runId: 'r-meitav' }),
+      'GET /api/scrape/r-meitav': () =>
+        ({ run: { status: 'running', message: 'signing in' } }),
+    });
+
+    render(<AccountsView />);
+    // Use getAllByText because 'Meitav' appears both as connection name and company meta.
+    await screen.findAllByText('Meitav');
+    const card = screen.getAllByText('Meitav')[0].closest('.conn-card')!;
+    await user.click(within(card as HTMLElement).getByRole('button', { name: /^sync$/i }));
+    const dialog = await screen.findByRole('dialog', { name: /sign in.*meitav/i });
+    await user.click(within(dialog).getByRole('button', { name: /close/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: /sign in.*meitav/i }))
+        .not.toBeInTheDocument();
+    });
+
+    await new Promise((r) => setTimeout(r, 500));
+    expect(screen.queryByRole('dialog', { name: /sign in.*meitav/i }))
+      .not.toBeInTheDocument();
+  });
 });
 
 describe('AccountsView — brokerage holdings', () => {

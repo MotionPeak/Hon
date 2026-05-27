@@ -13,6 +13,10 @@ const SnapTradeLinkFlow = lazy(() =>
   import('./SnapTradeLinkFlow').then((m) => ({ default: m.SnapTradeLinkFlow })),
 );
 
+const InteractiveSignInModal = lazy(() =>
+  import('./InteractiveSignInModal').then((m) => ({ default: m.InteractiveSignInModal })),
+);
+
 // Polling interval while a scrape is in-flight. Short enough that tests
 // resolve quickly via waitFor; long enough that production polling isn't
 // a CPU/network drag.
@@ -129,6 +133,11 @@ export function AccountsView() {
   const [removingAsset, setRemovingAsset] = useState<ManualAsset | null>(null);
   const [editingLoan, setEditingLoan] = useState<Loan | null>(null);
   const [removingLoan, setRemovingLoan] = useState<Loan | null>(null);
+  // runIds that the user has dismissed from the InteractiveSignInModal.
+  // The engine-side scrape continues; we just hide the modal locally.
+  // Cleared when the run terminates so a re-sync shows the modal again.
+  const [dismissedInteractiveRunIds, setDismissedInteractiveRunIds] =
+    useState<Set<string>>(() => new Set());
   // Add-asset flow:
   //   null            — closed
   //   'picker'        — list of companies + manual-asset / manual-loan rows
@@ -238,14 +247,32 @@ export function AccountsView() {
         );
       } else if (run.status === 'success') {
         setSyncForConnection(connectionId, { kind: 'idle' });
+        setDismissedInteractiveRunIds((prev) => {
+          if (!prev.has(runId)) return prev;
+          const next = new Set(prev);
+          next.delete(runId);
+          return next;
+        });
         await refresh();
       } else {
         setSyncForConnection(connectionId, { kind: 'error', message: run.message || 'Sync failed' });
+        setDismissedInteractiveRunIds((prev) => {
+          if (!prev.has(runId)) return prev;
+          const next = new Set(prev);
+          next.delete(runId);
+          return next;
+        });
       }
     } catch (e) {
       setSyncForConnection(connectionId, {
         kind: 'error',
         message: e instanceof ApiError ? e.message : String(e),
+      });
+      setDismissedInteractiveRunIds((prev) => {
+        if (!prev.has(runId)) return prev;
+        const next = new Set(prev);
+        next.delete(runId);
+        return next;
       });
     }
   }, [refresh, setSyncForConnection]);
@@ -517,6 +544,38 @@ export function AccountsView() {
               // running or success. Don't reset to idle here.
             }}
           />
+        );
+      })()}
+      {(() => {
+        // Mount one InteractiveSignInModal at a time, for the first connection
+        // observed running an interactive sync that the user hasn't dismissed.
+        const entry = Object.entries(syncStates).find(([connectionId, s]) => {
+          if (s.kind !== 'running') return false;
+          if (dismissedInteractiveRunIds.has(s.runId)) return false;
+          const conn = data.connections.find((c) => c.id === connectionId);
+          if (!conn) return false;
+          const company = data.companies.find((c) => c.id === conn.companyId);
+          return Boolean(company?.interactive);
+        });
+        if (!entry) return null;
+        const [connectionId, state] = entry;
+        if (state.kind !== 'running') return null; // TS narrowing
+        const conn = data.connections.find((c) => c.id === connectionId);
+        const company = conn && data.companies.find((c) => c.id === conn.companyId);
+        if (!conn || !company) return null;
+        return (
+          <Suspense fallback={null}>
+            <InteractiveSignInModal
+              company={company}
+              onClose={() => {
+                setDismissedInteractiveRunIds((prev) => {
+                  const next = new Set(prev);
+                  next.add(state.runId);
+                  return next;
+                });
+              }}
+            />
+          </Suspense>
         );
       })()}
     </div>
