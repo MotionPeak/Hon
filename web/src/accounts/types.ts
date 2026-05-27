@@ -122,3 +122,10 @@ export interface Holding {
 
 /** A "section" in the Accounts view — Banks, Credit cards, etc. */
 export type AssetSectionKey = 'bank' | 'card' | 'brokerage' | 'pension' | 'asset' | 'loan';
+
+/** One brokerage SnapTrade can connect, returned by POST /snaptrade/brokerages. */
+export interface BrokerageOption {
+  slug: string;
+  name: string;
+  logoUrl?: string;
+}
