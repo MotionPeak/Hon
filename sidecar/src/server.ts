@@ -1610,9 +1610,38 @@ app.get('/loans', async (_req, reply) => {
       ...loan,
       rateType: composeRateType(loan),
       state: computeLoanState(loan, prime, cpiNow),
+      // Bank-detected payment history. Empty for manual / SnapTrade /
+      // pension loans; their connectionId is null so the matcher never
+      // attached anything.
+      payments: repo!.listLoanPayments(loan.id).map((p) => ({
+        id: p.id, date: p.date, amount: p.amount,
+        accountId: p.accountId, description: p.description,
+      })),
     })),
     rates: { prime: needsPrime ? prime : null, cpiNow },
   };
+});
+
+/**
+ * Manual override for the bank-loan payment linker. Body `{ loanId }`
+ * attaches the transaction; `{ loanId: null }` unlinks. The next sync's
+ * auto-matcher skips rows that already have loan_id set, so a manual
+ * choice (link OR explicit unlink) sticks.
+ */
+app.patch('/transactions/:id/loan', async (req, reply) => {
+  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+  const { id } = req.params as { id: string };
+  const body = (req.body ?? {}) as { loanId?: string | null };
+  const loanId = body.loanId ?? null;
+  if (loanId !== null && !repo.getLoan(loanId)) {
+    return reply.code(404).send({ error: 'loan not found' });
+  }
+  try {
+    repo.setTransactionLoan(id, loanId);
+    return { ok: true, loanId };
+  } catch (err) {
+    return reply.code(500).send({ error: (err as Error).message });
+  }
 });
 
 app.post('/loans', async (req, reply) => {

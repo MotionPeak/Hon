@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-export const SCHEMA_VERSION = 33;
+export const SCHEMA_VERSION = 34;
 
 export interface DbHandle {
   db: Database.Database;
@@ -648,6 +648,14 @@ const MIGRATIONS: { version: number; sql: string }[] = [
     // delete-time null-out step.
     version: 33,
     sql: `ALTER TABLE transactions ADD COLUMN loan_id TEXT;`,
+  },
+  {
+    // Partial index on transactions.loan_id — only includes rows that
+    // have a link, which is a small minority of the table. Speeds up
+    // listLoanPayments(loanId) (Loans card history reads) without the
+    // size cost of indexing every NULL row.
+    version: 34,
+    sql: `CREATE INDEX IF NOT EXISTS idx_txn_loan_id ON transactions (loan_id) WHERE loan_id IS NOT NULL;`,
   },
 ];
 

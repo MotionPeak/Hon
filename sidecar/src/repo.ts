@@ -1989,9 +1989,13 @@ export class Repo {
     });
 
     // Backfill the 12-month window of this connection's transactions:
-    // every negative-amount, loan_id=null row that matches the new loan
-    // gets attached so the Loans card has history straight away instead
-    // of waiting for the next month's payment to land.
+    // every negative-amount, loan_id=null row that matches ANY of the
+    // connection's loans (including the one just created) gets attached.
+    // This is deliberately wider than "the new loan only" — pre-existing
+    // loans that the matcher couldn't disambiguate before (e.g. multi-
+    // loan ties that broke once the new loan added an externalId hit)
+    // get a second chance here. Net effect: the Loans card has history
+    // straight away instead of waiting for the next month's payment.
     const cutoff = new Date();
     cutoff.setMonth(cutoff.getMonth() - 12);
     const cutoffIso = cutoff.toISOString().slice(0, 10);
