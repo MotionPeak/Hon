@@ -2402,16 +2402,18 @@ button.mini { padding: 5px 11px; font-size: 12px; }
 
 /* --- Category-tile picker (matches legacy SPA design) ------------------ */
 .pick-grid {
-  display: grid; grid-template-columns: repeat(3, 1fr);
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px; margin: 8px 0 4px;
 }
 .pick-card {
-  flex: 1; border: 1px solid var(--hairline-2); border-radius: 13px;
+  min-width: 0;
+  border: 1px solid var(--hairline-2); border-radius: 13px;
   padding: 20px 8px; text-align: center; cursor: pointer; background: var(--card-hi);
   font-size: 13px; font-weight: 700;
   transition: border-color 0.15s, transform 0.12s;
   color: var(--text);
   display: flex; flex-direction: column; align-items: center; justify-content: center;
+  overflow-wrap: break-word; word-break: break-word;
 }
 .pick-card:hover:not(:disabled) { border-color: var(--accent); transform: translateY(-2px); }
 .pick-card:disabled { opacity: 0.5; cursor: not-allowed; }
