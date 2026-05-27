@@ -620,14 +620,17 @@ describe('AccountsView — add connection (picker + bank/card form)', () => {
     expect(within(dialog).getByRole('button', { name: /other asset/i })).toBeInTheDocument();
   });
 
-  it('the brokerage drilldown shows SnapTrade; pension category is hidden (still a separate flow)', async () => {
+  it('the brokerage drilldown shows SnapTrade; Pension and Car tiles render disabled (flows live in legacy)', async () => {
     const user = userEvent.setup();
     installFetchMock({ ...FULL, 'GET /api/companies': () => COMPANIES_FULL });
     render(<AccountsView />);
     await user.click(await screen.findByRole('button', { name: /add asset/i }));
     const dialog = screen.getByRole('dialog', { name: /add an asset/i });
-    // No Pension tile yet — pension flow lives in a later phase.
-    expect(within(dialog).queryByRole('button', { name: /pension/i })).toBeNull();
+    // Pension + Car tiles are visible but disabled until their flows are ported.
+    const pension = within(dialog).getByRole('button', { name: /pension/i });
+    const car = within(dialog).getByRole('button', { name: /^car/i });
+    expect(pension).toBeDisabled();
+    expect(car).toBeDisabled();
     // Drill into Brokerages → SnapTrade row appears.
     await user.click(within(dialog).getByRole('button', { name: /brokerages/i }));
     expect(within(dialog).getByText(/SnapTrade/i)).toBeInTheDocument();

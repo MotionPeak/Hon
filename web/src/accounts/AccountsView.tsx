@@ -1143,7 +1143,7 @@ interface AddConnectionPickerProps {
   onClose: () => void;
 }
 
-type PickerCategory = 'bank' | 'card' | 'brokerage' | 'loan' | 'asset';
+type PickerCategory = 'bank' | 'card' | 'brokerage' | 'car' | 'pension' | 'loan' | 'asset';
 
 interface CategoryTile {
   key: PickerCategory;
@@ -1153,12 +1153,21 @@ interface CategoryTile {
   leaf?: 'manual-asset' | 'manual-loan';
   /** Static sub-label when the count would be misleading (e.g. SnapTrade). */
   subOverride?: string;
+  /** Disabled until the flow lands in the React app. */
+  comingSoon?: boolean;
 }
 
 const PICKER_TILES: CategoryTile[] = [
   { key: 'bank', label: 'Banks', emoji: '🏦' },
   { key: 'card', label: 'Credit cards', emoji: '💳' },
   { key: 'brokerage', label: 'Brokerages', emoji: '📈', subOverride: 'via SnapTrade' },
+  // Car + Pension are intentionally shown but disabled — the flows
+  // still live in the legacy SPA; the tiles keep the React picker visually
+  // aligned with the legacy design until those flows are ported.
+  { key: 'car', label: 'Car', emoji: '🚗', subOverride: 'looked up by plate',
+    comingSoon: true },
+  { key: 'pension', label: 'Pension & savings', emoji: '🪺',
+    subOverride: 'pension, gemel & study fund', comingSoon: true },
   { key: 'loan', label: 'Loan', emoji: '📉', leaf: 'manual-loan',
     subOverride: 'mortgage, car loan, prime / CPI-linked' },
   { key: 'asset', label: 'Other asset', emoji: '💎', leaf: 'manual-asset',
@@ -1196,6 +1205,8 @@ function AddConnectionPicker(
               onClick={onClick}
               data-tile={tile.key}
               aria-label={tile.label}
+              disabled={tile.comingSoon}
+              title={tile.comingSoon ? 'Coming soon — use the legacy view for now' : undefined}
             >
               <span className="pc-emoji">{tile.emoji}</span>
               <span className="pc-label">{tile.label}</span>
