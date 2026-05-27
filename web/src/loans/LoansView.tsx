@@ -34,6 +34,14 @@ export function LoansView() {
       .catch(() => setData({ loans: [], rates: { prime: null, cpiNow: null } }));
   }, []);
 
+  // Clear the "unseen loan ids" queue the moment the user opens this tab.
+  // The Loans-nav dot in App.tsx reads the same key + the custom event;
+  // emitting it drops the dot immediately even though it polls localStorage.
+  useEffect(() => {
+    window.localStorage.setItem('hon.unseenLoanIds', JSON.stringify([]));
+    window.dispatchEvent(new Event('hon.loan-ids-changed'));
+  }, []);
+
   if (data === null) return <DelayedLoader />;
 
   if (data.loans.length === 0) {

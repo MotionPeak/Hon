@@ -1645,6 +1645,43 @@ button.mini { padding: 5px 11px; font-size: 12px; }
   animation: fade .25s ease both;
 }
 
+/* New-loan banner — sits at the top of the Assets tab after a sync
+   has detected a loan the user hadn't seen before. */
+.new-loan-banner {
+  display: flex; align-items: center; gap: 10px;
+  margin: 10px 0 14px; padding: 11px 14px;
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--hairline));
+  border-radius: 12px;
+  animation: fade-up .3s cubic-bezier(.2,.8,.2,1) both;
+}
+.new-loan-banner-emoji { font-size: 18px; }
+.new-loan-banner-link {
+  background: transparent; border: 0; padding: 0;
+  color: var(--accent); font-weight: 700; cursor: pointer;
+  text-decoration: underline;
+}
+.new-loan-banner-dismiss {
+  background: transparent; border: 0; padding: 4px 8px; cursor: pointer;
+  color: var(--muted); font-size: 13px; border-radius: 8px;
+}
+.new-loan-banner-dismiss:hover { background: var(--card-hi); color: var(--text); }
+
+/* Loans nav-button unseen dot — small amber pulse in the top-right. */
+.app-nav .nav-btn[data-unseen]::after {
+  content: ''; position: absolute; top: 6px; right: 6px;
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 0 rgba(245,159,36,0.6);
+  animation: hon-unseen-pulse 1.6s ease-out infinite;
+  z-index: 2;
+}
+@keyframes hon-unseen-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(245,159,36,0.6); }
+  70%  { box-shadow: 0 0 0 8px rgba(245,159,36,0); }
+  100% { box-shadow: 0 0 0 0 rgba(245,159,36,0); }
+}
+
 /* Loan card: last-paid badge + collapsible payment history. */
 .loan-last-paid {
   font-size: 12px; font-weight: 600;

@@ -48,6 +48,27 @@ export function App() {
   const [tab, setTab] = useState<Tab>('overview');
   const [health, setHealth] = useState<Health | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
+
+  // Reads localStorage['hon.unseenLoanIds'] (written by AccountsView's
+  // new-loan detector). Non-empty → the Loans nav button gets data-unseen
+  // so it can render an amber pulse dot. Same-tab updates fire via a
+  // custom event since the browser's storage event is cross-tab only.
+  const [unseenLoanCount, setUnseenLoanCount] = useState(0);
+  useEffect(() => {
+    const read = (): void => {
+      try {
+        const v = JSON.parse(window.localStorage.getItem('hon.unseenLoanIds') ?? '[]');
+        setUnseenLoanCount(Array.isArray(v) ? v.length : 0);
+      } catch { setUnseenLoanCount(0); }
+    };
+    read();
+    window.addEventListener('hon.loan-ids-changed', read);
+    window.addEventListener('storage', read);
+    return () => {
+      window.removeEventListener('hon.loan-ids-changed', read);
+      window.removeEventListener('storage', read);
+    };
+  }, []);
   // The amber pill that slides behind the active tab. Measured from the
   // selected button after every tab change so it tracks any layout shift.
   const navRef = useRef<HTMLElement | null>(null);
@@ -145,6 +166,7 @@ export function App() {
                 role="tab"
                 aria-selected={tab === t.id}
                 className={`nav-btn${tab === t.id ? ' active' : ''}`}
+                data-unseen={t.id === 'loans' && unseenLoanCount > 0 ? 'true' : undefined}
                 onClick={() => setTab(t.id)}
               >
                 <span className="rn-ico" aria-hidden="true">{t.emoji}</span>

@@ -12,6 +12,26 @@ import { DelayedLoader } from '../ui/DelayedLoader';
 // a CPU/network drag.
 const SCRAPE_POLL_INTERVAL_MS = 200;
 
+// localStorage keys backing the new-loan detection.
+// - `STORE_KNOWN`: ids the user has acknowledged (cleared + rewritten when
+//   they open the Loans tab OR dismiss the banner).
+// - `STORE_UNSEEN`: queue of fresh ids that triggered the banner / nav dot.
+// The custom event lets same-tab listeners (the nav dot in App.tsx)
+// re-render — the built-in `storage` event only fires across tabs.
+const STORE_KNOWN = 'hon.knownLoanIds';
+const STORE_UNSEEN = 'hon.unseenLoanIds';
+const LOAN_IDS_EVENT = 'hon.loan-ids-changed';
+const readLoanIds = (key: string): string[] => {
+  try {
+    const v = JSON.parse(window.localStorage.getItem(key) ?? '[]');
+    return Array.isArray(v) ? v : [];
+  } catch { return []; }
+};
+const writeLoanIds = (key: string, ids: string[]): void => {
+  window.localStorage.setItem(key, JSON.stringify(Array.from(new Set(ids))));
+  window.dispatchEvent(new Event(LOAN_IDS_EVENT));
+};
+
 interface RunStatus {
   runId: string;
   connectionId: string;
@@ -142,6 +162,33 @@ export function AccountsView() {
 
   useEffect(() => { void refresh(); }, [refresh]);
 
+  // New-loan detection. After every /loans load, diff current ids against
+  // the user-acknowledged set in localStorage; unfamiliar ids land in the
+  // "unseen" queue, which renders the inline banner below and lights up
+  // the Loans sidebar nav dot. Acknowledgement happens when the user
+  // dismisses the banner or opens the Loans tab.
+  const [storageTick, setStorageTick] = useState(0);
+  useEffect(() => {
+    if (!data) return;
+    const currentIds = data.loans.map((l) => l.id);
+    const known = readLoanIds(STORE_KNOWN);
+    const fresh = currentIds.filter((id) => !known.includes(id));
+    if (fresh.length === 0) return;
+    const unseen = readLoanIds(STORE_UNSEEN);
+    writeLoanIds(STORE_UNSEEN, [...unseen, ...fresh]);
+  }, [data]);
+  // Re-render when localStorage changes (the dismiss button mutates it).
+  useEffect(() => {
+    const h = (): void => setStorageTick((t) => t + 1);
+    window.addEventListener(LOAN_IDS_EVENT, h);
+    window.addEventListener('storage', h);
+    return () => {
+      window.removeEventListener(LOAN_IDS_EVENT, h);
+      window.removeEventListener('storage', h);
+    };
+  }, []);
+  void storageTick; // touched only as a re-render trigger
+
   // Clear all polling timers on unmount.
   useEffect(() => {
     const timers = pollTimers.current;
@@ -269,6 +316,7 @@ export function AccountsView() {
           + Add asset
         </button>
       </div>
+      <NewLoanBanner data={data} />
       <div className="assets-grid">
         {SECTIONS.map((s) => {
           const count = sectionCount(s.key);
@@ -430,6 +478,45 @@ interface RowCallbacks {
   syncStates: Record<string, SyncState>;
   holdings: Holding[];
   expandedHoldings: Record<string, boolean>;
+}
+
+function NewLoanBanner({ data }: { data: AccountsData }) {
+  const unseen = readLoanIds(STORE_UNSEEN);
+  if (unseen.length === 0) return null;
+  const ids = new Set(unseen);
+  const newLoans = data.loans.filter((l) => ids.has(l.id));
+  if (newLoans.length === 0) return null;
+  const connNameById = new Map(data.connections.map((c) => [c.id, c.displayName]));
+  const bankNames = Array.from(new Set(
+    newLoans.map((l) => (l.connectionId && connNameById.get(l.connectionId)) || 'a connection'),
+  ));
+  const dismiss = (): void => {
+    const known = readLoanIds(STORE_KNOWN);
+    writeLoanIds(STORE_KNOWN, [...known, ...unseen]);
+    writeLoanIds(STORE_UNSEEN, []);
+  };
+  return (
+    <div className="new-loan-banner" data-testid="new-loan-banner">
+      <span className="new-loan-banner-emoji">✨</span>
+      <span>
+        Found {newLoans.length} new loan{newLoans.length === 1 ? '' : 's'}
+        {' from '}{bankNames.join(', ')}
+        {' — '}
+        <button
+          type="button"
+          className="new-loan-banner-link"
+          onClick={dismiss}
+        >View in Loans</button>
+      </span>
+      <span className="spacer" />
+      <button
+        type="button"
+        className="new-loan-banner-dismiss"
+        aria-label="Dismiss"
+        onClick={dismiss}
+      >✕</button>
+    </div>
+  );
 }
 
 function renderSectionItems(key: AssetSectionKey, data: AccountsData, cb: RowCallbacks) {
