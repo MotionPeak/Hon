@@ -83,3 +83,83 @@ describe('LoansView', () => {
     expect(screen.getByText(/65%/)).toBeInTheDocument();
   });
 });
+
+describe('LoansView — payment history', () => {
+  const today = new Date();
+  const isoDaysAgo = (n: number) => {
+    const d = new Date(today); d.setDate(d.getDate() - n);
+    return d.toISOString().slice(0, 10);
+  };
+  const loanWithPayments = (overrideDays = 10, count = 2) => ({
+    id: 'L1', name: 'Mortgage', principal: 100000, startDate: '2024-01-01',
+    termMonths: 120, isPrime: false, isCpiLinked: false, rateValue: 0.04,
+    cpiStart: null, currency: 'ILS', excluded: false, notes: null,
+    connectionId: 'C1', externalId: '12345678', nameOverridden: false,
+    createdAt: '2025-01-01', updatedAt: '2025-01-01',
+    rateType: 'fixed' as const,
+    state: {
+      monthsElapsed: 12, monthsRemaining: 108, annualRate: 0.04,
+      monthlyPayment: 1747, outstanding: 92000, totalPaid: 21000,
+      progress: 0.1, cpiRatio: 1,
+    },
+    payments: Array.from({ length: count }, (_, i) => ({
+      id: `t${i}`,
+      date: isoDaysAgo(overrideDays + i * 30),
+      amount: -1747.17,
+      accountId: 'a',
+      description: 'הלואה',
+    })),
+  });
+
+  it('renders a Last payment badge when payments exist', async () => {
+    installFetchMock({
+      'GET /api/loans': () => ({
+        loans: [loanWithPayments()],
+        rates: { prime: 6, cpiNow: 1 },
+      }),
+    });
+    render(<LoansView />);
+    const badge = (await screen.findByText(/last payment/i)).closest('.loan-last-paid')!;
+    expect(within(badge as HTMLElement).getByText(/1,?747/)).toBeInTheDocument();
+  });
+
+  it('flips to "Possibly missed" when the last payment is older than 35 days', async () => {
+    installFetchMock({
+      'GET /api/loans': () => ({
+        loans: [loanWithPayments(50, 1)],
+        rates: { prime: 6, cpiNow: 1 },
+      }),
+    });
+    render(<LoansView />);
+    expect(await screen.findByText(/possibly missed/i)).toBeInTheDocument();
+  });
+
+  it('does NOT render the badge when payments is empty', async () => {
+    const base = loanWithPayments();
+    base.payments = [];
+    installFetchMock({
+      'GET /api/loans': () => ({
+        loans: [base],
+        rates: { prime: 6, cpiNow: 1 },
+      }),
+    });
+    render(<LoansView />);
+    await screen.findByText('Mortgage');
+    expect(screen.queryByText(/last payment/i)).not.toBeInTheDocument();
+  });
+
+  it('history toggle reveals every linked payment, newest-first', async () => {
+    const user = (await import('@testing-library/user-event')).default.setup();
+    installFetchMock({
+      'GET /api/loans': () => ({
+        loans: [loanWithPayments(10, 3)],
+        rates: { prime: 6, cpiNow: 1 },
+      }),
+    });
+    render(<LoansView />);
+    await user.click(await screen.findByRole('button', { name: /3 payments/i }));
+    const list = await screen.findByTestId('loan-history-L1');
+    const rows = within(list).getAllByRole('listitem');
+    expect(rows).toHaveLength(3);
+  });
+});

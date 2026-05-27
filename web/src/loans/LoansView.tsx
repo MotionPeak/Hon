@@ -144,6 +144,64 @@ function LoanCardRich({ loan, primeNow }: { loan: Loan; primeNow: number | null 
           <span> interest</span>
         </div>
       )}
+      <LoanPaymentHistory loan={loan} />
     </article>
+  );
+}
+
+function LoanPaymentHistory({ loan }: { loan: Loan }) {
+  const [open, setOpen] = useState(false);
+  const [showAll, setShowAll] = useState(false);
+  const payments = loan.payments ?? [];
+  if (payments.length === 0) return null;
+  const last = payments[0]!;
+  // ~35 days since the last payment is the rough overdue threshold. Anything
+  // older flips the badge to amber + "Possibly missed".
+  const daysSince = Math.round(
+    (Date.now() - new Date(last.date).getTime()) / 86_400_000,
+  );
+  const overdue = daysSince > 35;
+  const visible = showAll ? payments : payments.slice(0, 24);
+  return (
+    <>
+      <div className={`loan-last-paid ${overdue ? 'overdue' : 'ok'}`}>
+        {overdue ? '⚠ Possibly missed' : '✓ Last payment'}
+        {' · '}
+        <b>{money(Math.abs(last.amount), loan.currency)}</b>
+        {' on '}
+        {new Date(last.date).toLocaleDateString(undefined,
+          { day: 'numeric', month: 'short' })}
+      </div>
+      <button
+        type="button"
+        className="loan-history-toggle"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+      >
+        {open ? '▴' : '▾'} {payments.length} payment{payments.length === 1 ? '' : 's'}
+      </button>
+      {open && (
+        <ul className="loan-history" data-testid={`loan-history-${loan.id}`}>
+          {visible.map((p) => (
+            <li key={p.id} className="loan-history-row">
+              <span className="loan-history-date">
+                {new Date(p.date).toLocaleDateString(undefined,
+                  { day: 'numeric', month: 'short', year: 'numeric' })}
+              </span>
+              <span className="loan-history-amt">
+                {money(Math.abs(p.amount), loan.currency)}
+              </span>
+            </li>
+          ))}
+          {!showAll && payments.length > 24 && (
+            <li className="loan-history-more">
+              <button type="button" onClick={() => setShowAll(true)}>
+                Show {payments.length - 24} more
+              </button>
+            </li>
+          )}
+        </ul>
+      )}
+    </>
   );
 }
