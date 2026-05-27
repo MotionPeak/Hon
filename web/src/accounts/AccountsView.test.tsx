@@ -618,13 +618,15 @@ describe('AccountsView — add connection (picker + bank/card form)', () => {
     expect(within(dialog).getByText('Max')).toBeInTheDocument();
   });
 
-  it('the picker hides brokerage and pension companies (separate flows)', async () => {
+  it('the picker hides pension companies (still a separate flow) but shows brokerage (SnapTrade)', async () => {
     const user = userEvent.setup();
     installFetchMock({ ...FULL, 'GET /api/companies': () => COMPANIES_FULL });
     render(<AccountsView />);
     await user.click(await screen.findByRole('button', { name: /add asset/i }));
     const dialog = screen.getByRole('dialog', { name: /add an asset/i });
-    expect(within(dialog).queryByText('SnapTrade')).not.toBeInTheDocument();
+    // SnapTrade is brokerage and now routes through the link-flow wizard.
+    expect(within(dialog).getByText(/SnapTrade/i)).toBeInTheDocument();
+    // Pension still has its own visible-window flow — keep it out of this picker.
     expect(within(dialog).queryByText('Harel')).not.toBeInTheDocument();
   });
 

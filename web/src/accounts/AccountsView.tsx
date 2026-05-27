@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, lazy, Suspense, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { api, ApiError } from '../api';
 import { money } from '../format';
@@ -6,6 +6,10 @@ import type {
   Account, AssetSectionKey, Company, Connection, Holding, Loan, ManualAsset,
 } from './types';
 import { DelayedLoader } from '../ui/DelayedLoader';
+
+const SnapTradeLinkFlow = lazy(() =>
+  import('./SnapTradeLinkFlow').then((m) => ({ default: m.SnapTradeLinkFlow })),
+);
 
 // Polling interval while a scrape is in-flight. Short enough that tests
 // resolve quickly via waitFor; long enough that production polling isn't
@@ -131,6 +135,9 @@ export function AccountsView() {
   //   'manual-loan'   — form for a hand-entered loan (Spitzer amortisation)
   type AddFlow = null | 'picker' | 'manual-asset' | 'manual-loan' | Company;
   const [addFlow, setAddFlow] = useState<AddFlow>(null);
+  // When set, render <SnapTradeLinkFlow> in its own modal portal. Holds the
+  // connectionId of the newly-created (or existing) SnapTrade connection.
+  const [linkSnapTradeFor, setLinkSnapTradeFor] = useState<string | null>(null);
 
   const toggleHoldings = useCallback((accountId: string) => {
     setExpandedHoldings((prev) => ({ ...prev, [accountId]: !prev[accountId] }));
@@ -436,8 +443,37 @@ export function AccountsView() {
         <AddConnectionForm
           company={addFlow}
           onClose={() => setAddFlow(null)}
-          onSaved={async () => { setAddFlow(null); await refresh(); }}
+          onSaved={async (connectionId) => {
+            await refresh();
+            if (addFlow.type === 'brokerage') {
+              setAddFlow(null);
+              setLinkSnapTradeFor(connectionId);
+            } else {
+              setAddFlow(null);
+            }
+          }}
         />
+      )}
+      {linkSnapTradeFor !== null && (
+        <ModalPortal>
+          <div className="overlay">
+            <div role="dialog" aria-label="Link a brokerage" className="modal">
+              <Suspense fallback={<p className="snaptrade-flow-loading">Loading…</p>}>
+                <SnapTradeLinkFlow
+                  connectionId={linkSnapTradeFor}
+                  onLinked={async () => {
+                    const before = data?.accounts.length ?? 0;
+                    await api(`/connections/${linkSnapTradeFor}/scrape`, 'POST', {});
+                    await refresh();
+                    const after = data?.accounts.length ?? 0;
+                    return { accountsAdded: Math.max(0, after - before) };
+                  }}
+                  onCancel={() => setLinkSnapTradeFor(null)}
+                />
+              </Suspense>
+            </div>
+          </div>
+        </ModalPortal>
       )}
       {(() => {
         // Render at most one OTP modal — the first connection that needs one.
@@ -1078,9 +1114,11 @@ function AddConnectionPicker(
     AddConnectionPickerProps,
 ) {
   const [query, setQuery] = useState('');
-  // Only bank + card flows are handled here; brokerage (SnapTrade) and
-  // pension have their own multi-step flows that land in later sessions.
-  const supported = companies.filter((c) => c.type === 'bank' || c.type === 'card');
+  // Bank + card + brokerage (SnapTrade) routed here. Pension still uses
+  // its own multi-step flow that lands in a later session.
+  const supported = companies.filter(
+    (c) => c.type === 'bank' || c.type === 'card' || c.type === 'brokerage',
+  );
   const q = query.toLowerCase();
   const filtered = supported.filter((c) => c.name.toLowerCase().includes(q));
   // Show the manual-asset / manual-loan rows when the query matches
@@ -1247,7 +1285,7 @@ function AddManualAssetForm({ onClose, onSaved }: AddManualAssetFormProps) {
 interface AddConnectionFormProps {
   company: Company;
   onClose: () => void;
-  onSaved: () => void | Promise<void>;
+  onSaved: (connectionId: string) => void | Promise<void>;
 }
 
 function AddConnectionForm({ company, onClose, onSaved }: AddConnectionFormProps) {
@@ -1264,12 +1302,14 @@ function AddConnectionForm({ company, onClose, onSaved }: AddConnectionFormProps
       return;
     }
     try {
-      await api('/connections', 'POST', {
-        companyId: company.id,
-        displayName: displayName.trim(),
-        credentials,
-      });
-      await onSaved();
+      const created = await api<{ connection: Connection }>(
+        '/connections', 'POST', {
+          companyId: company.id,
+          displayName: displayName.trim(),
+          credentials,
+        },
+      );
+      await onSaved(created.connection.id);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e));
     }
