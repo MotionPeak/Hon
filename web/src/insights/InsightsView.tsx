@@ -6,7 +6,9 @@ import { money } from '../format';
 import { useSettings } from '../settings/useSettings';
 import type { Category } from '../settings/CategoriesPanel';
 import type { Transaction } from '../activity/types';
+import type { Account } from '../accounts/types';
 import { cycleAnalytics, type MonthBucket } from './analytics';
+import { smoothPath } from './smooth';
 
 function monthLetter(key: string): string {
   // "2026-05" → "M" (English month letter — matches the legacy app).
@@ -279,18 +281,135 @@ function pickDisplayCurrency(holdings: { currency: string }[]): string {
   return best;
 }
 
+interface AccountPillsProps {
+  accounts: Account[];
+  value: 'all' | string;
+  onChange: (next: 'all' | string) => void;
+}
+
+/** Segmented "All accounts" + per-account filter row above the chart.
+ *  Pure presentational — the parent decides which accounts are eligible
+ *  (brokerage-with-snapshots) and owns the selection state. */
+function AccountPills({ accounts, value, onChange }: AccountPillsProps) {
+  return (
+    <div className="brk-acct-row" role="group" aria-label="Accounts">
+      <button
+        type="button"
+        className={`brk-acct-pill${value === 'all' ? ' on' : ''}`}
+        aria-pressed={value === 'all'}
+        onClick={() => onChange('all')}
+      >All accounts</button>
+      {accounts.map((a) => (
+        <button
+          key={a.id}
+          type="button"
+          className={`brk-acct-pill${value === a.id ? ' on' : ''}`}
+          aria-pressed={value === a.id}
+          onClick={() => onChange(a.id)}
+        >{a.label || `Account ${a.accountNumber}`}</button>
+      ))}
+    </div>
+  );
+}
+
+interface InceptionInputProps {
+  account: Account;
+  onSaved: () => void | Promise<void>;
+}
+
+/** Per-account "investment start" editor. Lets the user pin the date
+ *  from which their snapshot history is real — synthetic backfill
+ *  before that date is hidden from the chart. PATCHes the engine on
+ *  every commit and asks the parent to refetch so the chart redraws. */
+function InceptionInput({ account, onSaved }: InceptionInputProps) {
+  const [value, setValue] = useState<string>(account.inceptionDate ?? '');
+  // Keep in sync when the focused account changes from the parent.
+  useEffect(() => {
+    setValue(account.inceptionDate ?? '');
+  }, [account.id, account.inceptionDate]);
+  const save = async (next: string): Promise<void> => {
+    await api(
+      `/accounts/${encodeURIComponent(account.id)}/inception`,
+      'PATCH',
+      { inceptionDate: next || null },
+    );
+    await onSaved();
+  };
+  return (
+    <div className="brk-inception-row">
+      <label className="brk-inception-label">
+        <span>Investment start</span>
+        <input
+          type="date"
+          className="brk-inception-input"
+          value={value}
+          onChange={(e) => {
+            setValue(e.target.value);
+            void save(e.target.value);
+          }}
+        />
+      </label>
+      {value && (
+        <button
+          type="button"
+          className="brk-inception-clear"
+          aria-label="Clear inception date"
+          onClick={() => { setValue(''); void save(''); }}
+        >×</button>
+      )}
+      {value && (
+        <span className="brk-inception-hint">
+          Synthetic backfill before this date is hidden.
+        </span>
+      )}
+    </div>
+  );
+}
+
+interface InceptionBadgeProps {
+  earliest: string | null;
+}
+
+/** Read-only "Since YYYY-MM-DD (earliest)" badge for the All-accounts
+ *  view. No edit affordance — per-account inception is the source of
+ *  truth and we don't want a mass-edit here that silently overwrites
+ *  per-account customisation. */
+function InceptionBadge({ earliest }: InceptionBadgeProps) {
+  if (!earliest) return null;
+  return (
+    <div className="brk-inception-badge">
+      Since {earliest} (earliest)
+    </div>
+  );
+}
+
 function BrokerageSubTab() {
   const [data, setData] = useState<BrokerageResp | null>(null);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [acctFilter, setAcctFilter] = useState<'all' | string>('all');
   const [range, setRange] = useState<Range>('1Y');
   const [displayCur, setDisplayCur] = useState<string | null>(null);
-  useEffect(() => {
-    api<BrokerageResp>('/brokerage')
-      .then(setData)
-      .catch(() => setData({
+
+  const refresh = useCallback(async () => {
+    try {
+      const [b, a] = await Promise.all([
+        api<BrokerageResp>('/brokerage'),
+        api<{ accounts: Account[] }>('/accounts').catch(
+          () => ({ accounts: [] as Account[] }),
+        ),
+      ]);
+      setData(b);
+      setAccounts(a.accounts);
+    } catch {
+      setData({
         holdings: [], snapshots: [], holdingSnapshots: [],
         performance: [], ilsRates: null,
-      }));
+      });
+    }
   }, []);
+
+  useEffect(() => { void refresh(); }, [refresh]);
+
   if (data === null) return <DelayedLoader />;
   if (data.holdings.length === 0 && data.snapshots.length === 0) {
     return (
@@ -303,9 +422,52 @@ function BrokerageSubTab() {
   const rates = data.ilsRates;
   const cur = displayCur ?? pickDisplayCurrency(data.holdings);
 
+  // Brokerage accounts in scope of the pills: any account with at
+  // least one snapshot in /brokerage. The engine only writes snapshots
+  // for brokerage accounts, so the intersection is the right filter
+  // without a separate company.type check.
+  const brkAcctIds = new Set(data.snapshots.map((s) => s.accountId));
+  const brkAccounts = accounts.filter((a) => brkAcctIds.has(a.id));
+
+  // For the All-accounts view we show a read-only earliest-inception
+  // badge instead of an editable input. The "earliest" is
+  // min(account.inceptionDate ?? firstSnapshotDate for that account) —
+  // accounts without an inception use the first date the engine has
+  // ever seen for them as the implicit starting point.
+  const firstSnapByAcct = new Map<string, string>();
+  for (const s of data.snapshots) {
+    const cur = firstSnapByAcct.get(s.accountId);
+    if (!cur || s.date < cur) firstSnapByAcct.set(s.accountId, s.date);
+  }
+  const earliestCandidates = brkAccounts
+    .map((a) => a.inceptionDate ?? firstSnapByAcct.get(a.id) ?? null)
+    .filter((d): d is string => d !== null);
+  const earliestInception: string | null = earliestCandidates.length === 0
+    ? null
+    : earliestCandidates.reduce((m, d) => d < m ? d : m, earliestCandidates[0]!);
+
+  // Focused account (when a specific pill is on) — drives the
+  // InceptionInput.
+  const focusedAccount = acctFilter === 'all'
+    ? null
+    : brkAccounts.find((a) => a.id === acctFilter) ?? null;
+
+  // Snapshots scoped to the current acctFilter, with the focused
+  // account's inceptionDate applied as a min-cutoff to drop synthetic
+  // backfill from before the user actually held the account.
+  const scopedSnapshots = acctFilter === 'all'
+    ? data.snapshots
+    : (() => {
+        const focused = brkAccounts.find((a) => a.id === acctFilter);
+        const inception = focused?.inceptionDate ?? null;
+        return data.snapshots.filter((s) =>
+          s.accountId === acctFilter && (!inception || s.date >= inception),
+        );
+      })();
+
   // Full series (sum across accounts), in the display currency.
   const dailyTotals = new Map<string, number>();
-  for (const s of data.snapshots) {
+  for (const s of scopedSnapshots) {
     const v = convertAmount(s.value, s.currency, cur, rates);
     dailyTotals.set(s.date, (dailyTotals.get(s.date) ?? 0) + v);
   }
@@ -348,6 +510,20 @@ function BrokerageSubTab() {
 
   return (
     <div className="brokerage-pane">
+      {brkAccounts.length > 0 && (
+        <AccountPills
+          accounts={brkAccounts}
+          value={acctFilter}
+          onChange={setAcctFilter}
+        />
+      )}
+      {acctFilter === 'all' ? (
+        <InceptionBadge earliest={earliestInception} />
+      ) : (
+        focusedAccount && (
+          <InceptionInput account={focusedAccount} onSaved={refresh} />
+        )
+      )}
       <div className="brk-stats" data-testid="brokerage-stats">
         <StatBox
           label="Portfolio value"
@@ -515,7 +691,8 @@ function ValueChart({
     n === 1 ? PAD.l + innerW / 2 : PAD.l + (i / (n - 1)) * innerW;
   const y = (v: number): number =>
     PAD.t + innerH - ((v - min) / range) * innerH;
-  const path = series.map((p, i) => `${i === 0 ? 'M' : 'L'} ${x(i)} ${y(p.value)}`).join(' ');
+  const pts = series.map((p, i) => ({ x: x(i), y: y(p.value) }));
+  const path = smoothPath(pts);
   const area = `${path} L ${x(n - 1)} ${PAD.t + innerH} L ${x(0)} ${PAD.t + innerH} Z`;
   return (
     <svg
@@ -539,7 +716,7 @@ function ValueChart({
         strokeLinejoin="round"
         strokeLinecap="round"
       />
-      {series.map((p, i) => (
+      {n <= 24 && series.map((p, i) => (
         <circle
           key={p.date}
           cx={x(i)}

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen, within, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, within, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { InsightsView } from './InsightsView';
 import { SettingsProvider } from '../settings/useSettings';
@@ -232,6 +232,10 @@ describe('InsightsView — Spending sub-tab', () => {
 const EMPTY_TXNS = {
   'GET /api/transactions': () => ({ transactions: [] }),
   'GET /api/categories': () => CATEGORIES,
+  // BrokerageSubTab fetches /accounts alongside /brokerage to drive the
+  // per-account filter pills. Default to empty so tests that don't
+  // override stay focused on what they care about.
+  'GET /api/accounts': () => ({ accounts: [] }),
 };
 const EMPTY_BROKERAGE = {
   'GET /api/brokerage': () => ({
@@ -532,5 +536,179 @@ describe('InsightsView — Brokerage sub-tab', () => {
     // Each holding shows its market value.
     expect(within(list).getByText(/2,?000/)).toBeInTheDocument();
     expect(within(list).getByText(/2,?400/)).toBeInTheDocument();
+  });
+});
+
+describe('InsightsView — brokerage account pills', () => {
+  const accountsResp = {
+    accounts: [
+      { id: 'a-ibkr', connectionId: 'c-st', companyId: 'snaptrade',
+        connectionName: 'IBKR', accountNumber: '123', label: 'IBKR USD',
+        balance: 4302.44, currency: 'USD', updatedAt: '2026-05-25',
+        excluded: false, inceptionDate: null },
+      { id: 'a-vg', connectionId: 'c-st', companyId: 'snaptrade',
+        connectionName: 'IBKR', accountNumber: '456', label: 'Vanguard',
+        balance: 1234, currency: 'USD', updatedAt: '2026-05-25',
+        excluded: false, inceptionDate: '2024-06-01' },
+      { id: 'a-bank', connectionId: 'c-b', companyId: 'beinleumi',
+        connectionName: 'Beinleumi', accountNumber: '789', label: 'Checking',
+        balance: -2187, currency: 'ILS', updatedAt: '2026-05-25',
+        excluded: false, inceptionDate: null },
+    ],
+  };
+
+  const brokerageResp = {
+    holdings: [
+      { accountId: 'a-ibkr', symbol: 'AAPL', description: 'Apple',
+        units: 10, price: 200, currency: 'USD',
+        costBasis: 1500, openPnl: 500, value: 2000, updatedAt: '2026-05-25' },
+      { accountId: 'a-vg', symbol: 'VOO', description: 'S&P 500',
+        units: 5, price: 400, currency: 'USD',
+        costBasis: 1800, openPnl: 200, value: 2000, updatedAt: '2026-05-25' },
+    ],
+    snapshots: [
+      { accountId: 'a-ibkr', date: '2024-05-01', value: 1500, currency: 'USD' },
+      { accountId: 'a-ibkr', date: '2025-05-01', value: 1800, currency: 'USD' },
+      { accountId: 'a-ibkr', date: '2026-05-01', value: 2000, currency: 'USD' },
+      { accountId: 'a-vg',   date: '2024-01-01', value:  900, currency: 'USD' },
+      { accountId: 'a-vg',   date: '2025-01-01', value: 1500, currency: 'USD' },
+      { accountId: 'a-vg',   date: '2026-01-01', value: 2000, currency: 'USD' },
+    ],
+    holdingSnapshots: [],
+    performance: [],
+    ilsRates: { USD: 3.7 },
+  };
+
+  const baseMocks = {
+    ...EMPTY_TXNS,
+    'GET /api/brokerage': () => brokerageResp,
+    'GET /api/accounts': () => accountsResp,
+  };
+
+  async function openBrokerage(user: ReturnType<typeof userEvent.setup>) {
+    renderView();
+    await user.click(await screen.findByRole('tab', { name: /brokerage/i }));
+  }
+
+  it('renders an "All accounts" pill plus one pill per brokerage account in /brokerage', async () => {
+    installFetchMock(baseMocks);
+    const user = userEvent.setup();
+    await openBrokerage(user);
+    const group = await screen.findByRole('group', { name: /accounts/i });
+    expect(within(group).getByRole('button', { name: /all accounts/i })).toBeInTheDocument();
+    expect(within(group).getByRole('button', { name: /IBKR USD/ })).toBeInTheDocument();
+    expect(within(group).getByRole('button', { name: /Vanguard/ })).toBeInTheDocument();
+    // Bank account NOT in the pills (no snapshots in /brokerage).
+    expect(within(group).queryByRole('button', { name: /Checking/ })).not.toBeInTheDocument();
+  });
+
+  it('starts on "All accounts" — pill marked on, chart renders', async () => {
+    installFetchMock(baseMocks);
+    const user = userEvent.setup();
+    await openBrokerage(user);
+    const group = await screen.findByRole('group', { name: /accounts/i });
+    expect(within(group).getByRole('button', { name: /all accounts/i }))
+      .toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('brokerage-chart')).toBeInTheDocument();
+  });
+
+  it('selecting an account marks its pill on and unsets All accounts', async () => {
+    installFetchMock(baseMocks);
+    const user = userEvent.setup();
+    await openBrokerage(user);
+    const group = await screen.findByRole('group', { name: /accounts/i });
+    await user.click(within(group).getByRole('button', { name: /IBKR USD/ }));
+    expect(within(group).getByRole('button', { name: /IBKR USD/ }))
+      .toHaveAttribute('aria-pressed', 'true');
+    expect(within(group).getByRole('button', { name: /all accounts/i }))
+      .toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('hides the inception input under "All accounts" and shows the earliest read-only badge', async () => {
+    installFetchMock(baseMocks);
+    const user = userEvent.setup();
+    await openBrokerage(user);
+    await screen.findByRole('group', { name: /accounts/i });
+    expect(screen.queryByLabelText(/investment start/i)).not.toBeInTheDocument();
+    // Earliest = min(inceptionDate ?? firstSnapshotDate per account).
+    // a-ibkr has no inception; its first snapshot is 2024-05-01.
+    // a-vg has inception 2024-06-01.
+    // min = 2024-05-01.
+    expect(screen.getByText(/since 2024-05-01 \(earliest\)/i)).toBeInTheDocument();
+  });
+
+  it('reveals the inception input when a specific account is selected', async () => {
+    installFetchMock(baseMocks);
+    const user = userEvent.setup();
+    await openBrokerage(user);
+    const group = await screen.findByRole('group', { name: /accounts/i });
+    await user.click(within(group).getByRole('button', { name: /Vanguard/ }));
+    const input = screen.getByLabelText(/investment start/i) as HTMLInputElement;
+    expect(input).toHaveValue('2024-06-01');
+  });
+
+  it('editing the inception PATCHes /accounts/:id/inception and refetches', async () => {
+    const patch = vi.fn((_b: unknown) => ({ ok: true }));
+    let brokerageCalls = 0;
+    installFetchMock({
+      ...baseMocks,
+      'GET /api/brokerage': () => { brokerageCalls += 1; return brokerageResp; },
+      'PATCH /api/accounts/a-vg/inception': patch,
+    });
+    const user = userEvent.setup();
+    await openBrokerage(user);
+    const group = await screen.findByRole('group', { name: /accounts/i });
+    await user.click(within(group).getByRole('button', { name: /Vanguard/ }));
+    const input = screen.getByLabelText(/investment start/i) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: '2025-01-01' } });
+    await waitFor(() => expect(patch).toHaveBeenCalled());
+    expect(patch.mock.calls[0]?.[0]).toEqual({ inceptionDate: '2025-01-01' });
+    expect(brokerageCalls).toBeGreaterThan(1);
+  });
+
+  it('drops snapshots before account.inceptionDate when a focused account has an inception', async () => {
+    // a-vg has inceptionDate '2024-06-01' but a snapshot at '2024-01-01'.
+    // Focusing Vanguard should drop the pre-inception snapshot. We
+    // can't read the SVG path coords reliably, but the chart's dots
+    // re-render once per snapshot — so the count of <circle> drops
+    // from 3 (full Vanguard series) to 2 (post-inception).
+    installFetchMock({
+      ...baseMocks,
+      'GET /api/brokerage': () => ({
+        ...brokerageResp,
+        snapshots: brokerageResp.snapshots.filter((s) => s.accountId === 'a-vg'),
+      }),
+    });
+    const user = userEvent.setup();
+    await openBrokerage(user);
+    const group = await screen.findByRole('group', { name: /accounts/i });
+    await user.click(within(group).getByRole('button', { name: /Vanguard/ }));
+    const chart = await screen.findByTestId('brokerage-chart');
+    const dots = chart.querySelectorAll('circle');
+    // 3 snapshots total for a-vg; one is pre-inception (2024-01-01);
+    // we expect 2 after the cutoff. (Range pill defaults to 1Y which
+    // would also clip to ~1 year back from latest, but 2026-01-01 is
+    // within 1Y of latest = 2026-01-01, and 2025-01-01 is at the
+    // 1Y edge. Use ALL to remove the range filter from the picture.)
+    await user.click(screen.getByRole('button', { name: /^ALL$/ }));
+    const dotsAll = (await screen.findByTestId('brokerage-chart'))
+      .querySelectorAll('circle');
+    expect(dotsAll.length).toBe(2);
+    expect(dots.length).toBeGreaterThan(0);
+  });
+
+  it('clearing the inception PATCHes with null', async () => {
+    const patch = vi.fn((_b: unknown) => ({ ok: true }));
+    installFetchMock({
+      ...baseMocks,
+      'PATCH /api/accounts/a-vg/inception': patch,
+    });
+    const user = userEvent.setup();
+    await openBrokerage(user);
+    const group = await screen.findByRole('group', { name: /accounts/i });
+    await user.click(within(group).getByRole('button', { name: /Vanguard/ }));
+    await user.click(screen.getByRole('button', { name: /clear inception date/i }));
+    await waitFor(() => expect(patch).toHaveBeenCalled());
+    expect(patch.mock.calls[0]?.[0]).toEqual({ inceptionDate: null });
   });
 });
