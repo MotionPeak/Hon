@@ -42,7 +42,7 @@ describe('SnapTradeLinkFlow', () => {
   beforeEach(() => {
     // shouldAdvanceTime keeps waitFor from deadlocking when we're also
     // using fake timers to advance the poll interval manually.
-    vi.useFakeTimers({ shouldAdvanceTime: true, shouldAdvanceTimeDelta: 20 });
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
   });
   afterEach(() => {
