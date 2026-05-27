@@ -5,6 +5,52 @@ when I open this in a month and forget how it works). This is the
 **non-obvious** stuff — the why behind decisions that would otherwise
 look strange. The README covers what Hon does and how to run it.
 
+> **Read [HANDOFF.md](HANDOFF.md) for current state** — what's shipped,
+> what's deferred, restart workflow, recent gotchas.
+
+---
+
+## Two UIs coexist
+
+- **Legacy SPA** — `sidecar/public/app.html` (one ~10k-line file).
+  Served by the engine on `/`. Still the production UI.
+- **React app** — `web/` (Vite + React 19 + TS strict + Vitest).
+  Dev only: `cd web && npm run dev` → `http://localhost:5173/#token=…`.
+  Talks to the same engine via `vite.config.ts` proxy `/api → :4000`.
+  Tab-by-tab migration is structurally complete; will replace the
+  legacy SPA once `web/dist` is wired to the engine's `/` route.
+
+### One-command launcher (top-level `package.json`)
+
+```bash
+cd Hon && npm run dev
+# concurrently spawns engine (yellow) + vite (cyan)
+```
+
+### Persistent dev token
+
+`web.mjs` reads/writes `<dataDir>/dev-token` (mode 0600). Token
+precedence: `HON_TOKEN` env > on-disk > fresh-and-saved. URL is
+bookmarkable across restarts. **The token is the only thing between a
+local browser tab and the user's finances — never remove it.**
+
+### React-side conventions worth knowing
+
+- **Radix UI primitives** (`@radix-ui/react-dialog`,
+  `@radix-ui/react-dropdown-menu`) for modals/menus. jsdom polyfills
+  for `hasPointerCapture` / `setPointerCapture` /
+  `releasePointerCapture` / `scrollIntoView` in
+  `web/src/test/setup.ts`.
+- **Cross-component navigation via custom window events** instead
+  of prop drilling: `hon.go-to-loans` (chip → tab switch),
+  `hon.loan-ids-changed` (same-tab localStorage signal — the
+  browser's `storage` event is cross-tab only).
+- **`web/src/ui/DelayedLoader.tsx`** — 250ms grace period before
+  rendering loading state. Replaces all `<p>Loading…</p>` to kill
+  tab-switch flash.
+- **`installFetchMock`** in `web/src/test/mockFetch.ts` keyed by
+  `"METHOD /api/path"`. Unmocked requests throw loud.
+
 ---
 
 ## Architecture at a glance
@@ -205,12 +251,47 @@ earmark in checking, not an outflow.
 
 ## The DB — `db.ts` + `repo.ts`
 
-- `SCHEMA_VERSION` lives in `db.ts`. Migrations run in order on every
-  start. Adding a column = new migration; never edit a prior one.
+- `SCHEMA_VERSION` lives in `db.ts` (currently **34**). Migrations
+  run in order on every start. Adding a column = new migration;
+  never edit a prior one.
 - All access via the `Repo` class (no direct `db.prepare` outside
   `repo.ts`). Methods are typed end-to-end.
 - The `txn_effective` view is the canonical transaction read — applies
   refund offsets + Splitwise reductions inline so callers don't have to.
+- **`TXN_COLS` reminder.** The bare-SELECT constant near the top of
+  `repo.ts` lists every column the UI reads from `transactions`.
+  If you add a new column (e.g. `loan_id AS loanId`, schema v33),
+  **add it to `TXN_COLS` too** — otherwise the UI silently loses it.
+  This was the bug that landed at the end of the loan-detection
+  feature (commit `45d3ff8`).
+
+## Loan auto-link — `loanMatcher.ts` + `repo.ts`
+
+Bank-scraped loans get their payment transactions linked
+automatically. `transactions.loan_id TEXT` (migration 33) + partial
+index `idx_txn_loan_id WHERE loan_id IS NOT NULL` (migration 34).
+
+`matchPaymentToLoan(txn, loans)` in `src/loanMatcher.ts` is a pure
+heuristic: externalId hit → ≥3-char name-token hit after stripping
+loan stopwords → single-loan fallback (only when the loan name
+doesn't itself contain a stopword).
+
+**Hebrew regex pitfall.** `\b` doesn't anchor Hebrew (Hebrew chars
+aren't `\w`). The matcher uses bare substring for Hebrew
+alternatives (`הלוואה|הלואה`) and `\b…\b` only for Latin
+(`halvaa|loan`). If you add Hebrew patterns elsewhere, do the same.
+
+Two write paths run the matcher:
+1. `upsertBankLoan` first-insert branch — 12-month backfill scan
+   over the connection's transactions.
+2. Per-account sync — hoisted prepared statements run the matcher
+   after every `upsertTxn`, skipping rows that already have `loan_id`.
+
+API surface:
+- `GET /loans` folds `repo.listLoanPayments(loan.id)` into each
+  loan as `payments` (newest-first).
+- `PATCH /transactions/:id/loan` body `{ loanId | null }` for
+  manual link/unlink.
 
 ## The vault — `vault.ts`
 
@@ -231,6 +312,28 @@ Apple Silicon; falls back to CPU on Intel/Linux.
 The "Categorize all" button in Settings batches uncategorized
 transactions through the LLM with merchant-grouping to amortize prompt
 cost. Cache hits per merchant key avoid re-prompting.
+
+`MODEL_CATALOG` includes **DictaLM 2.0 (Hebrew-focused)** —
+`hf:dicta-il/dictalm2.0-instruct-GGUF:Q4_K_M`, ~4.1 GB. Recommend
+this for Hebrew-heavy transaction sets; the default is still the
+small Llama 3.2 for fastest categorization on mixed text.
+
+## Voucher scrapers — gotchas worth knowing
+
+- **HTZ Cloudflare wall.** `#eightDigit` wait is **90s** in
+  `voucherScrapers.ts`. Combined with stealth flags
+  (`--disable-blink-features=AutomationControlled`,
+  `ignoreDefaultArgs:['--enable-automation']`, `navigator.webdriver`
+  override) to dodge Cloudflare Turnstile.
+- **HTZ vault-free fastpath.** The HTZ voucher's `externalId` is
+  `htz-<code>`; the UI extracts the code and skips the vault round
+  trip on ↻ Sync. HTZ-only — other providers still need the vault.
+- **BuyMe identity check.** Persistent cookie profiles can silently
+  harvest cards for a NEW BuyMe email if the previous session's
+  cookies still authenticate. The scraper writes a `last-email`
+  marker file before launch and `rmSync`s the profile dir on
+  mismatch to force fresh OTP. Pattern is reusable for any
+  cookie-fastpath scraper that's identity-scoped.
 
 ## Categorization — `categorize.ts`
 
@@ -274,6 +377,9 @@ sqlite3 hon.db "DELETE FROM scrape_runs WHERE connection_id = '<id>'"
 | "Bank balance projection looks too sunny" | Check `bankProjectionBlock` is using `expectedFixedThisCycle` (full commitments, not remaining) |
 | "Headline ≠ Fixed bills page total" | Same fix — both should use `expectedFixedThisCycle` |
 | "Loans page shows duplicates after re-sync" | `repo.upsertBankLoan` keys on (connection_id, external_id). Check the scraper is returning a stable externalId |
+| "`→ Loan name` chip / new column not showing in React UI" | Did you add it to `TXN_COLS` in `repo.ts`? The bare-SELECT strips anything not listed |
+| "BuyMe synced wrong account silently" | Persistent cookies hit fastpath. Check the `last-email` marker — see § Voucher scrapers |
+| "HTZ sync hangs forever" | Cloudflare interstitial. Confirm `#eightDigit` wait is 90s and stealth flags are applied |
 
 ## Conventions
 
