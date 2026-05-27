@@ -278,6 +278,12 @@ export class ScrapeRunner {
       const persistDone = log.timer('persist', { accounts: outcome.accounts.length });
       const saved = this.repo.saveScrapeResult(args.connectionId, outcome.accounts);
       persistDone({ accountsSaved: saved.accounts, transactionsSaved: saved.transactions });
+      const txnsFetched = outcome.accounts.reduce((s, a) => s + a.transactions.length, 0);
+      log.info('persist.skipped', {
+        fetched: txnsFetched,
+        saved: saved.transactions,
+        skipped: txnsFetched - saved.transactions,
+      });
       if (outcome.brokeragePerformance) {
         this.repo.saveBrokeragePerformance(args.connectionId, outcome.brokeragePerformance);
         log.info('brokerage.performance.saved');
