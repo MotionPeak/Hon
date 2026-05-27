@@ -124,6 +124,28 @@ describe('useSnapTradeConnectionPoll', () => {
     expect(fetchSpy.mock.calls.length).toBe(callsAfterFirstTick + 1);
   });
 
+  it('fires onIncrease when server reports done:true even if count is unchanged', async () => {
+    installFetchMock({
+      'GET /api/snaptrade/connections/conn-1/count': () => ({ count: 1, done: true }),
+    });
+    const onIncrease = vi.fn();
+    const onTimeout = vi.fn();
+    const onError = vi.fn();
+
+    renderHook(() =>
+      useSnapTradeConnectionPoll({
+        connectionId: 'conn-1', baseline: 1, enabled: true,
+        onIncrease, onTimeout, onError,
+      }),
+    );
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onIncrease).toHaveBeenCalledTimes(1);
+    expect(onIncrease).toHaveBeenCalledWith(1);
+    expect(onTimeout).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
+  });
+
   it('does nothing when enabled is false', async () => {
     const fetchSpy = installFetchMock({
       'GET /api/snaptrade/connections/conn-1/count': () => ({ count: 0 }),

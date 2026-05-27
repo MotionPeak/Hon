@@ -22,6 +22,18 @@ import {
 } from './snaptrade.js';
 import { migrateLegacySnapTradeUsers } from './snaptradeUser.js';
 import {
+  createDoneRegistry,
+  type DoneRegistry,
+} from './snaptradeDoneRegistry.js';
+
+// Cleared 10 minutes after a /snaptrade/done callback fires — long
+// enough to outlast any reasonable post-portal poll, short enough that
+// stale flags can't survive a forgotten tab.
+const SNAPTRADE_DONE_TTL_MS = 10 * 60_000;
+const snaptradeDoneRegistry: DoneRegistry = createDoneRegistry({
+  ttlMs: SNAPTRADE_DONE_TTL_MS,
+});
+import {
   verifyKey,
   fetchPickList,
   planSplit,
@@ -392,7 +404,15 @@ app.post('/snaptrade/brokerages', async (req, reply) => {
 });
 
 // Landing page SnapTrade's portal redirects to once a brokerage is connected.
-app.get('/snaptrade/done', async (_req, reply) =>
+// The client embeds `?honConn=<connectionId>` into the customRedirect so we
+// can record the completion against the Hon connection — the polling caller
+// reads this flag and finishes the flow even when SnapTrade just refreshed
+// an existing connection (count == baseline).
+app.get('/snaptrade/done', async (req, reply) => {
+  const q = req.query as { honConn?: string; status?: string } | undefined;
+  if (q?.honConn && typeof q.honConn === 'string') {
+    snaptradeDoneRegistry.markDone(q.honConn);
+  }
   reply.type('text/html; charset=utf-8').send(`<!doctype html>
 <html><head><meta charset="utf-8"><title>Hon — Connected</title>
 <style>
@@ -404,10 +424,10 @@ app.get('/snaptrade/done', async (_req, reply) =>
   p { color:#ffffff8c; font-size:14px; line-height:1.5; }
 </style></head>
 <body><div class="box">
-  <h1>Brokerage connected</h1>
-  <p>Your brokerage is linked. You can close this tab and return to Hon,
-  then press Sync.</p>
-</div></body></html>`));
+  <h1>Brokerage linked</h1>
+  <p>You can close this tab — Hon is pulling your accounts now.</p>
+</div></body></html>`);
+});
 
 // Read-only check of how many brokerages the SnapTrade user currently has
 // linked. Used by the Link-a-brokerage flow to poll for completion without
@@ -422,6 +442,7 @@ app.get('/snaptrade/connections/:connectionId/count', async (req, reply) => {
   if (!credentials || typeof credentials !== 'object') {
     return reply.code(400).send({ error: 'credentials are required' });
   }
+  const done = snaptradeDoneRegistry.get(connectionId) !== null;
   try {
     const snaptrade = makeClient(credentials);
     const stored = getStoredUser(credentials, vault);
@@ -430,10 +451,10 @@ app.get('/snaptrade/connections/:connectionId/count', async (req, reply) => {
       // portal even once. Count is trivially 0; polling caller sees no
       // increase and waits until baseline is set by a /snaptrade/portal
       // call.
-      return { count: 0 };
+      return { count: 0, done };
     }
     const count = await countConnections(snaptrade, stored.userId, stored.userSecret);
-    return { count };
+    return { count, done };
   } catch (err) {
     return reply.code(400).send({ error: describeSnapError(err) });
   }

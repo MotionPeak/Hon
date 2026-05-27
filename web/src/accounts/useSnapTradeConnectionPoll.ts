@@ -17,10 +17,12 @@ interface Args {
 /**
  * Polls GET /snaptrade/connections/:id/count every 3s for up to 5 min
  * (the portal URL's TTL). Fires `onIncrease(newCount)` the first tick
- * the count exceeds `baseline`, `onTimeout()` if it never does, and
- * `onError(msg)` after 3 consecutive fetch failures. Callbacks are
- * mirrored into refs (use-latest pattern) so changing their identity
- * doesn't restart the interval.
+ * the count exceeds `baseline` OR the server reports `done: true` (the
+ * SnapTrade portal redirected back to /snaptrade/done — covers re-link
+ * of an already-linked broker, where count stays at baseline).
+ * `onTimeout()` if neither happens; `onError(msg)` after 3 consecutive
+ * fetch failures. Callbacks are mirrored into refs (use-latest pattern)
+ * so changing their identity doesn't restart the interval.
  */
 export function useSnapTradeConnectionPoll(args: Args): void {
   const { connectionId, baseline, enabled } = args;
@@ -45,12 +47,12 @@ export function useSnapTradeConnectionPoll(args: Args): void {
         return;
       }
       try {
-        const res = await api<{ count: number }>(
+        const res = await api<{ count: number; done?: boolean }>(
           `/snaptrade/connections/${connectionId}/count`,
         );
         if (cancelled) return;
         consecutiveFailures = 0;
-        if (res.count > baseline) {
+        if (res.count > baseline || res.done === true) {
           onIncreaseRef.current(res.count);
           return;
         }

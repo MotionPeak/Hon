@@ -83,7 +83,7 @@ export function SnapTradeLinkFlow(
         const res = await api<{ portal: PortalResult }>('/snaptrade/portal', 'POST', {
           connectionId,
           broker: state.brokerSlug,
-          customRedirect: `${window.location.origin}/api/snaptrade/done`,
+          customRedirect: `${window.location.origin}/api/snaptrade/done?honConn=${encodeURIComponent(connectionId)}`,
         });
         if (cancelled) return;
         const p = res.portal;
@@ -219,7 +219,11 @@ function DonePanel(
   return (
     <div className="snaptrade-flow">
       <h2>Connected {brokerName}</h2>
-      <p>{accountsAdded} account{accountsAdded === 1 ? '' : 's'} added.</p>
+      <p>
+        {accountsAdded === 0
+          ? `${brokerName} connection refreshed.`
+          : `${accountsAdded} account${accountsAdded === 1 ? '' : 's'} added.`}
+      </p>
       <div className="modal-actions"><button type="button" onClick={onDone}>Done</button></div>
     </div>
   );
