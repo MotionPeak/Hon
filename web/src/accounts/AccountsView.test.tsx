@@ -861,3 +861,71 @@ describe('AccountsView — asset edit + remove', () => {
 // The Assets tab no longer renders loans, so these tests were removed.
 // The Loans-tab implementation still owns the edit / remove flows; if
 // they need test coverage, those tests belong in LoansView.test.tsx.
+
+describe('AccountsView — SnapTrade link flow', () => {
+  const SNAPTRADE_COMPANIES = {
+    companies: [
+      { id: 'hapoalim', name: 'Bank Hapoalim', loginFields: [], type: 'bank', domain: 'bankhapoalim.co.il' },
+      { id: 'snaptrade', name: 'SnapTrade (brokerages)', loginFields: ['clientId', 'consumerKey'], type: 'brokerage', domain: 'snaptrade.com' },
+    ],
+  };
+
+  const SNAPTRADE_ROUTES = {
+    ...FULL,
+    'GET /api/companies': () => SNAPTRADE_COMPANIES,
+    'GET /api/connections': () => ({ connections: [] }),
+    'GET /api/accounts': () => ({ accounts: [] }),
+    'POST /api/connections': () => ({
+      connection: {
+        id: 'new-st-conn', companyId: 'snaptrade', displayName: 'SnapTrade (brokerages)',
+        createdAt: '2026-05-27T00:00:00Z', lastScrapeAt: null, lastStatus: null, hasCredentials: true,
+      },
+    }),
+    'POST /api/snaptrade/brokerages': () => ({
+      brokerages: [
+        { slug: 'INTERACTIVE_BROKERS', name: 'Interactive Brokers' },
+        { slug: 'SCHWAB', name: 'Charles Schwab' },
+      ],
+    }),
+  };
+
+  it('Add Account → SnapTrade routes through credentials to the link flow', async () => {
+    const user = userEvent.setup();
+    installFetchMock(SNAPTRADE_ROUTES);
+
+    render(<AccountsView />);
+    // Wait for initial fetches, then open the picker.
+    await user.click(await screen.findByRole('button', { name: /add asset/i }));
+    await user.click(await screen.findByText(/SnapTrade/i));
+
+    // Credentials form for SnapTrade
+    await user.type(await screen.findByLabelText(/clientId/i), 'demo-cid');
+    await user.type(screen.getByLabelText(/consumerKey/i), 'demo-key');
+    await user.click(screen.getByRole('button', { name: /^add$/i }));
+
+    // SnapTradeLinkFlow modal opens with the brokerage picker.
+    expect(await screen.findByRole('dialog', { name: /link a brokerage/i })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /Interactive Brokers/i })).toBeInTheDocument();
+  });
+
+  it('SnapTrade ConnectionCard renders a Link button that opens the flow', async () => {
+    const user = userEvent.setup();
+    installFetchMock({
+      ...SNAPTRADE_ROUTES,
+      'GET /api/connections': () => ({
+        connections: [
+          {
+            id: 'existing-st', companyId: 'snaptrade', displayName: 'SnapTrade',
+            createdAt: '2026-05-27T00:00:00Z', lastScrapeAt: null, lastStatus: null, hasCredentials: true,
+          },
+        ],
+      }),
+    });
+
+    render(<AccountsView />);
+
+    await user.click(await screen.findByRole('button', { name: /link a brokerage/i }));
+    expect(await screen.findByRole('dialog', { name: /link a brokerage/i })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /Interactive Brokers/i })).toBeInTheDocument();
+  });
+});
