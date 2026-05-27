@@ -49,6 +49,15 @@ export function App() {
   const [health, setHealth] = useState<Health | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
 
+  // Activity row's "→ Loan name" chip dispatches this to ask the shell
+  // to flip to the Loans tab. Decouples the chip from prop-drilling a
+  // navigation callback through five components.
+  useEffect(() => {
+    const h = (): void => setTab('loans');
+    window.addEventListener('hon.go-to-loans', h);
+    return () => window.removeEventListener('hon.go-to-loans', h);
+  }, []);
+
   // Reads localStorage['hon.unseenLoanIds'] (written by AccountsView's
   // new-loan detector). Non-empty → the Loans nav button gets data-unseen
   // so it can render an amber pulse dot. Same-tab updates fire via a

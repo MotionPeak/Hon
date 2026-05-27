@@ -1645,6 +1645,20 @@ button.mini { padding: 5px 11px; font-size: 12px; }
   animation: fade .25s ease both;
 }
 
+/* Activity row "→ Loan name" chip — sits next to the description
+   on linked loan-payment rows. Click jumps to the Loans tab via the
+   hon.go-to-loans custom event. */
+.txn-loan-chip {
+  display: inline-flex; align-items: center;
+  margin-left: 8px;
+  background: var(--accent-soft); color: var(--accent);
+  border: 0; border-radius: 999px;
+  padding: 2px 9px; font-size: 11px; font-weight: 700;
+  cursor: pointer; vertical-align: 2px;
+  transition: background-color .15s ease, color .15s ease;
+}
+.txn-loan-chip:hover { background: var(--accent); color: #fff; }
+
 /* Activity sidebar — loan-picker rows inside the small Radix Dialog. */
 .loan-pick-list {
   list-style: none; padding: 0; margin: 0;

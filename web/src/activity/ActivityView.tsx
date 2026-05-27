@@ -288,7 +288,10 @@ export function ActivityView() {
                       {cat?.emoji ?? '▫️'}
                     </span>
                     <div className="txn-main">
-                      <div className="txn-name">{t.description}</div>
+                      <div className="txn-name">
+                        {t.description}
+                        <LoanChip loanId={t.loanId} loans={loans} />
+                      </div>
                       <div className="txn-sub">
                         {fmtDate(t.date)}
                         {acct && (
@@ -324,6 +327,7 @@ export function ActivityView() {
           grouped={grouped}
           categoryByName={categoryByName}
           accountById={accountById}
+          loans={loans}
           onPickTxn={pickTxn}
           selectedIds={selectedIds}
         />
@@ -395,6 +399,7 @@ interface UmbrellaSectionsProps {
   grouped: Map<string, Transaction[]>;
   categoryByName: Map<string, Category>;
   accountById: Map<string, Account>;
+  loans: Loan[];
   onPickTxn: (t: Transaction) => void;
   selectedIds: Set<string>;
 }
@@ -408,7 +413,7 @@ const GROUP_LABEL: Record<Category['catGroup'], string> = {
 };
 
 function UmbrellaSections({
-  orderedCats, grouped, categoryByName, accountById, onPickTxn, selectedIds,
+  orderedCats, grouped, categoryByName, accountById, loans, onPickTxn, selectedIds,
 }: UmbrellaSectionsProps) {
   const groupOf = (catName: string): Category['catGroup'] => {
     return categoryByName.get(catName)?.catGroup ?? 'variable';
@@ -451,6 +456,7 @@ function UmbrellaSections({
                   cat={categoryByName.get(catName)}
                   rows={grouped.get(catName) ?? []}
                   accountById={accountById}
+                  loans={loans}
                   onPickTxn={onPickTxn}
                   selectedIds={selectedIds}
                 />
@@ -468,12 +474,13 @@ interface CatCardProps {
   cat: Category | undefined;
   rows: Transaction[];
   accountById: Map<string, Account>;
+  loans: Loan[];
   onPickTxn: (t: Transaction) => void;
   selectedIds: Set<string>;
 }
 
 function CatCard({
-  catName, cat, rows, accountById, onPickTxn, selectedIds,
+  catName, cat, rows, accountById, loans, onPickTxn, selectedIds,
 }: CatCardProps) {
   let total = 0;
   let cur = 'ILS';
@@ -520,7 +527,10 @@ function CatCard({
                 {cat?.emoji ?? '▫️'}
               </span>
               <div className="txn-main">
-                <div className="txn-name">{t.description}</div>
+                <div className="txn-name">
+                  {t.description}
+                  <LoanChip loanId={t.loanId} loans={loans} />
+                </div>
                 <div className="txn-sub">
                   {fmtDate(t.date)}
                   {acct && (
@@ -539,6 +549,36 @@ function CatCard({
         })}
       </ul>
     </article>
+  );
+}
+
+/** Small "→ Loan name" pill rendered next to the description on Activity
+ *  rows whose loan_id is set (either auto-matched by loanMatcher or
+ *  pinned by hand via the sidebar). Clicking it dispatches
+ *  `hon.go-to-loans` — App.tsx catches that and flips the active tab.
+ *  Renders nothing when loanId is null or the loan isn't in the loans
+ *  array (e.g. the matcher ran before the loan was fetched). */
+function LoanChip({
+  loanId, loans,
+}: {
+  loanId: string | null | undefined;
+  loans: Loan[];
+}) {
+  if (!loanId) return null;
+  const loan = loans.find((l) => l.id === loanId);
+  if (!loan) return null;
+  return (
+    <button
+      type="button"
+      className="txn-loan-chip"
+      title={`Linked to ${loan.name} — open the Loans tab`}
+      onClick={(e) => {
+        e.stopPropagation();
+        window.dispatchEvent(new CustomEvent('hon.go-to-loans'));
+      }}
+    >
+      → {loan.name}
+    </button>
   );
 }
 
