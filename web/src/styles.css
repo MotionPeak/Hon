@@ -2435,6 +2435,34 @@ button.mini { padding: 5px 11px; font-size: 12px; }
 }
 .back-btn:hover { color: var(--text); }
 
+/* --- Drilldown institution / brokerage list (legacy .pick-list) -------- */
+.pick-list {
+  list-style: none; padding: 0; margin: 8px 0 4px;
+  display: flex; flex-direction: column; gap: 2px;
+  max-height: 340px; overflow-y: auto;
+}
+.pick-row {
+  width: 100%;
+  display: flex; align-items: center; gap: 11px;
+  padding: 9px; border: 0; border-radius: 10px;
+  background: transparent; color: var(--text);
+  cursor: pointer; text-align: left;
+  font: inherit; font-size: 14px; font-weight: 600;
+  white-space: normal;
+}
+.pick-row:hover { background: var(--card-hi); border-color: transparent; }
+.pick-row[data-pre-focused="true"] { background: var(--card-hi); }
+.pick-row-logo {
+  width: 32px; height: 32px; flex: none; object-fit: contain;
+  border-radius: 8px; background: #fff;
+}
+.pick-row .logo {
+  width: 32px; height: 32px; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 22px;
+}
+.pick-row-name { flex: 1; min-width: 0; }
+
 /* --- SnapTrade link flow panels ---------------------------------------- */
 .snaptrade-flow { display: flex; flex-direction: column; gap: 12px; }
 .snaptrade-flow h2 { margin: 0; }

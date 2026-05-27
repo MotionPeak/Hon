@@ -1,67 +1,39 @@
-import { useDeferredValue, useMemo, useState } from 'react';
 import type { BrokerageOption } from './types';
 
 interface Props {
   brokerages: BrokerageOption[];
-  onPick: (slug: string) => void;
+  onPick: (slug: string, name: string) => void;
 }
 
 /**
- * Searchable grid of SnapTrade-supported brokerages. Pre-builds a lowercase
- * name index so the filter doesn't re-lowercase on every keystroke; the
- * search input value is wrapped in useDeferredValue so typing stays
- * responsive even with 50+ entries.
+ * Vertical list of SnapTrade-supported brokerages. Matches the bank/card
+ * drilldown style elsewhere in the picker (.pick-list / .pick-row).
+ * IBKR is flagged via data-pre-focused so the parent can scroll it
+ * into view if desired.
  */
 export function SnapTradeBrokeragePicker({ brokerages, onPick }: Props) {
-  const [query, setQuery] = useState('');
-  const deferredQuery = useDeferredValue(query);
-
-  const indexed = useMemo(
-    () => brokerages.map((b) => ({ b, key: b.name.toLowerCase() })),
-    [brokerages],
-  );
-
-  const filtered = useMemo(() => {
-    const q = deferredQuery.toLowerCase().trim();
-    if (!q) return indexed.map((i) => i.b);
-    return indexed.filter((i) => i.key.includes(q)).map((i) => i.b);
-  }, [indexed, deferredQuery]);
-
+  if (brokerages.length === 0) {
+    return <p className="hint">No brokerages match.</p>;
+  }
   return (
-    <div className="snaptrade-picker">
-      <label className="field">
-        <span>Search</span>
-        <input
-          type="text"
-          placeholder="Search brokerages…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          autoFocus
-        />
-      </label>
-      {filtered.length === 0 ? (
-        <p className="snaptrade-picker-empty">No brokerages match.</p>
-      ) : (
-        <ul className="snaptrade-picker-grid">
-          {filtered.map((b) => (
-            <li key={b.slug}>
-              <button
-                type="button"
-                className="snaptrade-picker-card"
-                onClick={() => onPick(b.slug)}
-                data-pre-focused={b.slug === 'INTERACTIVE_BROKERS' ? 'true' : undefined}
-              >
-                {b.logoUrl ? (
-                  <img src={b.logoUrl} alt="" className="snaptrade-picker-logo" />
-                ) : (
-                  <span className="snaptrade-picker-logo snaptrade-picker-logo-fallback">📈</span>
-                )}
-                <span className="snaptrade-picker-name">{b.name}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
+    <ul className="pick-list">
+      {brokerages.map((b) => (
+        <li key={b.slug}>
+          <button
+            type="button"
+            className="pick-row"
+            onClick={() => onPick(b.slug, b.name)}
+            data-pre-focused={b.slug === 'INTERACTIVE_BROKERS' ? 'true' : undefined}
+          >
+            {b.logoUrl ? (
+              <img src={b.logoUrl} alt="" className="pick-row-logo" />
+            ) : (
+              <span className="logo">📈</span>
+            )}
+            <span className="pick-row-name">{b.name}</span>
+          </button>
+        </li>
+      ))}
+    </ul>
   );
 }

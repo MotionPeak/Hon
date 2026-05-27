@@ -16,6 +16,11 @@ interface PortalResult {
 
 interface Props {
   connectionId: string;
+  /** When set, the modal skips the broker picker and goes straight to
+   *  opening the portal for this broker. Used by AddConnectionPicker's
+   *  inline brokerage list, which has already picked the broker. */
+  initialBrokerSlug?: string;
+  initialBrokerName?: string;
   /** Parent's existing scrape path. Resolves with the account count added. */
   onLinked: () => Promise<{ accountsAdded: number }>;
   onCancel: () => void;
@@ -32,11 +37,21 @@ type State =
   | { kind: 'done'; brokerName: string; accountsAdded: number }
   | { kind: 'error'; message: string; canRetry: boolean };
 
-export function SnapTradeLinkFlow({ connectionId, onLinked, onCancel }: Props) {
-  const [state, setState] = useState<State>({ kind: 'loading' });
+export function SnapTradeLinkFlow(
+  { connectionId, initialBrokerSlug, initialBrokerName, onLinked, onCancel }: Props,
+) {
+  // If a broker is pre-selected by the parent (the Add-asset modal's
+  // inline brokerage list), skip 'loading' + 'picking' and go straight
+  // to 'opening' the portal for that broker.
+  const [state, setState] = useState<State>(() =>
+    initialBrokerSlug
+      ? { kind: 'opening', brokerSlug: initialBrokerSlug, brokerName: initialBrokerName ?? initialBrokerSlug }
+      : { kind: 'loading' },
+  );
 
-  // Load brokerages on mount.
+  // Load brokerages on mount — only when no broker was pre-selected.
   useEffect(() => {
+    if (initialBrokerSlug) return;
     let cancelled = false;
     (async () => {
       try {
@@ -57,7 +72,7 @@ export function SnapTradeLinkFlow({ connectionId, onLinked, onCancel }: Props) {
       }
     })();
     return () => { cancelled = true; };
-  }, [connectionId]);
+  }, [connectionId, initialBrokerSlug]);
 
   // Open portal when a broker is picked.
   useEffect(() => {
@@ -134,9 +149,8 @@ export function SnapTradeLinkFlow({ connectionId, onLinked, onCancel }: Props) {
     return (
       <PickingPanel
         brokerages={state.brokerages}
-        onPick={(slug) => {
-          const brokerName = state.brokerages.find((b) => b.slug === slug)?.name ?? slug;
-          setState({ kind: 'opening', brokerSlug: slug, brokerName });
+        onPick={(slug, name) => {
+          setState({ kind: 'opening', brokerSlug: slug, brokerName: name });
         }}
         onCancel={onCancel}
       />
@@ -161,7 +175,7 @@ function LoadingPanel() {
 
 function PickingPanel(
   { brokerages, onPick, onCancel }:
-    { brokerages: BrokerageOption[]; onPick: (slug: string) => void; onCancel: () => void },
+    { brokerages: BrokerageOption[]; onPick: (slug: string, name: string) => void; onCancel: () => void },
 ) {
   return (
     <div className="snaptrade-flow">

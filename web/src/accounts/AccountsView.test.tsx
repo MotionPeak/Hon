@@ -901,23 +901,46 @@ describe('AccountsView — SnapTrade link flow', () => {
     }),
   };
 
-  it('Add Account → SnapTrade routes through credentials to the link flow', async () => {
+  it('Add Account → Brokerages → inline credentials form → inline brokerage list', async () => {
     const user = userEvent.setup();
     installFetchMock(SNAPTRADE_ROUTES);
 
     render(<AccountsView />);
-    // Wait for initial fetches, then open the picker → Brokerages → SnapTrade.
     await user.click(await screen.findByRole('button', { name: /add asset/i }));
     await user.click(await screen.findByRole('button', { name: /brokerages/i }));
-    await user.click(await screen.findByText(/SnapTrade/i));
 
-    // Credentials form for SnapTrade
+    // No SnapTrade connection exists yet → inline credentials form appears
+    // ('Connect a brokerage' header, no separate modal).
+    expect(await screen.findByRole('heading', { name: /connect a brokerage/i })).toBeInTheDocument();
     await user.type(await screen.findByLabelText(/clientId/i), 'demo-cid');
     await user.type(screen.getByLabelText(/consumerKey/i), 'demo-key');
-    await user.click(screen.getByRole('button', { name: /^add$/i }));
+    await user.click(screen.getByRole('button', { name: /^connect$/i }));
 
-    // SnapTradeLinkFlow modal opens with the brokerage picker.
-    expect(await screen.findByRole('dialog', { name: /link a brokerage/i })).toBeInTheDocument();
+    // Inline brokerage list takes over the same modal.
+    expect(await screen.findByRole('heading', { name: /^brokerages$/i })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /Interactive Brokers/i })).toBeInTheDocument();
+  });
+
+  it('Add Account → Brokerages with existing SnapTrade conn → skips creds, shows brokerage list', async () => {
+    const user = userEvent.setup();
+    installFetchMock({
+      ...SNAPTRADE_ROUTES,
+      'GET /api/connections': () => ({
+        connections: [
+          {
+            id: 'existing-st', companyId: 'snaptrade', displayName: 'SnapTrade',
+            createdAt: '2026-05-27T00:00:00Z', lastScrapeAt: null, lastStatus: null, hasCredentials: true,
+          },
+        ],
+      }),
+    });
+
+    render(<AccountsView />);
+    await user.click(await screen.findByRole('button', { name: /add asset/i }));
+    await user.click(await screen.findByRole('button', { name: /brokerages/i }));
+
+    // Skips credentials step entirely.
+    expect(screen.queryByRole('heading', { name: /connect a brokerage/i })).toBeNull();
     expect(await screen.findByRole('button', { name: /Interactive Brokers/i })).toBeInTheDocument();
   });
 

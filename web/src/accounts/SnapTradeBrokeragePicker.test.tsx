@@ -11,34 +11,24 @@ const SAMPLE: BrokerageOption[] = [
 ];
 
 describe('SnapTradeBrokeragePicker', () => {
-  it('renders one card per brokerage', () => {
+  it('renders one row per brokerage', () => {
     render(<SnapTradeBrokeragePicker brokerages={SAMPLE} onPick={() => {}} />);
     expect(screen.getByRole('button', { name: /Interactive Brokers/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Charles Schwab/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Robinhood/i })).toBeInTheDocument();
   });
 
-  it('filters case-insensitively by name', async () => {
-    const user = userEvent.setup();
-    render(<SnapTradeBrokeragePicker brokerages={SAMPLE} onPick={() => {}} />);
-    await user.type(screen.getByPlaceholderText(/search brokerages/i), 'schw');
-    expect(screen.queryByRole('button', { name: /Interactive Brokers/i })).toBeNull();
-    expect(screen.getByRole('button', { name: /Charles Schwab/i })).toBeInTheDocument();
-  });
-
-  it('calls onPick(slug) when a card is clicked', async () => {
+  it('calls onPick(slug, name) when a row is clicked', async () => {
     const user = userEvent.setup();
     const onPick = vi.fn();
     render(<SnapTradeBrokeragePicker brokerages={SAMPLE} onPick={onPick} />);
     await user.click(screen.getByRole('button', { name: /Interactive Brokers/i }));
-    expect(onPick).toHaveBeenCalledWith('INTERACTIVE_BROKERS');
+    expect(onPick).toHaveBeenCalledWith('INTERACTIVE_BROKERS', 'Interactive Brokers');
   });
 
-  it('shows an empty state when the filter matches nothing', async () => {
-    const user = userEvent.setup();
-    render(<SnapTradeBrokeragePicker brokerages={SAMPLE} onPick={() => {}} />);
-    await user.type(screen.getByPlaceholderText(/search brokerages/i), 'xyzzy');
-    expect(screen.getByText(/no brokerages match/i)).toBeInTheDocument();
+  it('shows an empty hint when the list is empty', () => {
+    render(<SnapTradeBrokeragePicker brokerages={[]} onPick={() => {}} />);
+    expect(screen.getByText(/no brokerages/i)).toBeInTheDocument();
   });
 
   it('flags IBKR as pre-focused via data attribute', () => {

@@ -3,9 +3,10 @@ import { createPortal } from 'react-dom';
 import { api, ApiError } from '../api';
 import { money } from '../format';
 import type {
-  Account, AssetSectionKey, Company, Connection, Holding, Loan, ManualAsset,
+  Account, AssetSectionKey, BrokerageOption, Company, Connection, Holding, Loan, ManualAsset,
 } from './types';
 import { DelayedLoader } from '../ui/DelayedLoader';
+import { SnapTradeBrokeragePicker } from './SnapTradeBrokeragePicker';
 
 const SnapTradeLinkFlow = lazy(() =>
   import('./SnapTradeLinkFlow').then((m) => ({ default: m.SnapTradeLinkFlow })),
@@ -136,8 +137,15 @@ export function AccountsView() {
   type AddFlow = null | 'picker' | 'manual-asset' | 'manual-loan' | Company;
   const [addFlow, setAddFlow] = useState<AddFlow>(null);
   // When set, render <SnapTradeLinkFlow> in its own modal portal. Holds the
-  // connectionId of the newly-created (or existing) SnapTrade connection.
-  const [linkSnapTradeFor, setLinkSnapTradeFor] = useState<string | null>(null);
+  // connectionId of the newly-created (or existing) SnapTrade connection,
+  // and (optionally) a pre-selected broker if the user picked one in the
+  // Add-asset modal's inline brokerage list.
+  interface LinkTarget {
+    connectionId: string;
+    brokerSlug?: string;
+    brokerName?: string;
+  }
+  const [linkSnapTradeFor, setLinkSnapTradeFor] = useState<LinkTarget | null>(null);
 
   const toggleHoldings = useCallback((accountId: string) => {
     setExpandedHoldings((prev) => ({ ...prev, [accountId]: !prev[accountId] }));
@@ -349,7 +357,7 @@ export function AccountsView() {
                   onRemoveAsset: setRemovingAsset,
                   onEditLoan: setEditingLoan,
                   onRemoveLoan: setRemovingLoan,
-                  onLinkSnapTradeBrokerage: (connectionId) => setLinkSnapTradeFor(connectionId),
+                  onLinkSnapTradeBrokerage: (connectionId) => setLinkSnapTradeFor({ connectionId }),
                   syncStates,
                   holdings: data.holdings,
                   expandedHoldings,
@@ -422,9 +430,14 @@ export function AccountsView() {
       {addFlow === 'picker' && (
         <AddConnectionPicker
           companies={data.companies}
+          connections={data.connections}
           onPickCompany={(c) => setAddFlow(c)}
           onPickManualAsset={() => setAddFlow('manual-asset')}
           onPickManualLoan={() => setAddFlow('manual-loan')}
+          onPickBrokerage={(connectionId, brokerSlug, brokerName) => {
+            setAddFlow(null);
+            setLinkSnapTradeFor({ connectionId, brokerSlug, brokerName });
+          }}
           onClose={() => setAddFlow(null)}
         />
       )}
@@ -448,7 +461,7 @@ export function AccountsView() {
             await refresh();
             if (addFlow.type === 'brokerage') {
               setAddFlow(null);
-              setLinkSnapTradeFor(connectionId);
+              setLinkSnapTradeFor({ connectionId });
             } else {
               setAddFlow(null);
             }
@@ -461,10 +474,12 @@ export function AccountsView() {
             <div role="dialog" aria-label="Link a brokerage" className="modal">
               <Suspense fallback={<p className="snaptrade-flow-loading">Loading…</p>}>
                 <SnapTradeLinkFlow
-                  connectionId={linkSnapTradeFor}
+                  connectionId={linkSnapTradeFor.connectionId}
+                  initialBrokerSlug={linkSnapTradeFor.brokerSlug}
+                  initialBrokerName={linkSnapTradeFor.brokerName}
                   onLinked={async () => {
                     const before = data?.accounts.length ?? 0;
-                    await api(`/connections/${linkSnapTradeFor}/scrape`, 'POST', {});
+                    await api(`/connections/${linkSnapTradeFor.connectionId}/scrape`, 'POST', {});
                     await refresh();
                     const after = data?.accounts.length ?? 0;
                     return { accountsAdded: Math.max(0, after - before) };
@@ -1137,9 +1152,14 @@ function CompanyLogo({ company }: { company: Company }) {
 
 interface AddConnectionPickerProps {
   companies: Company[];
+  connections: Connection[];
   onPickCompany: (company: Company) => void;
   onPickManualAsset: () => void;
   onPickManualLoan: () => void;
+  /** Fired when the user picks a brokerage in the inline brokerage list.
+   *  The parent closes the picker and opens SnapTradeLinkFlow with the
+   *  broker pre-selected. */
+  onPickBrokerage: (connectionId: string, brokerSlug: string, brokerName: string) => void;
   onClose: () => void;
 }
 
@@ -1174,12 +1194,28 @@ const PICKER_TILES: CategoryTile[] = [
     subOverride: 'cash, property…' },
 ];
 
+type PickerStep =
+  | { kind: 'category' }
+  | { kind: 'institution'; category: 'bank' | 'card' }
+  | { kind: 'snaptrade-credentials' }
+  | { kind: 'snaptrade-brokerages'; connectionId: string };
+
 function AddConnectionPicker(
-  { companies, onPickCompany, onPickManualAsset, onPickManualLoan, onClose }:
+  { companies, connections, onPickCompany, onPickManualAsset, onPickManualLoan,
+    onPickBrokerage, onClose }:
     AddConnectionPickerProps,
 ) {
-  // null on the category step; set when drilling into bank/card/brokerage.
-  const [category, setCategory] = useState<'bank' | 'card' | 'brokerage' | null>(null);
+  const [step, setStep] = useState<PickerStep>({ kind: 'category' });
+  const existingSnapTradeConn = connections.find((c) => c.companyId === 'snaptrade');
+  const snapTradeCompany = companies.find((c) => c.id === 'snaptrade');
+
+  const openBrokerageStep = () => {
+    if (existingSnapTradeConn) {
+      setStep({ kind: 'snaptrade-brokerages', connectionId: existingSnapTradeConn.id });
+    } else {
+      setStep({ kind: 'snaptrade-credentials' });
+    }
+  };
 
   const renderCategoryStep = () => (
     <>
@@ -1187,7 +1223,7 @@ function AddConnectionPicker(
       <p>What would you like to add to Hon?</p>
       <div className="pick-grid">
         {PICKER_TILES.map((tile) => {
-          const count = (tile.key === 'bank' || tile.key === 'card' || tile.key === 'brokerage')
+          const count = (tile.key === 'bank' || tile.key === 'card')
             ? companies.filter((c) => c.type === tile.key).length
             : null;
           const sub = tile.subOverride
@@ -1195,7 +1231,10 @@ function AddConnectionPicker(
           const onClick = () => {
             if (tile.leaf === 'manual-asset') { onPickManualAsset(); return; }
             if (tile.leaf === 'manual-loan')  { onPickManualLoan();  return; }
-            setCategory(tile.key as 'bank' | 'card' | 'brokerage');
+            if (tile.key === 'brokerage') { openBrokerageStep(); return; }
+            if (tile.key === 'bank' || tile.key === 'card') {
+              setStep({ kind: 'institution', category: tile.key });
+            }
           };
           return (
             <button
@@ -1219,16 +1258,16 @@ function AddConnectionPicker(
   );
 
   const renderInstitutionStep = () => {
-    if (category === null) return null;
-    const inGroup = companies.filter((c) => c.type === category);
-    const tile = PICKER_TILES.find((t) => t.key === category);
+    if (step.kind !== 'institution') return null;
+    const inGroup = companies.filter((c) => c.type === step.category);
+    const tile = PICKER_TILES.find((t) => t.key === step.category);
     return (
       <>
-        <h2>{tile?.label ?? category}</h2>
+        <h2>{tile?.label ?? step.category}</h2>
         <button
           type="button"
           className="back-btn"
-          onClick={() => setCategory(null)}
+          onClick={() => setStep({ kind: 'category' })}
         >‹ All categories</button>
         {inGroup.length === 0 ? (
           <p className="hint">No institutions in this category.</p>
@@ -1252,17 +1291,179 @@ function AddConnectionPicker(
     );
   };
 
+  const renderStep = () => {
+    if (step.kind === 'category') return renderCategoryStep();
+    if (step.kind === 'institution') return renderInstitutionStep();
+    if (step.kind === 'snaptrade-credentials') {
+      if (!snapTradeCompany) {
+        return (
+          <>
+            <h2>Brokerages</h2>
+            <p className="hint">SnapTrade isn't available — the engine didn't return it in /companies.</p>
+          </>
+        );
+      }
+      return (
+        <SnapTradeCredentialsStep
+          company={snapTradeCompany}
+          onBack={() => setStep({ kind: 'category' })}
+          onSaved={(connectionId) => setStep({ kind: 'snaptrade-brokerages', connectionId })}
+        />
+      );
+    }
+    if (step.kind === 'snaptrade-brokerages') {
+      return (
+        <SnapTradeBrokeragesStep
+          connectionId={step.connectionId}
+          onBack={() => setStep({ kind: 'category' })}
+          onPickBrokerage={(slug, name) => onPickBrokerage(step.connectionId, slug, name)}
+        />
+      );
+    }
+    return null;
+  };
+
   return (
     <ModalPortal>
       <div className="overlay">
         <div role="dialog" aria-label="Add an asset" className="modal">
-          {category === null ? renderCategoryStep() : renderInstitutionStep()}
+          {renderStep()}
           <div className="modal-actions">
             <button type="button" onClick={onClose}>Cancel</button>
           </div>
         </div>
       </div>
     </ModalPortal>
+  );
+}
+
+interface SnapTradeCredentialsStepProps {
+  company: Company;
+  onBack: () => void;
+  onSaved: (connectionId: string) => void;
+}
+
+/** Inline SnapTrade dev-credentials form, rendered as a sub-step of
+ *  AddConnectionPicker when the user clicks the Brokerages tile but
+ *  no SnapTrade connection exists yet. */
+function SnapTradeCredentialsStep(
+  { company, onBack, onSaved }: SnapTradeCredentialsStepProps,
+) {
+  const [displayName, setDisplayName] = useState(company.name);
+  const [credentials, setCredentials] = useState<Record<string, string>>(() =>
+    Object.fromEntries(company.loginFields.map((f) => [f, ''])),
+  );
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const submit = async () => {
+    setError(null);
+    if (!displayName.trim()) { setError('Display name is required.'); return; }
+    if (company.loginFields.some((f) => !credentials[f])) {
+      setError('Fill every credential field.');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const created = await api<{ connection: Connection }>(
+        '/connections', 'POST', {
+          companyId: company.id,
+          displayName: displayName.trim(),
+          credentials,
+        },
+      );
+      onSaved(created.connection.id);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e));
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <>
+      <h2>Connect a brokerage</h2>
+      <button type="button" className="back-btn" onClick={onBack}>‹ All categories</button>
+      <p>First, enter your SnapTrade developer keys (one time).</p>
+      <label className="field">
+        <span>Display name</span>
+        <input
+          type="text"
+          value={displayName}
+          onChange={(e) => setDisplayName(e.target.value)}
+        />
+      </label>
+      {company.loginFields.map((f) => (
+        <label key={f} className="field">
+          <span>{f}</span>
+          <input
+            type={f.toLowerCase().includes('password') ? 'password' : 'text'}
+            value={credentials[f] ?? ''}
+            autoComplete="off"
+            onChange={(e) =>
+              setCredentials((prev) => ({ ...prev, [f]: e.target.value }))
+            }
+          />
+        </label>
+      ))}
+      <p className="hint">
+        To get a Client ID and Consumer Key: sign up at dashboard.snaptrade.com,
+        open the API Keys page, copy the Client ID, click the regenerate icon
+        next to Consumer Key, then copy the revealed key. Paste both above.
+      </p>
+      {error && <div className="modal-err">{error}</div>}
+      <div className="modal-actions">
+        <button type="button" onClick={onBack}>Cancel</button>
+        <button type="button" className="primary" onClick={submit} disabled={submitting}>
+          {submitting ? 'Connecting…' : 'Connect'}
+        </button>
+      </div>
+    </>
+  );
+}
+
+interface SnapTradeBrokeragesStepProps {
+  connectionId: string;
+  onBack: () => void;
+  onPickBrokerage: (slug: string, name: string) => void;
+}
+
+/** Inline brokerage list, rendered as a sub-step of AddConnectionPicker
+ *  when the user clicks the Brokerages tile and a SnapTrade connection
+ *  already exists. Fetches /snaptrade/brokerages once on mount. */
+function SnapTradeBrokeragesStep(
+  { connectionId, onBack, onPickBrokerage }: SnapTradeBrokeragesStepProps,
+) {
+  const [brokerages, setBrokerages] = useState<BrokerageOption[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api<{ brokerages: BrokerageOption[] }>(
+          '/snaptrade/brokerages', 'POST', { connectionId },
+        );
+        if (!cancelled) setBrokerages(res.brokerages);
+      } catch (e) {
+        if (!cancelled) setError(e instanceof ApiError ? e.message : String(e));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [connectionId]);
+
+  return (
+    <>
+      <h2>Brokerages</h2>
+      <button type="button" className="back-btn" onClick={onBack}>‹ All categories</button>
+      <p>Pick a brokerage to connect.</p>
+      {error ? (
+        <p className="modal-err">{error}</p>
+      ) : brokerages === null ? (
+        <DelayedLoader text="Loading brokerages…" />
+      ) : (
+        <SnapTradeBrokeragePicker brokerages={brokerages} onPick={onPickBrokerage} />
+      )}
+    </>
   );
 }
 
