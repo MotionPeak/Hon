@@ -6,7 +6,7 @@ import { DelayedLoader } from '../ui/DelayedLoader';
 import { cycleKey, cycleLabel, currentCycleKey } from '../cycle';
 import { money } from '../format';
 import { useSettings } from '../settings/useSettings';
-import type { Account } from '../accounts/types';
+import type { Account, Loan } from '../accounts/types';
 import type { Category } from '../settings/CategoriesPanel';
 import type { Transaction } from './types';
 
@@ -46,6 +46,7 @@ export function ActivityView() {
   const [transactions, setTransactions] = useState<Transaction[] | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [loans, setLoans] = useState<Loan[]>([]);
   const [month, setMonth] = useState<string | null>(null);
   const [moving, setMoving] = useState<Transaction | null>(null);
   const [search, setSearch] = useState('');
@@ -68,14 +69,16 @@ export function ActivityView() {
 
   const refresh = useCallback(async () => {
     try {
-      const [t, a, c] = await Promise.all([
+      const [t, a, c, l] = await Promise.all([
         api<{ transactions: Transaction[] }>('/transactions'),
         api<{ accounts: Account[] }>('/accounts'),
         api<{ categories: Category[] }>('/categories'),
+        api<{ loans: Loan[] }>('/loans').catch(() => ({ loans: [] as Loan[] })),
       ]);
       setTransactions(t.transactions);
       setAccounts(a.accounts);
       setCategories(c.categories);
+      setLoans(l.loans);
     } catch {
       setTransactions([]);
     }
@@ -330,6 +333,23 @@ export function ActivityView() {
           transaction={moving}
           allTransactions={transactions}
           categories={categories}
+          loans={loans}
+          onLinkLoan={async (loanId) => {
+            await api(
+              `/transactions/${encodeURIComponent(moving.id)}/loan`,
+              'PATCH',
+              { loanId },
+            );
+            await refresh();
+          }}
+          onUnlinkLoan={async () => {
+            await api(
+              `/transactions/${encodeURIComponent(moving.id)}/loan`,
+              'PATCH',
+              { loanId: null },
+            );
+            await refresh();
+          }}
           onClose={() => setMoving(null)}
           onSaved={async (cat) => {
             await api(
@@ -526,16 +546,19 @@ interface CategoryPickerProps {
   transaction: Transaction;
   allTransactions: Transaction[];
   categories: Category[];
+  loans: Loan[];
   onClose: () => void;
   onSaved: (category: string) => void | Promise<void>;
   onLinkRefund: (refundId: string) => void | Promise<void>;
   onUnlinkRefund: () => void | Promise<void>;
+  onLinkLoan: (loanId: string) => void | Promise<void>;
+  onUnlinkLoan: () => void | Promise<void>;
 }
 
 function CategoryPickerSidebar(
   {
-    transaction, allTransactions, categories, onClose, onSaved,
-    onLinkRefund, onUnlinkRefund,
+    transaction, allTransactions, categories, loans, onClose, onSaved,
+    onLinkRefund, onUnlinkRefund, onLinkLoan, onUnlinkLoan,
   }: CategoryPickerProps,
 ) {
   const current = transaction.category ?? 'Other';
@@ -645,6 +668,13 @@ function CategoryPickerSidebar(
               onUnlinkRefund={onUnlinkRefund}
             />
 
+            <LoansSection
+              transaction={transaction}
+              loans={loans}
+              onLink={onLinkLoan}
+              onUnlink={onUnlinkLoan}
+            />
+
             <div className="txn-sidebar-section">
               <div className="label">Splitwise</div>
               <button type="button" className="txn-sidebar-action" disabled>
@@ -666,6 +696,96 @@ function CategoryPickerSidebar(
         )}
       </aside>
     </ModalPortal>
+  );
+}
+
+function LoansSection({
+  transaction, loans, onLink, onUnlink,
+}: {
+  transaction: Transaction;
+  loans: Loan[];
+  onLink: (loanId: string) => void | Promise<void>;
+  onUnlink: () => void | Promise<void>;
+}) {
+  const [picking, setPicking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const linkedLoan = transaction.loanId
+    ? loans.find((l) => l.id === transaction.loanId) ?? null
+    : null;
+  const handleUnlink = async (): Promise<void> => {
+    setBusy(true);
+    try { await onUnlink(); } finally { setBusy(false); }
+  };
+  const handleLink = async (loanId: string): Promise<void> => {
+    setBusy(true);
+    try {
+      await onLink(loanId);
+      setPicking(false);
+    } finally { setBusy(false); }
+  };
+  return (
+    <div className="txn-sidebar-section">
+      <div className="label">Loans</div>
+      {linkedLoan ? (
+        <div className="rf-linked">
+          <div className="rf-linked-name">Linked to {linkedLoan.name}</div>
+          <button
+            type="button"
+            className="rf-unlink"
+            aria-label="Unlink loan"
+            disabled={busy}
+            onClick={() => void handleUnlink()}
+          >Unlink</button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          className="txn-sidebar-action"
+          onClick={() => setPicking(true)}
+          disabled={loans.length === 0}
+        >+ Link to a loan</button>
+      )}
+      <Dialog.Root open={picking} onOpenChange={(o) => { if (!o) setPicking(false); }}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="rx-overlay" />
+          <Dialog.Content className="rx-dialog rx-dialog-sm" aria-label="Pick a loan">
+            <Dialog.Title>Pick a loan</Dialog.Title>
+            <Dialog.Description className="rx-dialog-desc">
+              The transaction will be attached to the selected loan and
+              appear in its payment history. Auto-matched links can be
+              overridden here too.
+            </Dialog.Description>
+            <ul className="loan-pick-list">
+              {loans.map((l) => (
+                <li key={l.id}>
+                  <button
+                    type="button"
+                    className="loan-pick-row"
+                    disabled={busy}
+                    onClick={() => void handleLink(l.id)}
+                  >
+                    <span className="loan-pick-name">{l.name}</span>
+                    <span className="loan-pick-meta">
+                      {l.connectionId ? 'Bank loan' : 'Manual'}
+                    </span>
+                  </button>
+                </li>
+              ))}
+              {loans.length === 0 && (
+                <li className="loan-pick-empty">
+                  No loans yet. Add one from the Loans tab first.
+                </li>
+              )}
+            </ul>
+            <div className="form-actions">
+              <Dialog.Close asChild>
+                <button type="button" className="btn-ghost">Cancel</button>
+              </Dialog.Close>
+            </div>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+    </div>
   );
 }
 
