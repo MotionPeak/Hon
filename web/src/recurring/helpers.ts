@@ -40,3 +40,20 @@ export function merchantName(description: string): string {
 export function monthlyEquivalent(amount: number, freq: Frequency): number {
   return amount / RECURRENCE_DIV[freq];
 }
+
+/** The frequency choices the transaction editor offers for a given category —
+ *  null when the category is not a recurring bill. Mirrors the legacy SPA's
+ *  recurrenceChoices(): Subscriptions → monthly|yearly, any fixed-group
+ *  category → monthly|bimonthly. */
+export function recurrenceChoices(
+  cat: { name: string; catGroup: string } | null | undefined,
+): Array<readonly [Frequency, string]> | null {
+  if (!cat) return null;
+  if (cat.name === 'Subscriptions') {
+    return [['monthly', 'Monthly'], ['yearly', 'Yearly']];
+  }
+  if (cat.catGroup === 'fixed') {
+    return [['monthly', 'Monthly'], ['bimonthly', 'Bimonthly']];
+  }
+  return null;
+}

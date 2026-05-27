@@ -490,9 +490,24 @@ input[type="radio"], input[type="checkbox"] {
   font: 800 22px/1 ui-rounded, "SF Pro Rounded", system-ui;
   color: var(--text); letter-spacing: -.2px; margin-bottom: 18px;
 }
+/* Two-column masonry-style flow: CSS multicol packs sections top-to-bottom
+   in each column so a tall section (e.g. Pension with multiple accounts)
+   doesn't strand an empty gap below its shorter row-mate. Falls back to a
+   single column on narrow viewports. break-inside keeps each section
+   intact across the column break. */
 .assets-grid {
-  display: grid; gap: 22px; align-items: start;
-  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  column-count: 2;
+  column-gap: 22px;
+}
+.assets-grid > * {
+  break-inside: avoid;
+  -webkit-column-break-inside: avoid;
+  display: block;
+  margin-bottom: 22px;
+}
+.assets-grid > *:last-child { margin-bottom: 0; }
+@media (max-width: 760px) {
+  .assets-grid { column-count: 1; }
 }
 .assets-stack { display: flex; flex-direction: column; gap: 14px; }
 .assets-sub-head {
@@ -1635,6 +1650,45 @@ button.mini { padding: 5px 11px; font-size: 12px; }
   font-size: 11px; color: var(--faint); margin: 6px 0 0;
 }
 
+/* "Always categorize transactions from this business this way" — checkbox
+   row that follows the category picker. The amber accent matches the
+   nav-bar so the affordance reads as a primary action without a button. */
+.txn-sidebar-always {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 12px 0; border-top: 1px solid var(--hairline);
+  font-size: 13px; color: var(--text); cursor: pointer;
+  user-select: none;
+}
+.txn-sidebar-always input[type='checkbox'] {
+  flex: 0 0 auto; margin-top: 1px;
+  width: 16px; height: 16px;
+  accent-color: var(--accent); cursor: pointer;
+}
+.txn-sidebar-always:has(input:disabled) { opacity: 0.6; cursor: not-allowed; }
+
+/* Billing frequency segmented toggle. Same shape as other 2-up toggles
+   in the app — active option carries the amber fill, inactive options
+   are quiet card chips. */
+.freq-pick {
+  display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 8px;
+}
+.freq-opt {
+  padding: 10px 12px; border-radius: 10px;
+  background: var(--card-hi); border: 1px solid var(--hairline);
+  color: var(--muted); font-size: 13px; font-weight: 600;
+  cursor: pointer;
+  transition: background-color .15s ease, color .15s ease, border-color .15s ease;
+}
+.freq-opt:hover:not(:disabled) {
+  background: var(--card-hi-2, var(--card-hi));
+  color: var(--text); border-color: var(--hairline-2);
+}
+.freq-opt.active {
+  background: var(--accent); color: #1a1409;
+  border-color: var(--accent);
+}
+.freq-opt:disabled { opacity: 0.6; cursor: not-allowed; }
+
 /* Delayed loader — appears only when a request runs longer than the
    250ms threshold the component holds for. Centred in the content area
    instead of clinging to the top-left, so when it does appear it reads
@@ -1703,13 +1757,14 @@ button.mini { padding: 5px 11px; font-size: 12px; }
 }
 .new-loan-banner-dismiss:hover { background: var(--card-hi); color: var(--text); }
 
-/* Loans nav-button unseen dot — small amber pulse in the top-right. */
+/* Loans nav-button unseen dot — small amber pulse, vertically centered on the right. */
 .app-nav .nav-btn[data-unseen]::after {
-  content: ''; position: absolute; top: 6px; right: 6px;
+  content: ''; position: absolute; top: 50%; right: 10px;
   width: 8px; height: 8px; border-radius: 50%;
   background: var(--accent);
   box-shadow: 0 0 0 0 rgba(245,159,36,0.6);
   animation: hon-unseen-pulse 1.6s ease-out infinite;
+  transform: translateY(-50%);
   z-index: 2;
 }
 @keyframes hon-unseen-pulse {
