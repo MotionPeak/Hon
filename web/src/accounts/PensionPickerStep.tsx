@@ -97,8 +97,8 @@ export function PensionProviderRow(
         <span className="add-picker-name">{company.name}</span>
         <span className="add-picker-sub">
           {interactive
-            ? 'Opens a visible sign-in window on each sync to clear a security check'
-            : 'Synced silently in the background — no interaction needed'}
+            ? 'A browser window opens on each sync to clear a security check'
+            : 'Synced automatically in the background'}
         </span>
         <span
           className={

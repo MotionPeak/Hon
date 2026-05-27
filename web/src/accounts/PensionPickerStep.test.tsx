@@ -37,7 +37,7 @@ describe('PensionPickerStep', () => {
       />,
     );
     const migdalRow = screen.getByRole('button', { name: /migdal/i });
-    expect(within(migdalRow).getByText(/automatic/i)).toBeInTheDocument();
+    expect(within(migdalRow).getByText('Automatic')).toBeInTheDocument();
   });
 
   it('tags interactive providers as needing a browser window', () => {
@@ -50,7 +50,7 @@ describe('PensionPickerStep', () => {
       />,
     );
     const meitavRow = screen.getByRole('button', { name: /meitav/i });
-    expect(within(meitavRow).getByText(/browser window/i)).toBeInTheDocument();
+    expect(within(meitavRow).getByText('Browser window')).toBeInTheDocument();
   });
 
   it('renders a trailing "Custom pension account" row', () => {
