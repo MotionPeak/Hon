@@ -121,34 +121,49 @@ code, pre {
   color: var(--muted); font-size: 14px; font-weight: 600; position: relative;
   /* Sit ABOVE the sliding pill so the icon + label stay readable. */
   z-index: 1;
-  transition: color .2s ease, background-color .2s ease, border-color .2s ease,
-    transform .16s ease, box-shadow .2s ease;
+  /* Base transitions apply on un-hover (returning to default). Kept
+     short so the just-left item's hover styling clears almost
+     immediately during cursor traversal — otherwise background-color
+     and ::before height decay for ~200ms and the previous row reads
+     as still hovered alongside the new one, producing a "pop" of two
+     adjacent hovered-looking rows. The longer fade-IN is overridden
+     on :hover below. */
+  transition: color .08s ease, background-color .06s ease, border-color .06s ease,
+    transform .12s ease, box-shadow .08s ease;
 }
 .app-nav .nav-btn .rn-ico {
   font-size: 17px; line-height: 1;
-  /* Smooth ease-out, no overshoot. The previous spring (y1=1.7) peaked
-     around scale 1.37 with rotate ~−10° — combined with adjacent rows
-     animating during cursor traversal, that overshoot read as nearby
-     items twitching even though their bounding boxes never changed. */
-  transition: transform .22s cubic-bezier(.2, .7, .3, 1);
+  /* Same asymmetric logic for the icon scale — fast collapse on un-hover. */
+  transition: transform .08s cubic-bezier(.2, .7, .3, 1);
 }
 .app-nav .nav-btn::before {
   content: ""; position: absolute; left: 0; top: 50%;
   width: 3px; height: 0; border-radius: 0 3px 3px 0;
   background: var(--accent); transform: translateY(-50%);
-  transition: height .24s ease;
+  /* Fast collapse on un-hover so the amber tick on the just-left row
+     doesn't linger while the new tick grows on the new row. */
+  transition: height .07s ease;
 }
 .app-nav .nav-btn:hover {
-  /* Background/border/text colour change carries the hover affordance.
-     The previous translateX(4px) slid the just-left item back to 0
-     while the new hover slid 0→4 at the same time — two adjacent rows
-     in opposite horizontal motion right at the cursor boundary, which
-     the eye read as "items near the cursor twitching." Static now. */
+  /* Asymmetric transitions: the :hover variant gets the longer
+     deliberate fade-IN, while the un-hover snap-OUT uses the base
+     rule's shorter durations. Background/border/text colour carries
+     the hover affordance (the previous translateX(4px) slide was
+     dropped in the prior commit — it was creating opposite-direction
+     horizontal motion on adjacent rows during cursor traversal). */
   color: var(--text); background-color: var(--card-hi);
   border-color: var(--hairline);
+  transition: color .18s ease, background-color .18s ease, border-color .18s ease,
+    transform .12s ease, box-shadow .18s ease;
 }
-.app-nav .nav-btn:hover .rn-ico { transform: scale(1.12) rotate(-3deg); }
-.app-nav .nav-btn:hover::before { height: 54%; }
+.app-nav .nav-btn:hover .rn-ico {
+  transform: scale(1.12) rotate(-3deg);
+  transition: transform .22s cubic-bezier(.2, .7, .3, 1);
+}
+.app-nav .nav-btn:hover::before {
+  height: 54%;
+  transition: height .24s ease;
+}
 .app-nav .nav-btn.active {
   /* The pill carries the amber fill; the button itself is now just a
      transparent layer above so its hover transform doesn't snap. */
