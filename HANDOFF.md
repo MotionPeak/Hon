@@ -4,12 +4,32 @@
 >
 > **Then read [PROJECT-RULES.md](PROJECT-RULES.md)** — durable
 > behavioral rules (no `preview_start`, visual-verification workflow
-> via chrome-devtools MCP, branch/push policy, workflow discipline,
-> Hon-specific gotchas). Non-negotiable before touching code.
+> via chrome-devtools MCP, **worktree-per-session policy**, push
+> policy, workflow discipline, Hon-specific gotchas). Non-negotiable
+> before touching code.
 >
 > **And [CLAUDE.md](CLAUDE.md)** — code-architecture map: where
 > things live, the why behind non-obvious decisions, common
 > debugging patterns. Reference for code-level questions.
+
+## Session-start checklist (before any edit)
+
+1. **Spawn a worktree** (rule from PROJECT-RULES.md §3):
+   ```bash
+   cd /Users/shaharsolomons/Documents/Code/Hon
+   TOPIC="<short-slug>"; DATE=$(date +%F)
+   git worktree add ".claude/worktrees/${TOPIC}-${DATE}" -b "session/${TOPIC}-${DATE}"
+   cd ".claude/worktrees/${TOPIC}-${DATE}"
+   ```
+   …or invoke the **`superpowers:using-git-worktrees`** skill to do
+   the same thing. Every code edit lands in this worktree, never on
+   the `main` checkout.
+2. **Run sanity checks once**: `cd web && npm test`, `cd sidecar &&
+   npm test`, both typechecks — confirm a green baseline before
+   diverging.
+3. **Decide on workflow level**: trivial fix → just edit; multi-step
+   feature → invoke `superpowers:brainstorming` → `writing-plans` →
+   `executing-plans`.
 
 ## TL;DR — state of the world (2026-05-27)
 

@@ -73,17 +73,80 @@ suite. After any visual change: screenshot, read it, confirm with your
 own eyes, THEN commit. If you can't verify visually (chrome-devtools
 not available, no token, etc.), say so explicitly — don't bluff.
 
-## 3. Branch + push policy
+## 3. Branch + worktree + push policy
 
-- **Stay on `main`.** No PR / feature branches in this repo.
+### Every session works in its own git worktree
+
+Multiple Claude sessions may run in parallel; `main` should stay a
+clean integration target. **No code edits on the `main` worktree
+directly.** Set up a session worktree before touching any file:
+
+```bash
+# At session start — pick a topic slug for this session's scope.
+cd /Users/shaharsolomons/Documents/Code/Hon
+TOPIC="<topic>"                   # e.g. snaptrade-smoke, fix-h1-logo
+DATE=$(date +%F)
+git worktree add ".claude/worktrees/${TOPIC}-${DATE}" -b "session/${TOPIC}-${DATE}"
+cd ".claude/worktrees/${TOPIC}-${DATE}"
+# All further work in this directory. Commit freely.
+```
+
+`.claude/` is gitignored, so worktree dirs never accidentally end up
+tracked. Branch names follow `session/<topic>-<YYYY-MM-DD>` so `git
+branch` is self-documenting.
+
+For implementation work generated from a spec/plan, the
+**`superpowers:using-git-worktrees`** skill does the same setup +
+chooses the topic slug from the plan filename. Invoke it before
+editing any file.
+
+### Session end — merging back to main
+
+When the work is mergeable (tests green, typecheck clean, visually
+verified per §2):
+
+```bash
+# 1. Return to the main worktree
+cd /Users/shaharsolomons/Documents/Code/Hon
+
+# 2. ALWAYS show the user the diff before merging — they decide
+#    whether to merge, PR, or keep it on the branch.
+git log --oneline main..session/${TOPIC}-${DATE}
+git diff main...session/${TOPIC}-${DATE} --stat
+
+# 3a. Local merge (if user says "merge")
+git merge --no-ff "session/${TOPIC}-${DATE}"
+
+# 3b. OR open a PR (if user says "PR")
+gh pr create --base main --head "session/${TOPIC}-${DATE}" \
+  --title "<topic>" --body "<summary>"
+
+# 4. Clean up the worktree (only after merge is confirmed)
+git worktree remove ".claude/worktrees/${TOPIC}-${DATE}"
+# 5. Delete the branch (only if merged + user says delete)
+git branch -d "session/${TOPIC}-${DATE}"
+```
+
+### Push policy
+
 - **Never push to origin without an explicit "push" from Shahar.**
   Netlify/Vercel-style deploy hooks aren't in play for Hon, but the
   habit avoids surprise releases (Motion Peak, Tal's Food Art etc.
-  are deploy-connected — same rule everywhere).
+  are deploy-connected — same rule everywhere). Branches and `main`
+  alike — silence by default.
 - **Never** `--no-verify`, **never** amend a published commit,
   **never** force-push.
-- `git commit` freely. One commit per logical change. Tight commit
-  messages — what + why, not what code looks like.
+- `git commit` freely within the session worktree. One commit per
+  logical change. Tight commit messages — what + why, not what code
+  looks like.
+
+### When the user pushed back on this workflow
+
+Shahar codified the worktree-per-session rule on 2026-05-27 after a
+parallel code-review session (`.claude/worktrees/code-review-2026-05-27/`)
+made it obvious that direct-on-main was a recipe for stomped work.
+If a future session is tempted to "just commit straight to main for
+a quick fix" — don't. Even one-line fixes get a worktree.
 
 ## 4. Workflow discipline (when the task warrants it)
 
