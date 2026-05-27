@@ -21,6 +21,8 @@ export interface Connection {
   lastScrapeAt: string | null;
   lastStatus: string | null;
   hasCredentials: boolean;
+  /** Months of transaction history to fetch each sync. Default 12; range [1, 24]. */
+  historyMonths: number;
 }
 
 // SQLite has no boolean type, so `hasCredentials` arrives as 0 | 1.
@@ -280,7 +282,8 @@ function toSplitwiseLink(row: SplitwiseLinkRow): SplitwiseLink {
 const CONNECTION_COLS =
   'c.id, c.company_id AS companyId, c.display_name AS displayName, ' +
   'c.created_at AS createdAt, c.last_scrape_at AS lastScrapeAt, ' +
-  'c.last_status AS lastStatus, (cr.connection_id IS NOT NULL) AS hasCredentials';
+  'c.last_status AS lastStatus, c.history_months AS historyMonths, ' +
+  '(cr.connection_id IS NOT NULL) AS hasCredentials';
 
 const CONNECTION_FROM =
   'FROM connections c LEFT JOIN credentials cr ON cr.connection_id = c.id';
