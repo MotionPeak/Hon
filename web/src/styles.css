@@ -139,8 +139,13 @@ code, pre {
   transition: height .24s ease;
 }
 .app-nav .nav-btn:hover {
+  /* Background/border/text colour change carries the hover affordance.
+     The previous translateX(4px) slid the just-left item back to 0
+     while the new hover slid 0→4 at the same time — two adjacent rows
+     in opposite horizontal motion right at the cursor boundary, which
+     the eye read as "items near the cursor twitching." Static now. */
   color: var(--text); background-color: var(--card-hi);
-  border-color: var(--hairline); transform: translateX(4px);
+  border-color: var(--hairline);
 }
 .app-nav .nav-btn:hover .rn-ico { transform: scale(1.12) rotate(-3deg); }
 .app-nav .nav-btn:hover::before { height: 54%; }
