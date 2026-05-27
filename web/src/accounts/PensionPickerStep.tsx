@@ -20,9 +20,11 @@ interface PensionPickerStepProps {
  * providers Hon can't scrape (e.g. Altshuler, or any future fund the
  * engine hasn't been taught to read).
  *
- * The row markup is delegated to `PensionProviderRow` so future
- * per-provider variants (e.g. a Migdal row that previews retirement
- * projection) can be swapped in without rewriting the picker itself.
+ * The row markup is extracted into the exported `PensionProviderRow`
+ * sub-component so callers and tests can compose it directly, and so
+ * future per-provider variants can extend it. When a real variant
+ * lands, this picker should grow a `rowComponent` prop to make the
+ * substitution explicit.
  */
 export function PensionPickerStep(
   { companies, onPickCompany, onPickCustom, onBack }: PensionPickerStepProps,
@@ -45,7 +47,7 @@ export function PensionPickerStep(
       </p>
       <ul className="add-picker">
         {pensionCompanies.length === 0 && (
-          <li className="hint">No scraped providers available.</li>
+          <li className="hint" role="status">No scraped providers available.</li>
         )}
         {pensionCompanies.map((c) => (
           <PensionProviderRow
