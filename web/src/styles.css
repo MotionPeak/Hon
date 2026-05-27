@@ -2412,16 +2412,21 @@ button.mini { padding: 5px 11px; font-size: 12px; }
   font-size: 13px; font-weight: 700;
   transition: border-color 0.15s, transform 0.12s;
   color: var(--text);
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  overflow-wrap: break-word; word-break: break-word;
+  /* align-items: stretch lets each child take the cross-axis (tile width)
+     so the text actually wraps inside the tile instead of overflowing.
+     The base `button` rule sets white-space: nowrap — override here so
+     long sub-text actually wraps. */
+  display: flex; flex-direction: column; align-items: stretch; justify-content: center;
+  white-space: normal; overflow-wrap: break-word; word-break: normal;
 }
 .pick-card:hover:not(:disabled) { border-color: var(--accent); transform: translateY(-2px); }
 .pick-card:disabled { opacity: 0.5; cursor: not-allowed; }
 .pick-card .pc-emoji { font-size: 28px; display: block; margin-bottom: 7px; }
-.pick-card .pc-label { display: block; }
+.pick-card .pc-label { display: block; max-width: 100%; }
 .pick-card .pc-count {
   color: var(--muted); font-size: 11px; font-weight: 500;
-  display: block; margin-top: 3px;
+  display: block; margin-top: 3px; max-width: 100%;
+  line-height: 1.35;
 }
 .back-btn {
   background: none; border: none; color: var(--muted); cursor: pointer;
