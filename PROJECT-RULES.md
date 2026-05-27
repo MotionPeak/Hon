@@ -21,6 +21,16 @@
 
 ## 2. Visual verification workflow (USE THIS — don't ask for screenshots)
 
+> **Hard rule, no exceptions:** A UI change is NOT done until
+> chrome-devtools MCP has loaded the live app and a screenshot
+> confirms the change is rendered. No "tests pass + typecheck clean"
+> claim, no commit summary, no "shipped" message goes out before the
+> screenshot exists. Tests don't render pixels; vite HMR can be
+> pointing at a different checkout than the worktree being edited;
+> CSS specificity wars are invisible to the test runner. The screenshot
+> is the only proof. Codified after a 2026-05-27 incident where two
+> "done" UI claims hadn't actually rendered in Shahar's browser.
+
 When changing anything observable in the browser (CSS, JSX layouts,
 component state), **verify it yourself** instead of asking Shahar
 to screenshot. Workflow:

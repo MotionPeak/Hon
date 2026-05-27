@@ -490,9 +490,24 @@ input[type="radio"], input[type="checkbox"] {
   font: 800 22px/1 ui-rounded, "SF Pro Rounded", system-ui;
   color: var(--text); letter-spacing: -.2px; margin-bottom: 18px;
 }
+/* Two-column masonry-style flow: CSS multicol packs sections top-to-bottom
+   in each column so a tall section (e.g. Pension with multiple accounts)
+   doesn't strand an empty gap below its shorter row-mate. Falls back to a
+   single column on narrow viewports. break-inside keeps each section
+   intact across the column break. */
 .assets-grid {
-  display: grid; gap: 22px; align-items: start;
-  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  column-count: 2;
+  column-gap: 22px;
+}
+.assets-grid > * {
+  break-inside: avoid;
+  -webkit-column-break-inside: avoid;
+  display: block;
+  margin-bottom: 22px;
+}
+.assets-grid > *:last-child { margin-bottom: 0; }
+@media (max-width: 760px) {
+  .assets-grid { column-count: 1; }
 }
 .assets-stack { display: flex; flex-direction: column; gap: 14px; }
 .assets-sub-head {
