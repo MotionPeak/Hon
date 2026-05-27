@@ -2400,6 +2400,70 @@ button.mini { padding: 5px 11px; font-size: 12px; }
   padding: 14px 2px; color: var(--muted); text-align: center; font-size: 13px;
 }
 
+/* --- Category-tile picker (matches legacy SPA design) ------------------ */
+.pick-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: 10px; margin: 8px 0 4px;
+}
+.pick-card {
+  flex: 1; border: 1px solid var(--hairline-2); border-radius: 13px;
+  padding: 20px 8px; text-align: center; cursor: pointer; background: var(--card-hi);
+  font-size: 13px; font-weight: 700;
+  transition: border-color 0.15s, transform 0.12s;
+  color: var(--text);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+}
+.pick-card:hover:not(:disabled) { border-color: var(--accent); transform: translateY(-2px); }
+.pick-card:disabled { opacity: 0.5; cursor: not-allowed; }
+.pick-card .pc-emoji { font-size: 28px; display: block; margin-bottom: 7px; }
+.pick-card .pc-label { display: block; }
+.pick-card .pc-count {
+  color: var(--muted); font-size: 11px; font-weight: 500;
+  display: block; margin-top: 3px;
+}
+.back-btn {
+  background: none; border: none; color: var(--muted); cursor: pointer;
+  font-size: 13px; padding: 4px 0; margin-bottom: 6px;
+  align-self: flex-start;
+}
+.back-btn:hover { color: var(--text); }
+
+/* --- SnapTrade link flow panels ---------------------------------------- */
+.snaptrade-flow { display: flex; flex-direction: column; gap: 12px; }
+.snaptrade-flow h2 { margin: 0; }
+.snaptrade-flow p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.snaptrade-flow-loading {
+  padding: 28px 0; text-align: center; color: var(--muted); font-size: 13px;
+}
+.snaptrade-flow-error { color: var(--red, #ff6b6b); }
+.snaptrade-flow-meta { font-size: 12px; }
+.snaptrade-countdown { font-weight: 700; color: var(--text); }
+
+.snaptrade-picker { display: flex; flex-direction: column; gap: 10px; }
+.snaptrade-picker-empty {
+  padding: 14px 2px; color: var(--muted); text-align: center; font-size: 13px;
+}
+.snaptrade-picker-grid {
+  list-style: none; padding: 0; margin: 0;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px; max-height: 360px; overflow-y: auto;
+}
+.snaptrade-picker-card {
+  width: 100%; display: flex; flex-direction: column; align-items: center; gap: 8px;
+  padding: 14px 8px; border: 1px solid var(--hairline-2); border-radius: 12px;
+  background: var(--card-hi); color: var(--text); cursor: pointer;
+  font-size: 12px; font-weight: 600;
+  transition: border-color 0.15s, transform 0.12s;
+}
+.snaptrade-picker-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+.snaptrade-picker-card[data-pre-focused="true"] { border-color: var(--accent); }
+.snaptrade-picker-logo {
+  width: 32px; height: 32px; object-fit: contain;
+  display: flex; align-items: center; justify-content: center;
+}
+.snaptrade-picker-logo-fallback { font-size: 26px; }
+.snaptrade-picker-name { text-align: center; line-height: 1.3; }
+
 /* --- Brokerage holdings list ------------------------------------------ */
 .holds-toggle {
   margin-right: 6px; padding: 0; border: 0; background: none;
