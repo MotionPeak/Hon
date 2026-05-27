@@ -48,7 +48,9 @@ const SECTIONS: SectionDef[] = [
   { key: 'brokerage', label: 'Investments',       emoji: '📈' },
   { key: 'pension',   label: 'Pension',           emoji: '🪺' },
   { key: 'asset',     label: 'Other assets',      emoji: '💎' },
-  { key: 'loan',      label: 'Loans',             emoji: '📉' },
+  // Loans intentionally NOT rendered here — they live exclusively in
+  // the Loans tab. The /loans fetch is kept so the new-loan banner +
+  // nav-dot can still diff against localStorage.
 ];
 
 function sectionKeyForConnection(conn: Connection, companies: Company[]): AssetSectionKey {
@@ -243,14 +245,13 @@ export function AccountsView() {
 
   const sectionCount = (key: AssetSectionKey): number => {
     if (key === 'asset') return data.assets.length;
-    if (key === 'loan') return data.loans.length;
+    if (key === 'loan') return 0; // see SECTIONS comment
     return data.connections.filter(
       (c) => sectionKeyForConnection(c, data.companies) === key,
     ).length;
   };
 
-  const totalItems =
-    data.connections.length + data.assets.length + data.loans.length;
+  const totalItems = data.connections.length + data.assets.length;
   if (totalItems === 0) {
     return (
       <div className="accounts-view">

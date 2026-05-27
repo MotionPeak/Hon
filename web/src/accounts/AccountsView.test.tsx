@@ -78,13 +78,14 @@ const FULL = {
 };
 
 describe('AccountsView — section grouping', () => {
-  it('renders the 6 section headers in order when each section has content', async () => {
+  it('renders the 5 section headers in order when each section has content', async () => {
     installFetchMock(FULL);
     render(<AccountsView />);
     await screen.findByRole('heading', { name: /banks/i });
     const headers = screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent || '');
     // Section labels come with an emoji + count chip; check ordering ignoring chrome.
-    const order = ['Banks', 'Credit cards', 'Investments', 'Pension', 'Other assets', 'Loans'];
+    // Loans deliberately omitted — they live in the Loans tab now.
+    const order = ['Banks', 'Credit cards', 'Investments', 'Pension', 'Other assets'];
     const seen = headers.filter((t) => order.some((o) => t.includes(o)));
     expect(seen.map((t) => order.find((o) => t.includes(o)))).toEqual(order);
   });
@@ -293,20 +294,8 @@ describe('AccountsView — net-worth toggle', () => {
     expect(put.mock.calls[0]?.[0]).toEqual({ excluded: true });
   });
 
-  it('loan cards have a net-worth pill that PATCHes /loans/:id/excluded', async () => {
-    const user = userEvent.setup();
-    const patch = vi.fn((_body: unknown) => ({ ok: true }));
-    installFetchMock({
-      ...FULL,
-      'PATCH /api/loans/l-1/excluded': patch,
-    });
-    render(<AccountsView />);
-    const mortgage = await screen.findByText('Mortgage');
-    const card = mortgage.closest('.loan-card')!;
-    await user.click(within(card as HTMLElement).getByRole('checkbox', { name: /net worth/i }));
-    await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
-    expect(patch.mock.calls[0]?.[0]).toEqual({ excluded: true });
-  });
+  // Loan net-worth toggle test removed: loans no longer render in Assets.
+  // The Loans-tab card retains its own toggle and its own dedicated tests.
 });
 
 describe('AccountsView — remove connection', () => {
@@ -578,7 +567,7 @@ describe('AccountsView — brokerage holdings', () => {
   });
 });
 
-describe('AccountsView — assets + loans', () => {
+describe('AccountsView — assets', () => {
   it('renders each manual asset by name in the Other assets section', async () => {
     installFetchMock(FULL);
     render(<AccountsView />);
@@ -586,10 +575,12 @@ describe('AccountsView — assets + loans', () => {
     expect(screen.getByText(/45,?000/)).toBeInTheDocument();
   });
 
-  it('renders each loan by name in the Loans section', async () => {
+  it('does NOT render loans in Assets (they live in the Loans tab)', async () => {
     installFetchMock(FULL);
     render(<AccountsView />);
-    expect(await screen.findByText('Mortgage')).toBeInTheDocument();
+    await screen.findByText('Hapoalim main');
+    expect(screen.queryByText('Mortgage')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /loans/i })).not.toBeInTheDocument();
   });
 });
 
@@ -864,53 +855,7 @@ describe('AccountsView — asset edit + remove', () => {
   });
 });
 
-describe('AccountsView — loan edit + remove', () => {
-  it('opens an edit modal pre-filled with the loan fields', async () => {
-    const user = userEvent.setup();
-    installFetchMock(FULL);
-    render(<AccountsView />);
-    const mortgage = await screen.findByText('Mortgage');
-    await user.click(within(mortgage.closest('.loan-card') as HTMLElement)
-      .getByRole('button', { name: /^edit$/i }));
-    const dialog = screen.getByRole('dialog');
-    expect((within(dialog).getByLabelText(/name/i) as HTMLInputElement).value).toBe('Mortgage');
-    expect((within(dialog).getByLabelText(/principal/i) as HTMLInputElement).value).toBe('800000');
-    expect((within(dialog).getByLabelText(/term/i) as HTMLInputElement).value).toBe('240');
-    expect((within(dialog).getByLabelText(/rate/i) as HTMLInputElement).value).toBe('3.5');
-  });
-
-  it('save PUTs /loans/:id with the changed fields and refetches', async () => {
-    const user = userEvent.setup();
-    const put = vi.fn((_body: unknown) => ({ loan: { id: 'l-1' } }));
-    const get = vi.fn(() => LOANS);
-    installFetchMock({ ...FULL, 'GET /api/loans': get, 'PUT /api/loans/l-1': put });
-    render(<AccountsView />);
-    const mortgage = await screen.findByText('Mortgage');
-    await user.click(within(mortgage.closest('.loan-card') as HTMLElement)
-      .getByRole('button', { name: /^edit$/i }));
-    const dialog = screen.getByRole('dialog');
-    const rateInput = within(dialog).getByLabelText(/rate/i);
-    await user.clear(rateInput);
-    await user.type(rateInput, '4');
-    await user.click(within(dialog).getByRole('button', { name: /save/i }));
-    await waitFor(() => expect(put).toHaveBeenCalledTimes(1));
-    expect(put.mock.calls[0]?.[0]).toMatchObject({ name: 'Mortgage', rateValue: 4 });
-    await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
-  });
-
-  it('remove opens a confirmation; confirm DELETEs and refetches', async () => {
-    const user = userEvent.setup();
-    const del = vi.fn(() => ({ ok: true }));
-    const get = vi.fn(() => LOANS);
-    installFetchMock({ ...FULL, 'GET /api/loans': get, 'DELETE /api/loans/l-1': del });
-    render(<AccountsView />);
-    const mortgage = await screen.findByText('Mortgage');
-    await user.click(within(mortgage.closest('.loan-card') as HTMLElement)
-      .getByRole('button', { name: /^remove$/i }));
-    await user.click(
-      within(screen.getByRole('dialog')).getByRole('button', { name: /confirm remove/i }),
-    );
-    await waitFor(() => expect(del).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
-  });
-});
+// Loan edit / remove flows are now part of the Loans tab (LoansView).
+// The Assets tab no longer renders loans, so these tests were removed.
+// The Loans-tab implementation still owns the edit / remove flows; if
+// they need test coverage, those tests belong in LoansView.test.tsx.
