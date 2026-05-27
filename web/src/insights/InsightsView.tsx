@@ -7,6 +7,7 @@ import { useSettings } from '../settings/useSettings';
 import type { Category } from '../settings/CategoriesPanel';
 import type { Transaction } from '../activity/types';
 import { cycleAnalytics, type MonthBucket } from './analytics';
+import { smoothPath } from './smooth';
 
 function monthLetter(key: string): string {
   // "2026-05" → "M" (English month letter — matches the legacy app).
@@ -515,7 +516,8 @@ function ValueChart({
     n === 1 ? PAD.l + innerW / 2 : PAD.l + (i / (n - 1)) * innerW;
   const y = (v: number): number =>
     PAD.t + innerH - ((v - min) / range) * innerH;
-  const path = series.map((p, i) => `${i === 0 ? 'M' : 'L'} ${x(i)} ${y(p.value)}`).join(' ');
+  const pts = series.map((p, i) => ({ x: x(i), y: y(p.value) }));
+  const path = smoothPath(pts);
   const area = `${path} L ${x(n - 1)} ${PAD.t + innerH} L ${x(0)} ${PAD.t + innerH} Z`;
   return (
     <svg
@@ -539,7 +541,7 @@ function ValueChart({
         strokeLinejoin="round"
         strokeLinecap="round"
       />
-      {series.map((p, i) => (
+      {n <= 24 && series.map((p, i) => (
         <circle
           key={p.date}
           cx={x(i)}
