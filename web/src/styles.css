@@ -126,7 +126,11 @@ code, pre {
 }
 .app-nav .nav-btn .rn-ico {
   font-size: 17px; line-height: 1;
-  transition: transform .26s cubic-bezier(.34,1.7,.6,1);
+  /* Smooth ease-out, no overshoot. The previous spring (y1=1.7) peaked
+     around scale 1.37 with rotate ~−10° — combined with adjacent rows
+     animating during cursor traversal, that overshoot read as nearby
+     items twitching even though their bounding boxes never changed. */
+  transition: transform .22s cubic-bezier(.2, .7, .3, 1);
 }
 .app-nav .nav-btn::before {
   content: ""; position: absolute; left: 0; top: 50%;
@@ -138,7 +142,7 @@ code, pre {
   color: var(--text); background-color: var(--card-hi);
   border-color: var(--hairline); transform: translateX(4px);
 }
-.app-nav .nav-btn:hover .rn-ico { transform: scale(1.22) rotate(-7deg); }
+.app-nav .nav-btn:hover .rn-ico { transform: scale(1.12) rotate(-3deg); }
 .app-nav .nav-btn:hover::before { height: 54%; }
 .app-nav .nav-btn.active {
   /* The pill carries the amber fill; the button itself is now just a
