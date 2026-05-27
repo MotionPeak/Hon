@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor, within, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AccountsView } from './AccountsView';
 import { installFetchMock, jsonResponse } from '../test/mockFetch';
@@ -508,6 +508,91 @@ describe('AccountsView — sync flow', () => {
     await user.click(within(otpDialog).getByRole('button', { name: /submit/i }));
     await waitFor(() => expect(submitOtp).toHaveBeenCalledTimes(1));
     expect(submitOtp.mock.calls[0]?.[0]).toEqual({ code: '123456' });
+  });
+
+  const connectionsFixture = [{
+    id: 'c-bank-1', companyId: 'hapoalim', displayName: 'Hapoalim',
+    createdAt: '2026-01-01T00:00:00Z', lastScrapeAt: null, lastStatus: null,
+    hasCredentials: true, historyMonths: 18,
+  }];
+
+  it('sync POST omits monthsBack so engine uses connection default', async () => {
+    const user = userEvent.setup();
+    const postSpy = vi.fn((_body: unknown) => ({ runId: 'r-1' }));
+    installFetchMock({
+      'GET /api/companies': () => ({ companies: [{ id: 'hapoalim', name: 'Hapoalim', loginFields: ['username', 'password'], type: 'bank', interactive: true }] }),
+      'GET /api/connections': () => ({ connections: connectionsFixture }),
+      'GET /api/accounts': () => ({ accounts: [] }),
+      'GET /api/assets': () => ({ assets: [] }),
+      'GET /api/loans': () => ({ loans: [] }),
+      'GET /api/brokerage': () => ({ holdings: [] }),
+      'POST /api/connections/c-bank-1/scrape': postSpy,
+      'GET /api/scrape/r-1': () => ({ run: {
+        runId: 'r-1', connectionId: 'c-bank-1', status: 'success',
+        message: 'Imported 1 account(s) and 42 transaction(s).',
+        accountsCount: 1, transactionsCount: 42,
+        startedAt: '2026-05-27T10:00:00Z', finishedAt: '2026-05-27T10:00:30Z',
+      } }),
+    });
+    render(<AccountsView />);
+    await user.click(await screen.findByRole('button', { name: /^sync$/i }));
+    await waitFor(() => expect(postSpy).toHaveBeenCalled());
+    const callPayload = postSpy.mock.calls[0]?.[0];
+    expect(callPayload).toEqual({ interactive: true });
+    expect(callPayload).not.toHaveProperty('monthsBack');
+  });
+
+  it('renders ✓ Done — N transactions for ~5s after successful sync, then clears', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) });
+    installFetchMock({
+      'GET /api/companies': () => ({ companies: [{ id: 'hapoalim', name: 'Hapoalim', loginFields: ['username', 'password'], type: 'bank', interactive: true }] }),
+      'GET /api/connections': () => ({ connections: connectionsFixture }),
+      'GET /api/accounts': () => ({ accounts: [] }),
+      'GET /api/assets': () => ({ assets: [] }),
+      'GET /api/loans': () => ({ loans: [] }),
+      'GET /api/brokerage': () => ({ holdings: [] }),
+      'POST /api/connections/c-bank-1/scrape': () => ({ runId: 'r-1' }),
+      'GET /api/scrape/r-1': () => ({ run: {
+        runId: 'r-1', connectionId: 'c-bank-1', status: 'success',
+        message: 'Imported 1 account(s) and 42 transaction(s).',
+        accountsCount: 1, transactionsCount: 42,
+        startedAt: '2026-05-27T10:00:00Z', finishedAt: '2026-05-27T10:00:30Z',
+      } }),
+    });
+    render(<AccountsView />);
+    await user.click(await screen.findByRole('button', { name: /^sync$/i }));
+    expect(await screen.findByText(/Done.*42 transactions/i)).toBeInTheDocument();
+
+    await act(async () => { vi.advanceTimersByTime(5100); });
+    expect(screen.queryByText(/Done.*42 transactions/i)).not.toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
+  it('clears the 5s timer on unmount without warning', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) });
+    installFetchMock({
+      'GET /api/companies': () => ({ companies: [{ id: 'hapoalim', name: 'Hapoalim', loginFields: ['username', 'password'], type: 'bank', interactive: true }] }),
+      'GET /api/connections': () => ({ connections: connectionsFixture }),
+      'GET /api/accounts': () => ({ accounts: [] }),
+      'GET /api/assets': () => ({ assets: [] }),
+      'GET /api/loans': () => ({ loans: [] }),
+      'GET /api/brokerage': () => ({ holdings: [] }),
+      'POST /api/connections/c-bank-1/scrape': () => ({ runId: 'r-1' }),
+      'GET /api/scrape/r-1': () => ({ run: {
+        runId: 'r-1', connectionId: 'c-bank-1', status: 'success',
+        message: 'Imported 1 account(s) and 42 transaction(s).',
+        accountsCount: 1, transactionsCount: 42,
+        startedAt: '2026-05-27T10:00:00Z', finishedAt: '2026-05-27T10:00:30Z',
+      } }),
+    });
+    const { unmount } = render(<AccountsView />);
+    await user.click(await screen.findByRole('button', { name: /^sync$/i }));
+    await screen.findByText(/Done.*42 transactions/i);
+    unmount();
+    await act(async () => { vi.advanceTimersByTime(10000); });
+    vi.useRealTimers();
   });
 });
 

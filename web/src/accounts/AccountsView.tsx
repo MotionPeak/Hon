@@ -53,6 +53,7 @@ type SyncState =
   | { kind: 'starting' }
   | { kind: 'running'; runId: string; message: string }
   | { kind: 'needs-otp'; runId: string; message: string }
+  | { kind: 'success'; accountsCount: number; transactionsCount: number }
   | { kind: 'error'; message: string };
 
 // Modals escape stacking contexts (cards have transforms / animations that
@@ -236,8 +237,17 @@ export function AccountsView() {
           SCRAPE_POLL_INTERVAL_MS,
         );
       } else if (run.status === 'success') {
-        setSyncForConnection(connectionId, { kind: 'idle' });
+        setSyncForConnection(connectionId, {
+          kind: 'success',
+          accountsCount: run.accountsCount,
+          transactionsCount: run.transactionsCount,
+        });
         await refresh();
+        // Auto-clear after 5s. Stash the timer in pollTimers so the
+        // existing unmount-cleanup catches it.
+        pollTimers.current[connectionId] = setTimeout(() => {
+          setSyncForConnection(connectionId, { kind: 'idle' });
+        }, 5000);
       } else {
         setSyncForConnection(connectionId, { kind: 'error', message: run.message || 'Sync failed' });
       }
@@ -252,18 +262,16 @@ export function AccountsView() {
   const startSync = useCallback(async (connection: Connection) => {
     setSyncForConnection(connection.id, { kind: 'starting' });
     try {
-      // Mirror the legacy app's POST body. interactive=true picks the
-      // engine's runInteractiveScrape path, which wires the OTP watcher
-      // for the banks in HON_OTP_WATCHER_COMPANIES (Beinleumi, Hapoalim,
-      // Otsar Hahayal, Massad, Pagi). Headless mode has no watcher and
-      // hangs at LOGGING_IN when the bank shows its 2FA page.
-      // monthsBack=24 matches the legacy default so initial syncs pull
-      // a sensible window even when the engine's incremental shortcut
-      // can't kick in.
+      // interactive=true picks the engine's runInteractiveScrape path,
+      // which wires the OTP watcher for the banks in
+      // HON_OTP_WATCHER_COMPANIES (Beinleumi, Hapoalim, Otsar Hahayal,
+      // Massad, Pagi). Headless mode has no watcher and hangs at
+      // LOGGING_IN when the bank shows its 2FA page.
+      // Engine picks the per-connection historyMonths default.
       const { runId } = await api<{ runId: string }>(
         `/connections/${encodeURIComponent(connection.id)}/scrape`,
         'POST',
-        { interactive: true, monthsBack: 24 },
+        { interactive: true },
       );
       setSyncForConnection(connection.id, { kind: 'running', runId, message: 'Starting…' });
       void pollRun(connection.id, runId);
@@ -668,6 +676,12 @@ function ConnectionCard({ connection, company, accounts, callbacks }: Connection
         )}
         {syncState.kind === 'error' && (
           <div className="conn-sync-err">{syncState.message}</div>
+        )}
+        {syncState.kind === 'success' && (
+          <div className="conn-sync-done" role="status">
+            ✓ Done — {syncState.transactionsCount} transaction
+            {syncState.transactionsCount === 1 ? '' : 's'}
+          </div>
         )}
       </header>
       <ul className="conn-accounts">
