@@ -6,6 +6,7 @@ import { money } from '../format';
 import { useSettings } from '../settings/useSettings';
 import type { Category } from '../settings/CategoriesPanel';
 import type { Transaction } from '../activity/types';
+import type { Account } from '../accounts/types';
 import { cycleAnalytics, type MonthBucket } from './analytics';
 import { smoothPath } from './smooth';
 
@@ -280,18 +281,64 @@ function pickDisplayCurrency(holdings: { currency: string }[]): string {
   return best;
 }
 
+interface AccountPillsProps {
+  accounts: Account[];
+  value: 'all' | string;
+  onChange: (next: 'all' | string) => void;
+}
+
+/** Segmented "All accounts" + per-account filter row above the chart.
+ *  Pure presentational — the parent decides which accounts are eligible
+ *  (brokerage-with-snapshots) and owns the selection state. */
+function AccountPills({ accounts, value, onChange }: AccountPillsProps) {
+  return (
+    <div className="brk-acct-row" role="group" aria-label="Accounts">
+      <button
+        type="button"
+        className={`brk-acct-pill${value === 'all' ? ' on' : ''}`}
+        aria-pressed={value === 'all'}
+        onClick={() => onChange('all')}
+      >All accounts</button>
+      {accounts.map((a) => (
+        <button
+          key={a.id}
+          type="button"
+          className={`brk-acct-pill${value === a.id ? ' on' : ''}`}
+          aria-pressed={value === a.id}
+          onClick={() => onChange(a.id)}
+        >{a.label || `Account ${a.accountNumber}`}</button>
+      ))}
+    </div>
+  );
+}
+
 function BrokerageSubTab() {
   const [data, setData] = useState<BrokerageResp | null>(null);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [acctFilter, setAcctFilter] = useState<'all' | string>('all');
   const [range, setRange] = useState<Range>('1Y');
   const [displayCur, setDisplayCur] = useState<string | null>(null);
-  useEffect(() => {
-    api<BrokerageResp>('/brokerage')
-      .then(setData)
-      .catch(() => setData({
+
+  const refresh = useCallback(async () => {
+    try {
+      const [b, a] = await Promise.all([
+        api<BrokerageResp>('/brokerage'),
+        api<{ accounts: Account[] }>('/accounts').catch(
+          () => ({ accounts: [] as Account[] }),
+        ),
+      ]);
+      setData(b);
+      setAccounts(a.accounts);
+    } catch {
+      setData({
         holdings: [], snapshots: [], holdingSnapshots: [],
         performance: [], ilsRates: null,
-      }));
+      });
+    }
   }, []);
+
+  useEffect(() => { void refresh(); }, [refresh]);
+
   if (data === null) return <DelayedLoader />;
   if (data.holdings.length === 0 && data.snapshots.length === 0) {
     return (
@@ -304,9 +351,29 @@ function BrokerageSubTab() {
   const rates = data.ilsRates;
   const cur = displayCur ?? pickDisplayCurrency(data.holdings);
 
+  // Brokerage accounts in scope of the pills: any account with at
+  // least one snapshot in /brokerage. The engine only writes snapshots
+  // for brokerage accounts, so the intersection is the right filter
+  // without a separate company.type check.
+  const brkAcctIds = new Set(data.snapshots.map((s) => s.accountId));
+  const brkAccounts = accounts.filter((a) => brkAcctIds.has(a.id));
+
+  // Snapshots scoped to the current acctFilter, with the focused
+  // account's inceptionDate applied as a min-cutoff to drop synthetic
+  // backfill from before the user actually held the account.
+  const scopedSnapshots = acctFilter === 'all'
+    ? data.snapshots
+    : (() => {
+        const focused = brkAccounts.find((a) => a.id === acctFilter);
+        const inception = focused?.inceptionDate ?? null;
+        return data.snapshots.filter((s) =>
+          s.accountId === acctFilter && (!inception || s.date >= inception),
+        );
+      })();
+
   // Full series (sum across accounts), in the display currency.
   const dailyTotals = new Map<string, number>();
-  for (const s of data.snapshots) {
+  for (const s of scopedSnapshots) {
     const v = convertAmount(s.value, s.currency, cur, rates);
     dailyTotals.set(s.date, (dailyTotals.get(s.date) ?? 0) + v);
   }
@@ -349,6 +416,13 @@ function BrokerageSubTab() {
 
   return (
     <div className="brokerage-pane">
+      {brkAccounts.length > 0 && (
+        <AccountPills
+          accounts={brkAccounts}
+          value={acctFilter}
+          onChange={setAcctFilter}
+        />
+      )}
       <div className="brk-stats" data-testid="brokerage-stats">
         <StatBox
           label="Portfolio value"

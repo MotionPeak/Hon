@@ -538,3 +538,89 @@ describe('InsightsView — Brokerage sub-tab', () => {
     expect(within(list).getByText(/2,?400/)).toBeInTheDocument();
   });
 });
+
+describe('InsightsView — brokerage account pills', () => {
+  const accountsResp = {
+    accounts: [
+      { id: 'a-ibkr', connectionId: 'c-st', companyId: 'snaptrade',
+        connectionName: 'IBKR', accountNumber: '123', label: 'IBKR USD',
+        balance: 4302.44, currency: 'USD', updatedAt: '2026-05-25',
+        excluded: false, inceptionDate: null },
+      { id: 'a-vg', connectionId: 'c-st', companyId: 'snaptrade',
+        connectionName: 'IBKR', accountNumber: '456', label: 'Vanguard',
+        balance: 1234, currency: 'USD', updatedAt: '2026-05-25',
+        excluded: false, inceptionDate: '2024-06-01' },
+      { id: 'a-bank', connectionId: 'c-b', companyId: 'beinleumi',
+        connectionName: 'Beinleumi', accountNumber: '789', label: 'Checking',
+        balance: -2187, currency: 'ILS', updatedAt: '2026-05-25',
+        excluded: false, inceptionDate: null },
+    ],
+  };
+
+  const brokerageResp = {
+    holdings: [
+      { accountId: 'a-ibkr', symbol: 'AAPL', description: 'Apple',
+        units: 10, price: 200, currency: 'USD',
+        costBasis: 1500, openPnl: 500, value: 2000, updatedAt: '2026-05-25' },
+      { accountId: 'a-vg', symbol: 'VOO', description: 'S&P 500',
+        units: 5, price: 400, currency: 'USD',
+        costBasis: 1800, openPnl: 200, value: 2000, updatedAt: '2026-05-25' },
+    ],
+    snapshots: [
+      { accountId: 'a-ibkr', date: '2024-05-01', value: 1500, currency: 'USD' },
+      { accountId: 'a-ibkr', date: '2025-05-01', value: 1800, currency: 'USD' },
+      { accountId: 'a-ibkr', date: '2026-05-01', value: 2000, currency: 'USD' },
+      { accountId: 'a-vg',   date: '2024-01-01', value:  900, currency: 'USD' },
+      { accountId: 'a-vg',   date: '2025-01-01', value: 1500, currency: 'USD' },
+      { accountId: 'a-vg',   date: '2026-01-01', value: 2000, currency: 'USD' },
+    ],
+    holdingSnapshots: [],
+    performance: [],
+    ilsRates: { USD: 3.7 },
+  };
+
+  const baseMocks = {
+    ...EMPTY_TXNS,
+    'GET /api/brokerage': () => brokerageResp,
+    'GET /api/accounts': () => accountsResp,
+  };
+
+  async function openBrokerage(user: ReturnType<typeof userEvent.setup>) {
+    renderView();
+    await user.click(await screen.findByRole('tab', { name: /brokerage/i }));
+  }
+
+  it('renders an "All accounts" pill plus one pill per brokerage account in /brokerage', async () => {
+    installFetchMock(baseMocks);
+    const user = userEvent.setup();
+    await openBrokerage(user);
+    const group = await screen.findByRole('group', { name: /accounts/i });
+    expect(within(group).getByRole('button', { name: /all accounts/i })).toBeInTheDocument();
+    expect(within(group).getByRole('button', { name: /IBKR USD/ })).toBeInTheDocument();
+    expect(within(group).getByRole('button', { name: /Vanguard/ })).toBeInTheDocument();
+    // Bank account NOT in the pills (no snapshots in /brokerage).
+    expect(within(group).queryByRole('button', { name: /Checking/ })).not.toBeInTheDocument();
+  });
+
+  it('starts on "All accounts" — pill marked on, chart renders', async () => {
+    installFetchMock(baseMocks);
+    const user = userEvent.setup();
+    await openBrokerage(user);
+    const group = await screen.findByRole('group', { name: /accounts/i });
+    expect(within(group).getByRole('button', { name: /all accounts/i }))
+      .toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('brokerage-chart')).toBeInTheDocument();
+  });
+
+  it('selecting an account marks its pill on and unsets All accounts', async () => {
+    installFetchMock(baseMocks);
+    const user = userEvent.setup();
+    await openBrokerage(user);
+    const group = await screen.findByRole('group', { name: /accounts/i });
+    await user.click(within(group).getByRole('button', { name: /IBKR USD/ }));
+    expect(within(group).getByRole('button', { name: /IBKR USD/ }))
+      .toHaveAttribute('aria-pressed', 'true');
+    expect(within(group).getByRole('button', { name: /all accounts/i }))
+      .toHaveAttribute('aria-pressed', 'false');
+  });
+});
