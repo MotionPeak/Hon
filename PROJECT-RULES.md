@@ -179,6 +179,7 @@ For "build feature X": brainstorming → writing-plans → executing-plans
 | `PROJECT-RULES.md` (this file) | Behavioral rules Claude must follow | New durable rule emerges |
 | `CLAUDE.md` | Code architecture + non-obvious code reasons | Architecture changes; new load-bearing pattern |
 | `HANDOFF.md` | Current-session bridge: what's shipped, what's deferred, restart workflow | Every session end |
+| `docs/CODE-REVIEW-*.md` | Multi-agent code review findings (HIGH/MEDIUM/LOW, splits, intentional patterns) | After each /ultrareview-style audit; read before planning new work |
 | `docs/superpowers/specs/` | Design docs per feature | One per feature/phase |
 | `docs/superpowers/plans/` | TDD-ordered impl plans per feature | One per feature/phase |
 

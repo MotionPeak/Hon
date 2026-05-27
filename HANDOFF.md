@@ -232,8 +232,23 @@ All 10 tabs render with rich, near-legacy parity. Highlights:
 
 ## Deferred items
 
+> **Big backlog source: [docs/CODE-REVIEW-2026-05-27.md](docs/CODE-REVIEW-2026-05-27.md)** —
+> 11 HIGH findings (security: `/logo/:companyId` path traversal,
+> plaintext LLM API keys, Splitwise locked-vault silent orphan,
+> `applyMerchantRule` clobbers hand-categorization, scrypt cost
+> below OWASP 2024, no scrape lock, OTP timeout leak, etc.) plus
+> ~25 MEDIUM findings, file-split plans for the 7 files over 1k
+> lines, and a quick-win action list in §10. Read this BEFORE
+> planning the next session's work. The intentional-patterns
+> section (§9) is also load-bearing — preserves things like the
+> `BANK_SESSION_DENYLIST` Max entry, custom window events for
+> nav, the Harel iframe regex, etc.
+
 **Highest-value next steps**:
 
+- **Fix HIGH security findings from CODE-REVIEW** — H-1 (`/logo`
+  path traversal), H-2 (plaintext LLM keys → vault), H-6 (scrypt
+  cost) are real exposure that wouldn't be hard to ship.
 - **Manual smoke of SnapTrade portal end-to-end** — visually
   verified through to the brokerage picker but never actually
   completed an OAuth handshake with a real broker. Pick IBKR, walk
@@ -247,7 +262,7 @@ All 10 tabs render with rich, near-legacy parity. Highlights:
   Meitav/Menora visible-window + Altshuler manual) all work in the
   legacy SPA / engine; just no React UI yet.
 
-**Smaller polish**:
+**Smaller polish** (also covered in CODE-REVIEW §3):
 
 - Per-account filter pills + inception-date input on Brokerage chart.
 - Smooth bezier curve in `ValueChart` (polyline today).
