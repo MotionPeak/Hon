@@ -75,6 +75,34 @@ describe('SnapTradeLinkFlow', () => {
     expect(screen.getByText(/finish linking in the SnapTrade tab/i)).toBeInTheDocument();
   });
 
+  it('embeds honConn in customRedirect so /done can record completion', async () => {
+    let portalBody: { customRedirect?: string } | undefined;
+    installFetchMock(defaultRoutes({
+      'POST /api/snaptrade/portal': (body) => {
+        portalBody = body as { customRedirect?: string };
+        return {
+          portal: {
+            userId: 'u1', userSecret: 's1',
+            redirectURI: 'https://snaptrade.com/portal/abc',
+            connectionCount: 0, atLimit: false,
+          },
+        };
+      },
+    }));
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(<SnapTradeLinkFlow connectionId="conn-1" onLinked={async () => ({ accountsAdded: 0 })} onCancel={() => {}} />);
+    await vi.advanceTimersByTimeAsync(0);
+    await screen.findByRole('button', { name: /Interactive Brokers/i });
+    await user.click(screen.getByRole('button', { name: /Interactive Brokers/i }));
+
+    await waitFor(() => {
+      expect(portalBody?.customRedirect).toBeDefined();
+    });
+    expect(portalBody!.customRedirect).toMatch(
+      /\/api\/snaptrade\/done\?honConn=conn-1$/,
+    );
+  });
+
   it('when the poll detects a new connection, calls onLinked and shows done', async () => {
     let count = 0;
     installFetchMock(defaultRoutes({

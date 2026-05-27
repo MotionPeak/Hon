@@ -83,7 +83,7 @@ export function SnapTradeLinkFlow(
         const res = await api<{ portal: PortalResult }>('/snaptrade/portal', 'POST', {
           connectionId,
           broker: state.brokerSlug,
-          customRedirect: `${window.location.origin}/api/snaptrade/done`,
+          customRedirect: `${window.location.origin}/api/snaptrade/done?honConn=${encodeURIComponent(connectionId)}`,
         });
         if (cancelled) return;
         const p = res.portal;
