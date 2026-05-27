@@ -347,6 +347,29 @@ export class Repo {
     }
   }
 
+  /**
+   * Updates the per-connection history window used by sync.
+   *
+   * Validates [1, 24] (matches the API-layer clamp). Throws on out-of-range
+   * or non-integer input, and on unknown connection id, so the server
+   * route can rely on the throw to translate into a 4xx.
+   */
+  setConnectionHistoryMonths(id: string, months: number): Connection {
+    if (!Number.isInteger(months)) {
+      throw new Error(`historyMonths must be an integer, got ${months}`);
+    }
+    if (months < 1 || months > 24) {
+      throw new Error(`historyMonths out of range [1, 24]: ${months}`);
+    }
+    const result = this.db
+      .prepare('UPDATE connections SET history_months = ? WHERE id = ?')
+      .run(months, id);
+    if (result.changes === 0) {
+      throw new Error(`connection not found: ${id}`);
+    }
+    return this.getConnection(id)!;
+  }
+
   // --- Accounts & transactions ---------------------------------------------
 
   listAccounts(): AccountRow[] {
