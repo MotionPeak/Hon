@@ -30,10 +30,6 @@ const BANK_SESSION_DENYLIST = new Set<string>([
   'max',
 ]);
 
-// Companies whose "balance" is the next-bill outstanding, computed by the
-// scraper from the full set of pending + scheduled charges across the cycle.
-// Skipping the incremental-scrape shortcut for them — see chooseStartDate.
-const CARD_COMPANIES = new Set(['max', 'visaCal', 'isracard', 'amex']);
 
 export interface StartArgs {
   connectionId: string;
@@ -109,29 +105,15 @@ export class ScrapeRunner {
   }
 
   /**
-   * Picks the start date for a scrape. With a successful previous run on
-   * record, fetches from 14 days before its finish — the buffer catches
-   * transactions that post late or whose processed-date drifts. Otherwise
-   * falls back to the requested monthsBack window (the first-ever sync, or a
-   * sync after a failure). The DB's UNIQUE(account_id, external_id) makes any
-   * overlap a no-op, so the buffer is safe.
+   * Picks the start date for a scrape: always `monthsBack` months ago.
    *
-   * Credit-card companies are excluded from the incremental shortcut: a
-   * card's outstanding balance is computed from the *full* set of pending
-   * and scheduled charges across the billing cycle, so missing the older
-   * end of a cycle would undercount the balance. Cards always re-fetch the
-   * full monthsBack window.
+   * Earlier behavior used `lastSuccess - 14d` as an incremental shortcut, but
+   * once any connection had a small first sync the shortcut locked it into
+   * the same small window forever. Per-connection `historyMonths`
+   * (default 12) is now the only knob — DB UNIQUE(account_id, external_id)
+   * makes refetching old months a free no-op on persistence.
    */
-  private chooseStartDate(connectionId: string, companyId: string, monthsBack: number): Date {
-    if (CARD_COMPANIES.has(companyId)) return startDateMonthsAgo(monthsBack);
-    const lastSuccess = this.repo.lastSuccessfulScrapeAt(connectionId);
-    if (lastSuccess) {
-      const since = new Date(lastSuccess);
-      if (!Number.isNaN(since.getTime())) {
-        since.setDate(since.getDate() - 14);
-        return since;
-      }
-    }
+  private chooseStartDate(_connectionId: string, _companyId: string, monthsBack: number): Date {
     return startDateMonthsAgo(monthsBack);
   }
 
