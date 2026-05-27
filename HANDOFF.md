@@ -87,6 +87,64 @@ Branch `main`, commits `e9ef14d`..`dd5cfd7` (17 commits, all pushed):
    `SnapTradeLinkFlow` accepts `initialBrokerSlug` to skip its own
    picker when the broker was already chosen in the Add-asset modal.
 
+## What shipped after that (2026-05-27 evening)
+
+A run of UI polish under the brainstorm → plan → execute → verify
+flow. Each landed as its own merge into `main`. Tests + typecheck
+clean at every commit; visual verification per `PROJECT-RULES.md §2`.
+
+1. **Loans-nav dot centering** (`1a77d45`) — `top: 50%; transform:
+   translateY(-50%)` so the amber pulse sits mid-button.
+2. **Activity sidebar — Always categorize + billing frequency**
+   (`284d9d6`) — "Always categorize transactions from this business
+   this way" checkbox wires to `applyToMerchant: true`. Billing-
+   frequency segmented toggle (Monthly/Bimonthly for fixed group,
+   Monthly/Yearly for Subscriptions) PUTs `/merchant-frequency` on
+   save. `recurrenceChoices()` lifted into shared
+   `web/src/recurring/helpers.ts`.
+3. **Assets-grid masonry** (`96ffc4f`) — switched from `repeat(auto-
+   fit, minmax(360px, 1fr))` to CSS multicol so a tall section
+   (Pension w/ 2 accounts) no longer strands a 245px gap below its
+   shorter row-mate (Investments) and pushes Other Assets onto a
+   lonely row. Falls back to one column under 760px.
+4. **Connection-card favicon** (`d3804e1`) — `<CompanyLogo>` now
+   renders in `ConnectionCard` header so Beinleumi/Max/Meitav/Migdal/
+   IBKR show their favicons. `/api/logo/:companyId` already cached
+   on the engine.
+5. **Exclude transactions from cycle** (`909b887`, db migration
+   **v35**) — new `transactions.excluded_manual` column +
+   `PATCH /transactions/:id/excluded`. Pure helper
+   `web/src/activity/excluded.ts` merges the rule (cardProviders
+   substring match + `hideCardTotals`) with the per-row manual
+   override. Activity splits the active month into counted vs.
+   excluded; new collapsible "Excluded from cycle (N)" section sits
+   below the umbrella grouping; sidebar "Cycle calculations" toggle
+   flips the override (and clears it back to `null` when the user
+   restores the rule's default). 8 lump-sum `מקס איט פיננסים` card
+   bills from Beinleumi now auto-park in the section.
+6. **Brokerage chart polish** (`214e11c`) — `smoothPath` cubic-
+   bezier curve (tension 0.18, ported from legacy SPA, rounded to
+   2dp) replaces the polyline in `ValueChart`. New module-level
+   `AccountPills` + `InceptionInput` + `InceptionBadge`.
+   `BrokerageSubTab` fetches `/accounts` alongside `/brokerage`,
+   intersects with snapshot account IDs, and uses the focused
+   account's `inceptionDate` as a min-cutoff on the snapshot series.
+   "All accounts" shows a read-only earliest badge to avoid mass-
+   overwriting per-account customisation. Dots hidden when n > 24.
+
+**Latest commit:** `214e11c` — Merge branch
+'session/brokerage-chart-polish-2026-05-27' — brokerage chart polish.
+
+**Most recent test counts:** web `352 passing`, sidecar `55 passing`;
+both typechecks clean.
+
+**Vite root gotcha (mind this on resume):** vite is owned by
+whichever `npm run dev` last won the `:5173` port. If a parallel
+Claude session is also editing Hon, vite may be watching their
+worktree, not main — your HMR changes won't show up in the browser
+even though `main` has them. `ps aux | grep vite` shows the cwd via
+the binary path; cross-check with `lsof -p <pid> | grep cwd`.
+
 ## Restart workflow (you'll need this)
 
 ```bash
