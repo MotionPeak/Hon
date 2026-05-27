@@ -292,7 +292,7 @@ const RUN_COLS =
 const TXN_COLS =
   'id, account_id AS accountId, external_id AS externalId, date, ' +
   'processed_date AS processedDate, amount, currency, description, memo, ' +
-  'kind, status, category, created_at AS createdAt';
+  'kind, status, category, created_at AS createdAt, loan_id AS loanId';
 
 /** All database reads/writes go through this typed repository. */
 export class Repo {
