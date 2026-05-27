@@ -232,6 +232,10 @@ describe('InsightsView — Spending sub-tab', () => {
 const EMPTY_TXNS = {
   'GET /api/transactions': () => ({ transactions: [] }),
   'GET /api/categories': () => CATEGORIES,
+  // BrokerageSubTab fetches /accounts alongside /brokerage to drive the
+  // per-account filter pills. Default to empty so tests that don't
+  // override stay focused on what they care about.
+  'GET /api/accounts': () => ({ accounts: [] }),
 };
 const EMPTY_BROKERAGE = {
   'GET /api/brokerage': () => ({
