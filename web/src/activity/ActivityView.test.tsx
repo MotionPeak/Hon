@@ -10,6 +10,8 @@ const CATEGORIES = {
     { name: 'Groceries', emoji: '🛒', color: '#5CC773', catGroup: 'essential', sortOrder: 100, isBuiltin: true, createdAt: '2025-01-01' },
     { name: 'Coffee', emoji: '☕', color: '#A880ED', catGroup: 'variable', sortOrder: 500, isBuiltin: false, createdAt: '2025-02-02' },
     { name: 'Salary', emoji: '💰', color: '#5CC773', catGroup: 'income', sortOrder: 100, isBuiltin: true, createdAt: '2025-01-01' },
+    { name: 'Utilities', emoji: '💡', color: '#F59F24', catGroup: 'fixed', sortOrder: 200, isBuiltin: true, createdAt: '2025-01-01' },
+    { name: 'Subscriptions', emoji: '🔁', color: '#5CC7CC', catGroup: 'variable', sortOrder: 600, isBuiltin: true, createdAt: '2025-01-01' },
     { name: 'Other', emoji: '▫️', color: '#999EB8', catGroup: 'variable', sortOrder: 999, isBuiltin: true, createdAt: '2025-01-01' },
   ],
 };
@@ -61,6 +63,7 @@ const FULL = {
   'GET /api/transactions': () => TXNS,
   'GET /api/accounts': () => ACCOUNTS,
   'GET /api/categories': () => CATEGORIES,
+  'GET /api/merchant-frequencies': () => ({ frequencies: {} as Record<string, string> }),
 };
 
 function renderView() {
@@ -182,7 +185,10 @@ describe('ActivityView — category move', () => {
     expect(patch).not.toHaveBeenCalled();
     await user.click(within(sidebar).getByRole('button', { name: /^save$/i }));
     await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
-    expect(patch.mock.calls[0]?.[0]).toEqual({ category: 'Groceries' });
+    expect(patch.mock.calls[0]?.[0]).toEqual({
+      category: 'Groceries',
+      applyToMerchant: false,
+    });
     await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
     expect(screen.queryByRole('dialog', { name: /move to category/i })).not.toBeInTheDocument();
   });
@@ -208,6 +214,126 @@ describe('ActivityView — category move', () => {
     await user.click(within(sidebar).getByRole('button', { name: /^close$/i }));
     expect(screen.queryByRole('dialog', { name: /move to category/i })).not.toBeInTheDocument();
     expect(patch).not.toHaveBeenCalled();
+  });
+});
+
+describe('ActivityView — always categorize + billing frequency', () => {
+  it('ticking "Always categorize" sends applyToMerchant: true on save', async () => {
+    const user = userEvent.setup();
+    const patch = vi.fn((_body: unknown) => ({ ok: true }));
+    installFetchMock({
+      ...FULL,
+      'PATCH /api/transactions/t-1/category': patch,
+    });
+    renderView();
+    await user.click(await screen.findByText('Aroma Coffee'));
+    const sidebar = screen.getByRole('dialog', { name: /move to category/i });
+    await user.click(within(sidebar).getByRole('button', { name: /Groceries/ }));
+    await user.click(within(sidebar).getByRole('checkbox', {
+      name: /always categorize transactions from this business this way/i,
+    }));
+    await user.click(within(sidebar).getByRole('button', { name: /^save$/i }));
+    await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
+    expect(patch.mock.calls[0]?.[0]).toEqual({
+      category: 'Groceries',
+      applyToMerchant: true,
+    });
+  });
+
+  it('ticking "Always categorize" enables Save even without a category change', async () => {
+    const user = userEvent.setup();
+    installFetchMock(FULL);
+    renderView();
+    await user.click(await screen.findByText('Aroma Coffee'));
+    const sidebar = screen.getByRole('dialog', { name: /move to category/i });
+    const saveBtn = within(sidebar).getByRole('button', { name: /^save$/i });
+    expect(saveBtn).toBeDisabled();
+    await user.click(within(sidebar).getByRole('checkbox', {
+      name: /always categorize/i,
+    }));
+    expect(saveBtn).toBeEnabled();
+  });
+
+  it('billing-frequency toggle is hidden for variable-group categories', async () => {
+    const user = userEvent.setup();
+    installFetchMock(FULL);
+    renderView();
+    await user.click(await screen.findByText('Aroma Coffee'));
+    const sidebar = screen.getByRole('dialog', { name: /move to category/i });
+    // Coffee is variable group — no billing frequency.
+    expect(within(sidebar).queryByText(/billing frequency/i)).not.toBeInTheDocument();
+  });
+
+  it('shows Monthly/Bimonthly toggle when a fixed-group category is picked', async () => {
+    const user = userEvent.setup();
+    installFetchMock(FULL);
+    renderView();
+    await user.click(await screen.findByText('Aroma Coffee'));
+    const sidebar = screen.getByRole('dialog', { name: /move to category/i });
+    await user.click(within(sidebar).getByRole('button', { name: /Utilities/ }));
+    expect(within(sidebar).getByText(/billing frequency/i)).toBeInTheDocument();
+    const group = within(sidebar).getByRole('radiogroup', { name: /billing frequency/i });
+    expect(within(group).getByRole('radio', { name: 'Monthly' })).toHaveAttribute('aria-checked', 'true');
+    expect(within(group).getByRole('radio', { name: 'Bimonthly' })).toHaveAttribute('aria-checked', 'false');
+    // Subscriptions case: monthly|yearly.
+    await user.click(within(sidebar).getByRole('button', { name: /Subscriptions/ }));
+    const group2 = within(sidebar).getByRole('radiogroup', { name: /billing frequency/i });
+    expect(within(group2).getByRole('radio', { name: 'Yearly' })).toBeInTheDocument();
+    expect(within(group2).queryByRole('radio', { name: 'Bimonthly' })).not.toBeInTheDocument();
+  });
+
+  it('switching to Bimonthly PUTs /merchant-frequency on save', async () => {
+    const user = userEvent.setup();
+    const patch = vi.fn((_body: unknown) => ({ ok: true }));
+    const put = vi.fn((_body: unknown) => ({ ok: true }));
+    installFetchMock({
+      ...FULL,
+      'PATCH /api/transactions/t-1/category': patch,
+      'PUT /api/merchant-frequency': put,
+    });
+    renderView();
+    await user.click(await screen.findByText('Aroma Coffee'));
+    const sidebar = screen.getByRole('dialog', { name: /move to category/i });
+    await user.click(within(sidebar).getByRole('button', { name: /Utilities/ }));
+    await user.click(within(sidebar).getByRole('radio', { name: 'Bimonthly' }));
+    await user.click(within(sidebar).getByRole('button', { name: /^save$/i }));
+    await waitFor(() => expect(put).toHaveBeenCalledTimes(1));
+    expect(put.mock.calls[0]?.[0]).toEqual({
+      key: 'aroma coffee', frequency: 'bimonthly',
+    });
+  });
+
+  it('seeds the toggle from the stored merchant frequency', async () => {
+    const user = userEvent.setup();
+    installFetchMock({
+      ...FULL,
+      'GET /api/merchant-frequencies': () => ({
+        frequencies: { 'aroma coffee': 'bimonthly' },
+      }),
+    });
+    renderView();
+    await user.click(await screen.findByText('Aroma Coffee'));
+    const sidebar = screen.getByRole('dialog', { name: /move to category/i });
+    await user.click(within(sidebar).getByRole('button', { name: /Utilities/ }));
+    const group = within(sidebar).getByRole('radiogroup', { name: /billing frequency/i });
+    expect(within(group).getByRole('radio', { name: 'Bimonthly' })).toHaveAttribute('aria-checked', 'true');
+  });
+
+  it('does not call /merchant-frequency when the picked category has no recurrence', async () => {
+    const user = userEvent.setup();
+    const put = vi.fn(() => ({ ok: true }));
+    installFetchMock({
+      ...FULL,
+      'PATCH /api/transactions/t-1/category': () => ({ ok: true }),
+      'PUT /api/merchant-frequency': put,
+    });
+    renderView();
+    await user.click(await screen.findByText('Aroma Coffee'));
+    const sidebar = screen.getByRole('dialog', { name: /move to category/i });
+    await user.click(within(sidebar).getByRole('button', { name: /Groceries/ }));
+    await user.click(within(sidebar).getByRole('button', { name: /^save$/i }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /move to category/i })).not.toBeInTheDocument());
+    expect(put).not.toHaveBeenCalled();
   });
 });
 

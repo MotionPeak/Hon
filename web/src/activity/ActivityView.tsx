@@ -9,6 +9,11 @@ import { useSettings } from '../settings/useSettings';
 import type { Account, Loan } from '../accounts/types';
 import type { Category } from '../settings/CategoriesPanel';
 import type { Transaction } from './types';
+import { merchantKey, recurrenceChoices, type Frequency } from '../recurring/helpers';
+
+/** Stored merchant-frequency value. 'income'/'ignore' are tags the editor
+ *  here doesn't expose, but we keep them in the type to round-trip safely. */
+type FreqValue = Frequency | 'income' | 'ignore';
 
 function ModalPortal({ children }: { children: ReactNode }) {
   return createPortal(children, document.body);
@@ -47,6 +52,7 @@ export function ActivityView() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [loans, setLoans] = useState<Loan[]>([]);
+  const [merchantFreqs, setMerchantFreqs] = useState<Record<string, FreqValue>>({});
   const [month, setMonth] = useState<string | null>(null);
   const [moving, setMoving] = useState<Transaction | null>(null);
   const [search, setSearch] = useState('');
@@ -69,16 +75,19 @@ export function ActivityView() {
 
   const refresh = useCallback(async () => {
     try {
-      const [t, a, c, l] = await Promise.all([
+      const [t, a, c, l, f] = await Promise.all([
         api<{ transactions: Transaction[] }>('/transactions'),
         api<{ accounts: Account[] }>('/accounts'),
         api<{ categories: Category[] }>('/categories'),
         api<{ loans: Loan[] }>('/loans').catch(() => ({ loans: [] as Loan[] })),
+        api<{ frequencies: Record<string, FreqValue> }>('/merchant-frequencies')
+          .catch(() => ({ frequencies: {} as Record<string, FreqValue> })),
       ]);
       setTransactions(t.transactions);
       setAccounts(a.accounts);
       setCategories(c.categories);
       setLoans(l.loans);
+      setMerchantFreqs(f.frequencies ?? {});
     } catch {
       setTransactions([]);
     }
@@ -354,13 +363,33 @@ export function ActivityView() {
             );
             await refresh();
           }}
+          currentFreq={
+            (merchantFreqs[merchantKey(moving.description)] as Frequency | undefined) ?? null
+          }
           onClose={() => setMoving(null)}
-          onSaved={async (cat) => {
-            await api(
-              `/transactions/${encodeURIComponent(moving.id)}/category`,
-              'PATCH',
-              { category: cat },
-            );
+          onSaved={async (cat, opts) => {
+            const catChanged = cat !== (moving.category ?? '');
+            if (catChanged || opts.applyToMerchant) {
+              await api(
+                `/transactions/${encodeURIComponent(moving.id)}/category`,
+                'PATCH',
+                { category: cat, applyToMerchant: opts.applyToMerchant },
+              );
+            }
+            // Billing frequency — only persist when the category is a recurring
+            // bill AND the user changed it.
+            if (opts.frequency) {
+              const mKey = merchantKey(moving.description);
+              const stored = merchantFreqs[mKey];
+              // Don't overwrite an 'income'/'ignore' tag with a billing freq
+              // through the activity sidebar — those have their own UIs.
+              const isBillingFreq = !stored || stored === 'monthly'
+                || stored === 'bimonthly' || stored === 'yearly';
+              if (isBillingFreq && opts.frequency !== (stored ?? 'monthly')) {
+                await api('/merchant-frequency', 'PUT',
+                  { key: mKey, frequency: opts.frequency });
+              }
+            }
             setMoving(null);
             await refresh();
           }}
@@ -587,8 +616,13 @@ interface CategoryPickerProps {
   allTransactions: Transaction[];
   categories: Category[];
   loans: Loan[];
+  /** Stored billing frequency for this txn's merchant, or null if unset. */
+  currentFreq: Frequency | null;
   onClose: () => void;
-  onSaved: (category: string) => void | Promise<void>;
+  onSaved: (
+    category: string,
+    opts: { applyToMerchant: boolean; frequency: Frequency | null },
+  ) => void | Promise<void>;
   onLinkRefund: (refundId: string) => void | Promise<void>;
   onUnlinkRefund: () => void | Promise<void>;
   onLinkLoan: (loanId: string) => void | Promise<void>;
@@ -597,12 +631,14 @@ interface CategoryPickerProps {
 
 function CategoryPickerSidebar(
   {
-    transaction, allTransactions, categories, loans, onClose, onSaved,
+    transaction, allTransactions, categories, loans, currentFreq, onClose, onSaved,
     onLinkRefund, onUnlinkRefund, onLinkLoan, onUnlinkLoan,
   }: CategoryPickerProps,
 ) {
   const current = transaction.category ?? 'Other';
   const [picked, setPicked] = useState<string>(current);
+  const [always, setAlways] = useState<boolean>(false);
+  const [freq, setFreq] = useState<Frequency>(currentFreq ?? 'monthly');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [view, setView] = useState<'category' | 'refund-picker'>('category');
@@ -616,12 +652,30 @@ function CategoryPickerSidebar(
   for (const g of groupOrder) {
     grouped[g].sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
   }
+  // Billing-frequency choices depend on the currently *picked* category, not
+  // the saved one — so picking Subscriptions vs. a fixed-group category swaps
+  // the toggles in place. Null when the category isn't a recurring bill.
+  const pickedCat = categories.find((c) => c.name === picked);
+  const choices = recurrenceChoices(pickedCat);
+  // Snap freq to a valid choice if the user pivoted to a category with a
+  // different set of options (e.g. fixed → Subscriptions where bimonthly
+  // disappears). 'monthly' is the always-available fallback.
+  const effectiveFreq: Frequency = choices && choices.some(([v]) => v === freq)
+    ? freq : 'monthly';
+
+  const freqChanged = !!choices && effectiveFreq !== (currentFreq ?? 'monthly');
+  const catChanged = picked !== current;
+  const canSave = catChanged || always || freqChanged;
+
   const save = async () => {
-    if (busy || picked === current) return;
+    if (busy || !canSave) return;
     setBusy(true);
     setError(null);
     try {
-      await onSaved(picked);
+      await onSaved(picked, {
+        applyToMerchant: always,
+        frequency: choices ? effectiveFreq : null,
+      });
     } catch (e) {
       setBusy(false);
       setError(e instanceof ApiError ? e.message : String(e));
@@ -701,6 +755,41 @@ function CategoryPickerSidebar(
               ))}
             </div>
 
+            <label className="txn-sidebar-always">
+              <input
+                type="checkbox"
+                checked={always}
+                disabled={busy}
+                onChange={(e) => setAlways(e.target.checked)}
+              />
+              <span>Always categorize transactions from this business this way</span>
+            </label>
+
+            {choices && (
+              <div className="txn-sidebar-section">
+                <div className="label">Billing frequency</div>
+                <div
+                  className="freq-pick"
+                  role="radiogroup"
+                  aria-label="Billing frequency"
+                >
+                  {choices.map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      role="radio"
+                      aria-checked={effectiveFreq === value}
+                      className={`freq-opt${effectiveFreq === value ? ' active' : ''}`}
+                      onClick={() => setFreq(value)}
+                      disabled={busy}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <RefundSection
               transaction={transaction}
               allTransactions={allTransactions}
@@ -728,7 +817,7 @@ function CategoryPickerSidebar(
               type="button"
               className="primary txn-sidebar-save"
               onClick={() => void save()}
-              disabled={busy || picked === current}
+              disabled={busy || !canSave}
             >
               Save
             </button>
