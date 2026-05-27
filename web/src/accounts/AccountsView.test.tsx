@@ -965,3 +965,27 @@ describe('AccountsView — SnapTrade link flow', () => {
     expect(await screen.findByRole('button', { name: /Interactive Brokers/i })).toBeInTheDocument();
   });
 });
+
+import { AddManualAssetForm } from './AccountsView';
+
+describe('AddManualAssetForm — initialKind prop', () => {
+  it('defaults the Kind dropdown to "cash" when no initialKind is given', () => {
+    installFetchMock({});
+    render(<AddManualAssetForm onClose={() => {}} onSaved={async () => {}} />);
+    const kind = screen.getByLabelText(/kind/i) as HTMLSelectElement;
+    expect(kind.value).toBe('cash');
+  });
+
+  it('preselects the Kind dropdown to the provided initialKind', () => {
+    installFetchMock({});
+    render(
+      <AddManualAssetForm
+        initialKind="pension"
+        onClose={() => {}}
+        onSaved={async () => {}}
+      />,
+    );
+    const kind = screen.getByLabelText(/kind/i) as HTMLSelectElement;
+    expect(kind.value).toBe('pension');
+  });
+});

@@ -1482,10 +1482,13 @@ const ASSET_KINDS: Array<[string, string]> = [
 interface AddManualAssetFormProps {
   onClose: () => void;
   onSaved: () => void | Promise<void>;
+  /** Preselects the Kind dropdown. Defaults to 'cash'. Used by the pension
+   *  picker's "Custom pension account" row to land on the right kind. */
+  initialKind?: string;
 }
 
-function AddManualAssetForm({ onClose, onSaved }: AddManualAssetFormProps) {
-  const [kind, setKind] = useState('cash');
+export function AddManualAssetForm({ onClose, onSaved, initialKind }: AddManualAssetFormProps) {
+  const [kind, setKind] = useState(initialKind ?? 'cash');
   const [name, setName] = useState('');
   const [value, setValue] = useState('');
   const [currency, setCurrency] = useState('ILS');
