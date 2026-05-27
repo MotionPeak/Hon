@@ -349,6 +349,7 @@ export function AccountsView() {
                   onRemoveAsset: setRemovingAsset,
                   onEditLoan: setEditingLoan,
                   onRemoveLoan: setRemovingLoan,
+                  onLinkSnapTradeBrokerage: (connectionId) => setLinkSnapTradeFor(connectionId),
                   syncStates,
                   holdings: data.holdings,
                   expandedHoldings,
@@ -511,6 +512,7 @@ interface RowCallbacks {
   onRemoveAsset: (asset: ManualAsset) => void;
   onEditLoan: (loan: Loan) => void;
   onRemoveLoan: (loan: Loan) => void;
+  onLinkSnapTradeBrokerage: (connectionId: string) => void;
   syncStates: Record<string, SyncState>;
   holdings: Holding[];
   expandedHoldings: Record<string, boolean>;
@@ -615,6 +617,13 @@ function ConnectionCard({ connection, company, accounts, callbacks }: Connection
               >
                 Set credentials
               </button>
+            )}
+            {company?.id === 'snaptrade' && (
+              <LinkBrokerageButton
+                connectionId={connection.id}
+                accounts={accounts}
+                onLink={() => callbacks.onLinkSnapTradeBrokerage(connection.id)}
+              />
             )}
             {connection.hasCredentials && (
               <button
@@ -751,6 +760,31 @@ function BalanceModal({ account, onClose, onSaved }: BalanceModalProps) {
         </div>
       </div>
     </ModalPortal>
+  );
+}
+
+const SNAPTRADE_FREE_TIER_LIMIT = 5;
+
+interface LinkBrokerageButtonProps {
+  connectionId: string;
+  accounts: Account[];
+  onLink: () => void;
+}
+
+function LinkBrokerageButton({ connectionId, accounts, onLink }: LinkBrokerageButtonProps) {
+  const brokerageAccounts = accounts.filter((a) => a.connectionId === connectionId);
+  const atLimit = brokerageAccounts.length >= SNAPTRADE_FREE_TIER_LIMIT;
+  const label = brokerageAccounts.length === 0 ? 'Link a brokerage' : 'Link another brokerage';
+  return (
+    <button
+      type="button"
+      className="mini primary"
+      onClick={onLink}
+      disabled={atLimit}
+      title={atLimit ? "You're at the 5-brokerage SnapTrade free tier limit." : undefined}
+    >
+      {label}
+    </button>
   );
 }
 
