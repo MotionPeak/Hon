@@ -1703,13 +1703,14 @@ button.mini { padding: 5px 11px; font-size: 12px; }
 }
 .new-loan-banner-dismiss:hover { background: var(--card-hi); color: var(--text); }
 
-/* Loans nav-button unseen dot — small amber pulse in the top-right. */
+/* Loans nav-button unseen dot — small amber pulse, vertically centered on the right. */
 .app-nav .nav-btn[data-unseen]::after {
-  content: ''; position: absolute; top: 6px; right: 6px;
+  content: ''; position: absolute; top: 50%; right: 10px;
   width: 8px; height: 8px; border-radius: 50%;
   background: var(--accent);
   box-shadow: 0 0 0 0 rgba(245,159,36,0.6);
   animation: hon-unseen-pulse 1.6s ease-out infinite;
+  transform: translateY(-50%);
   z-index: 2;
 }
 @keyframes hon-unseen-pulse {
