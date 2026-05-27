@@ -284,10 +284,11 @@ app.post('/connections/:id/scrape', async (req, reply) => {
   }
   // Each scraper returns whatever history it actually holds, so asking for a
   // long window simply means "as far back as the institution allows".
+  // Per-connection default (historyMonths); body override clamped to [1, 24].
   const monthsBack =
     typeof body.monthsBack === 'number' && Number.isFinite(body.monthsBack)
       ? Math.max(1, Math.min(24, Math.round(body.monthsBack)))
-      : 12;
+      : connection.historyMonths;
 
   const runId = runner.start({
     connectionId: connection.id,
