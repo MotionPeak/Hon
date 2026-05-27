@@ -3,6 +3,7 @@ import { render, screen, waitFor, within, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AccountsView } from './AccountsView';
 import { installFetchMock, jsonResponse } from '../test/mockFetch';
+import { ApiError } from '../api';
 
 const COMPANIES = {
   companies: [
@@ -1048,5 +1049,60 @@ describe('AccountsView — SnapTrade link flow', () => {
     await user.click(await screen.findByRole('button', { name: /link a brokerage/i }));
     expect(await screen.findByRole('dialog', { name: /link a brokerage/i })).toBeInTheDocument();
     expect(await screen.findByRole('button', { name: /Interactive Brokers/i })).toBeInTheDocument();
+  });
+});
+
+describe('connection card — history months select', () => {
+  const baseFixtureMocks = (historyMonths: number, patchSpy?: (body: unknown) => unknown) => ({
+    'GET /api/companies': () => ({ companies: [{ id: 'hapoalim', name: 'Hapoalim', loginFields: ['username', 'password'], type: 'bank', interactive: true }] }),
+    'GET /api/connections': () => ({ connections: [{
+      id: 'c-bank-1', companyId: 'hapoalim', displayName: 'Hapoalim',
+      createdAt: '2026-01-01T00:00:00Z', lastScrapeAt: null, lastStatus: null,
+      hasCredentials: true, historyMonths,
+    }] }),
+    'GET /api/accounts': () => ({ accounts: [] }),
+    'GET /api/assets': () => ({ assets: [] }),
+    'GET /api/loans': () => ({ loans: [] }),
+    'GET /api/brokerage': () => ({ holdings: [] }),
+    ...(patchSpy ? { 'PATCH /api/connections/c-bank-1/history-months': patchSpy } : {}),
+  });
+
+  it('connection card renders history-months select with current value', async () => {
+    installFetchMock(baseFixtureMocks(18));
+    render(<AccountsView />);
+    const select = await screen.findByLabelText(/history months/i) as HTMLSelectElement;
+    expect(select.value).toBe('18');
+  });
+
+  it('changing the select PATCHes /connections/:id/history-months', async () => {
+    const user = userEvent.setup();
+    const patchCalls: unknown[] = [];
+    const patchSpy = (body: unknown): Promise<unknown> => {
+      patchCalls.push(body);
+      return Promise.resolve({
+        connection: {
+          id: 'c-bank-1', companyId: 'hapoalim', displayName: 'Hapoalim',
+          createdAt: '2026-01-01T00:00:00Z', lastScrapeAt: null, lastStatus: null,
+          hasCredentials: true, historyMonths: 6,
+        },
+      });
+    };
+    installFetchMock(baseFixtureMocks(12, patchSpy));
+    render(<AccountsView />);
+    const select = await screen.findByLabelText(/history months/i);
+    await user.selectOptions(select, '6');
+    await waitFor(() => expect(patchCalls.length).toBeGreaterThan(0));
+    expect(patchCalls[0]).toEqual({ historyMonths: 6 });
+  });
+
+  it('reverts the select when PATCH fails', async () => {
+    const user = userEvent.setup();
+    const patchSpy = (_body: unknown): Promise<unknown> =>
+      Promise.reject(new ApiError('historyMonths must be an integer in [1, 24]', 400));
+    installFetchMock(baseFixtureMocks(12, patchSpy));
+    render(<AccountsView />);
+    const select = await screen.findByLabelText(/history months/i) as HTMLSelectElement;
+    await user.selectOptions(select, '6');
+    await waitFor(() => expect(select.value).toBe('12'));
   });
 });

@@ -283,6 +283,32 @@ export function AccountsView() {
     }
   }, [pollRun, setSyncForConnection]);
 
+  const setHistoryMonths = useCallback(async (connection: Connection, months: number) => {
+    // Optimistic update.
+    const previous = connection.historyMonths;
+    setData((d) => d && ({
+      ...d,
+      connections: d.connections.map((c) =>
+        c.id === connection.id ? { ...c, historyMonths: months } : c,
+      ),
+    }));
+    try {
+      await api(
+        `/connections/${encodeURIComponent(connection.id)}/history-months`,
+        'PATCH',
+        { historyMonths: months },
+      );
+    } catch {
+      // Revert on failure.
+      setData((d) => d && ({
+        ...d,
+        connections: d.connections.map((c) =>
+          c.id === connection.id ? { ...c, historyMonths: previous } : c,
+        ),
+      }));
+    }
+  }, []);
+
   const toggleAccountExcluded = useCallback(async (a: Account, excluded: boolean) => {
     try {
       await api(`/accounts/${encodeURIComponent(a.id)}/excluded`, 'PATCH', { excluded });
@@ -360,6 +386,7 @@ export function AccountsView() {
                   onRemoveConnection: setRemovingConnection,
                   onSetCredentials: setEditingCredentials,
                   onSync: startSync,
+                  onSetHistoryMonths: setHistoryMonths,
                   onToggleHoldings: toggleHoldings,
                   onEditAsset: setEditingAsset,
                   onRemoveAsset: setRemovingAsset,
@@ -530,6 +557,7 @@ interface RowCallbacks {
   onRemoveConnection: (connection: Connection) => void;
   onSetCredentials: (connection: Connection) => void;
   onSync: (connection: Connection) => void;
+  onSetHistoryMonths: (connection: Connection, months: number) => void;
   onToggleHoldings: (accountId: string) => void;
   onEditAsset: (asset: ManualAsset) => void;
   onRemoveAsset: (asset: ManualAsset) => void;
@@ -660,6 +688,23 @@ function ConnectionCard({ connection, company, accounts, callbacks }: Connection
               >
                 {syncing ? 'Syncing…' : 'Sync'}
               </button>
+            )}
+            {connection.hasCredentials && (
+              <label className="conn-history-label">
+                <span className="conn-history-text">History</span>
+                <select
+                  className="conn-history-select mini"
+                  aria-label="History months"
+                  value={connection.historyMonths}
+                  onChange={(e) => callbacks.onSetHistoryMonths(connection, Number(e.target.value))}
+                >
+                  <option value={3}>3 mo</option>
+                  <option value={6}>6 mo</option>
+                  <option value={12}>12 mo</option>
+                  <option value={18}>18 mo</option>
+                  <option value={24}>24 mo</option>
+                </select>
+              </label>
             )}
             <button
               type="button"
