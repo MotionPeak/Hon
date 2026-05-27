@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen, within, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, within, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { InsightsView } from './InsightsView';
 import { SettingsProvider } from '../settings/useSettings';
@@ -622,5 +622,62 @@ describe('InsightsView — brokerage account pills', () => {
       .toHaveAttribute('aria-pressed', 'true');
     expect(within(group).getByRole('button', { name: /all accounts/i }))
       .toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('hides the inception input under "All accounts" and shows the earliest read-only badge', async () => {
+    installFetchMock(baseMocks);
+    const user = userEvent.setup();
+    await openBrokerage(user);
+    await screen.findByRole('group', { name: /accounts/i });
+    expect(screen.queryByLabelText(/investment start/i)).not.toBeInTheDocument();
+    // Earliest = min(inceptionDate ?? firstSnapshotDate per account).
+    // a-ibkr has no inception; its first snapshot is 2024-05-01.
+    // a-vg has inception 2024-06-01.
+    // min = 2024-05-01.
+    expect(screen.getByText(/since 2024-05-01 \(earliest\)/i)).toBeInTheDocument();
+  });
+
+  it('reveals the inception input when a specific account is selected', async () => {
+    installFetchMock(baseMocks);
+    const user = userEvent.setup();
+    await openBrokerage(user);
+    const group = await screen.findByRole('group', { name: /accounts/i });
+    await user.click(within(group).getByRole('button', { name: /Vanguard/ }));
+    const input = screen.getByLabelText(/investment start/i) as HTMLInputElement;
+    expect(input).toHaveValue('2024-06-01');
+  });
+
+  it('editing the inception PATCHes /accounts/:id/inception and refetches', async () => {
+    const patch = vi.fn((_b: unknown) => ({ ok: true }));
+    let brokerageCalls = 0;
+    installFetchMock({
+      ...baseMocks,
+      'GET /api/brokerage': () => { brokerageCalls += 1; return brokerageResp; },
+      'PATCH /api/accounts/a-vg/inception': patch,
+    });
+    const user = userEvent.setup();
+    await openBrokerage(user);
+    const group = await screen.findByRole('group', { name: /accounts/i });
+    await user.click(within(group).getByRole('button', { name: /Vanguard/ }));
+    const input = screen.getByLabelText(/investment start/i) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: '2025-01-01' } });
+    await waitFor(() => expect(patch).toHaveBeenCalled());
+    expect(patch.mock.calls[0]?.[0]).toEqual({ inceptionDate: '2025-01-01' });
+    expect(brokerageCalls).toBeGreaterThan(1);
+  });
+
+  it('clearing the inception PATCHes with null', async () => {
+    const patch = vi.fn((_b: unknown) => ({ ok: true }));
+    installFetchMock({
+      ...baseMocks,
+      'PATCH /api/accounts/a-vg/inception': patch,
+    });
+    const user = userEvent.setup();
+    await openBrokerage(user);
+    const group = await screen.findByRole('group', { name: /accounts/i });
+    await user.click(within(group).getByRole('button', { name: /Vanguard/ }));
+    await user.click(screen.getByRole('button', { name: /clear inception date/i }));
+    await waitFor(() => expect(patch).toHaveBeenCalled());
+    expect(patch.mock.calls[0]?.[0]).toEqual({ inceptionDate: null });
   });
 });

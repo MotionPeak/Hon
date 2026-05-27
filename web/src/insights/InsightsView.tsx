@@ -312,6 +312,77 @@ function AccountPills({ accounts, value, onChange }: AccountPillsProps) {
   );
 }
 
+interface InceptionInputProps {
+  account: Account;
+  onSaved: () => void | Promise<void>;
+}
+
+/** Per-account "investment start" editor. Lets the user pin the date
+ *  from which their snapshot history is real — synthetic backfill
+ *  before that date is hidden from the chart. PATCHes the engine on
+ *  every commit and asks the parent to refetch so the chart redraws. */
+function InceptionInput({ account, onSaved }: InceptionInputProps) {
+  const [value, setValue] = useState<string>(account.inceptionDate ?? '');
+  // Keep in sync when the focused account changes from the parent.
+  useEffect(() => {
+    setValue(account.inceptionDate ?? '');
+  }, [account.id, account.inceptionDate]);
+  const save = async (next: string): Promise<void> => {
+    await api(
+      `/accounts/${encodeURIComponent(account.id)}/inception`,
+      'PATCH',
+      { inceptionDate: next || null },
+    );
+    await onSaved();
+  };
+  return (
+    <div className="brk-inception-row">
+      <label className="brk-inception-label">
+        <span>Investment start</span>
+        <input
+          type="date"
+          className="brk-inception-input"
+          value={value}
+          onChange={(e) => {
+            setValue(e.target.value);
+            void save(e.target.value);
+          }}
+        />
+      </label>
+      {value && (
+        <button
+          type="button"
+          className="brk-inception-clear"
+          aria-label="Clear inception date"
+          onClick={() => { setValue(''); void save(''); }}
+        >×</button>
+      )}
+      {value && (
+        <span className="brk-inception-hint">
+          Synthetic backfill before this date is hidden.
+        </span>
+      )}
+    </div>
+  );
+}
+
+interface InceptionBadgeProps {
+  earliest: string | null;
+}
+
+/** Read-only "Since YYYY-MM-DD (earliest)" badge for the All-accounts
+ *  view. No edit affordance — per-account inception is the source of
+ *  truth and we don't want a mass-edit here that silently overwrites
+ *  per-account customisation. */
+function InceptionBadge({ earliest }: InceptionBadgeProps) {
+  if (!earliest) return null;
+  return (
+    <div className="brk-inception-badge">
+      Since {earliest} (earliest)
+    </div>
+  );
+}
+
 function BrokerageSubTab() {
   const [data, setData] = useState<BrokerageResp | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -357,6 +428,29 @@ function BrokerageSubTab() {
   // without a separate company.type check.
   const brkAcctIds = new Set(data.snapshots.map((s) => s.accountId));
   const brkAccounts = accounts.filter((a) => brkAcctIds.has(a.id));
+
+  // For the All-accounts view we show a read-only earliest-inception
+  // badge instead of an editable input. The "earliest" is
+  // min(account.inceptionDate ?? firstSnapshotDate for that account) —
+  // accounts without an inception use the first date the engine has
+  // ever seen for them as the implicit starting point.
+  const firstSnapByAcct = new Map<string, string>();
+  for (const s of data.snapshots) {
+    const cur = firstSnapByAcct.get(s.accountId);
+    if (!cur || s.date < cur) firstSnapByAcct.set(s.accountId, s.date);
+  }
+  const earliestCandidates = brkAccounts
+    .map((a) => a.inceptionDate ?? firstSnapByAcct.get(a.id) ?? null)
+    .filter((d): d is string => d !== null);
+  const earliestInception: string | null = earliestCandidates.length === 0
+    ? null
+    : earliestCandidates.reduce((m, d) => d < m ? d : m, earliestCandidates[0]!);
+
+  // Focused account (when a specific pill is on) — drives the
+  // InceptionInput.
+  const focusedAccount = acctFilter === 'all'
+    ? null
+    : brkAccounts.find((a) => a.id === acctFilter) ?? null;
 
   // Snapshots scoped to the current acctFilter, with the focused
   // account's inceptionDate applied as a min-cutoff to drop synthetic
@@ -422,6 +516,13 @@ function BrokerageSubTab() {
           value={acctFilter}
           onChange={setAcctFilter}
         />
+      )}
+      {acctFilter === 'all' ? (
+        <InceptionBadge earliest={earliestInception} />
+      ) : (
+        focusedAccount && (
+          <InceptionInput account={focusedAccount} onSaved={refresh} />
+        )
       )}
       <div className="brk-stats" data-testid="brokerage-stats">
         <StatBox

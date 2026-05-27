@@ -933,6 +933,46 @@ button.mini { padding: 5px 11px; font-size: 12px; }
   border-color: var(--accent);
 }
 
+/* Inception-date control row under the account-filter pills. Sits
+   between the pills and the chart, mirroring the legacy SPA layout. */
+.brk-inception-row {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  margin: 0 0 12px;
+  font-size: 12px; color: var(--muted);
+}
+.brk-inception-label {
+  display: inline-flex; align-items: center; gap: 6px;
+  cursor: pointer;
+}
+.brk-inception-input {
+  background: var(--card-hi);
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  padding: 4px 8px;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.brk-inception-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.brk-inception-clear {
+  background: transparent; border: 0;
+  color: var(--muted); font-size: 14px;
+  cursor: pointer; padding: 0 6px;
+  line-height: 1;
+}
+.brk-inception-clear:hover { color: var(--red); }
+.brk-inception-hint { color: var(--faint); font-size: 11px; }
+
+/* Read-only earliest-inception badge for the "All accounts" view —
+   no edit affordance, just surfaces the implicit cutoff. */
+.brk-inception-badge {
+  margin: 0 0 12px;
+  font-size: 12px; color: var(--muted);
+}
+
 /* Top stat row — 5 boxes (Portfolio / Gain·1Y / P&L / Return / Holdings). */
 .brk-stats {
   display: grid;
