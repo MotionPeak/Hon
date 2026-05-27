@@ -59,7 +59,7 @@ Two further asks bundled in:
 
 ### 1. Data model
 
-**Migration 35** in `sidecar/src/db.ts`:
+**Migration 36** in `sidecar/src/db.ts` (current schema is v35 — `excluded_manual` on `transactions`):
 
 ```sql
 ALTER TABLE connections ADD COLUMN history_months INTEGER NOT NULL DEFAULT 12;
@@ -69,7 +69,7 @@ ALTER TABLE connections ADD COLUMN history_months INTEGER NOT NULL DEFAULT 12;
   automatic on the next sync.
 - Range `[1, 24]` enforced at API + repo layer (no DB CHECK constraint;
   matches the schema's permissive style).
-- Schema rolls from `SCHEMA_VERSION = 34` to `35`.
+- Schema rolls from `SCHEMA_VERSION = 35` to `36`.
 
 ### 2. Repo surface
 
@@ -168,15 +168,29 @@ to emit:
 `.sync-pill-success` reuses `.sync-pill`'s shape; green tint via
 existing token palette. Fade-out respects `prefers-reduced-motion`.
 
-**Settings drawer — history window**:
+**History window control — inline on connection card**:
 
-Inside the per-connection settings drawer (next to "Disable sync",
-"Delete connection"):
+There is no per-connection settings drawer today (only modal flows for
+Set credentials / Edit balance / Remove). Adding a drawer is out of scope;
+instead, render the control inline on the connection card header,
+beside the existing "Sync"/"Remove" buttons:
 
-> **History window**: `[ 12 ▾ ] months`
+```tsx
+<select
+  className="conn-history-select mini"
+  value={connection.historyMonths}
+  onChange={(e) => callbacks.onSetHistoryMonths(connection, Number(e.target.value))}
+>
+  <option value={3}>3 mo</option>
+  <option value={6}>6 mo</option>
+  <option value={12}>12 mo</option>
+  <option value={18}>18 mo</option>
+  <option value={24}>24 mo</option>
+</select>
+```
 
-- Radix `<Select>` with options `[3, 6, 12, 18, 24]`.
-- Reads initial value from `connection.historyMonths`.
+- Native `<select>` styled as a `mini` pill matching the existing
+  buttons. No new Radix primitive needed.
 - PATCHes `/connections/:id/history-months` on change.
 - Optimistic update (matches `toggleAccountExcluded` pattern); reverts
   to stored value on error.
