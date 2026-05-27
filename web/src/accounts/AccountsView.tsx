@@ -1316,8 +1316,8 @@ function AddConnectionPicker(
       return (
         <PensionPickerStep
           companies={companies}
-          onPickCompany={(c) => onPickCompany(c)}
-          onPickCustom={() => onPickManualPension()}
+          onPickCompany={onPickCompany}
+          onPickCustom={onPickManualPension}
           onBack={() => setStep({ kind: 'category' })}
         />
       );

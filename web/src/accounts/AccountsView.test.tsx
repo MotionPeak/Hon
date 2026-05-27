@@ -638,7 +638,7 @@ describe('AccountsView — add connection (picker + bank/card form)', () => {
     render(<AccountsView />);
     await user.click(await screen.findByRole('button', { name: /add asset/i }));
     const dialog = screen.getByRole('dialog', { name: /add an asset/i });
-    const pension = within(dialog).getByRole('button', { name: /pension/i });
+    const pension = within(dialog).getByRole('button', { name: /^pension & savings$/i });
     expect(pension).not.toBeDisabled();
     await user.click(pension);
     expect(within(dialog).getByRole('button', { name: /harel/i })).toBeInTheDocument();
@@ -835,7 +835,7 @@ describe('AccountsView — add connection (picker + bank/card form)', () => {
     render(<AccountsView />);
     await user.click(await screen.findByRole('button', { name: /add asset/i }));
     const dialog = screen.getByRole('dialog', { name: /add an asset/i });
-    await user.click(within(dialog).getByRole('button', { name: /pension/i }));
+    await user.click(within(dialog).getByRole('button', { name: /^pension & savings$/i }));
     await user.click(within(dialog).getByRole('button', { name: /custom pension account/i }));
     const assetDialog = await screen.findByRole('dialog', { name: /add a manual asset/i });
     const kind = within(assetDialog).getByLabelText(/kind/i) as HTMLSelectElement;
