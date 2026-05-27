@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { AccountsView } from './AccountsView';
+import { AccountsView, AddManualAssetForm } from './AccountsView';
 import { installFetchMock, jsonResponse } from '../test/mockFetch';
 
 const COMPANIES = {
@@ -965,8 +965,6 @@ describe('AccountsView — SnapTrade link flow', () => {
     expect(await screen.findByRole('button', { name: /Interactive Brokers/i })).toBeInTheDocument();
   });
 });
-
-import { AddManualAssetForm } from './AccountsView';
 
 describe('AddManualAssetForm — initialKind prop', () => {
   it('defaults the Kind dropdown to "cash" when no initialKind is given', () => {

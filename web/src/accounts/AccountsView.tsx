@@ -1470,23 +1470,33 @@ function SnapTradeBrokeragesStep(
   );
 }
 
-const ASSET_KINDS: Array<[string, string]> = [
+const ASSET_KINDS = [
   ['cash', 'Cash / savings'],
   ['property', 'Property'],
   ['car', 'Car'],
   ['crypto', 'Crypto'],
   ['pension', 'Pension'],
   ['other', 'Other'],
-];
+] as const;
+
+/** The legal kind values for a manual asset. Derived from ASSET_KINDS
+ *  so a new entry there is automatically allowed as an initialKind. */
+export type AssetKind = typeof ASSET_KINDS[number][0];
 
 interface AddManualAssetFormProps {
   onClose: () => void;
   onSaved: () => void | Promise<void>;
   /** Preselects the Kind dropdown. Defaults to 'cash'. Used by the pension
    *  picker's "Custom pension account" row to land on the right kind. */
-  initialKind?: string;
+  initialKind?: AssetKind;
 }
 
+/**
+ * Modal form for adding a manual (non-scraped) asset to the user's
+ * net-worth view. Used both from the standalone "Other asset" picker
+ * tile and from the pension picker's "Custom pension account" row
+ * (which preselects the Kind dropdown via the `initialKind` prop).
+ */
 export function AddManualAssetForm({ onClose, onSaved, initialKind }: AddManualAssetFormProps) {
   const [kind, setKind] = useState(initialKind ?? 'cash');
   const [name, setName] = useState('');
@@ -1517,7 +1527,7 @@ export function AddManualAssetForm({ onClose, onSaved, initialKind }: AddManualA
           </p>
           <label className="field">
             <span>Kind</span>
-            <select value={kind} onChange={(e) => setKind(e.target.value)}>
+            <select value={kind} onChange={(e) => setKind(e.target.value as AssetKind)}>
               {ASSET_KINDS.map(([id, label]) => (
                 <option key={id} value={id}>{label}</option>
               ))}
