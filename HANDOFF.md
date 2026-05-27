@@ -1,4 +1,4 @@
-# HANDOFF.md — Hon (React migration + loan auto-link)
+# HANDOFF.md — Hon
 
 > **Read this first.** Rolling bridge between Claude Code sessions.
 >
@@ -6,26 +6,66 @@
 > behavioral rules (no `preview_start`, visual-verification workflow
 > via chrome-devtools MCP, branch/push policy, workflow discipline,
 > Hon-specific gotchas). Non-negotiable before touching code.
+>
+> **And [CLAUDE.md](CLAUDE.md)** — code-architecture map: where
+> things live, the why behind non-obvious decisions, common
+> debugging patterns. Reference for code-level questions.
 
-## TL;DR — state of the world
+## TL;DR — state of the world (2026-05-27)
 
 - **React migration done, structurally.** All 10 tabs ship from
   `web/` at near-legacy parity. The legacy SPA at
   `sidecar/public/app.html` is still served by the engine and is the
   production UI; the React app is at `cd web && npm run dev`.
-- **Engine untouched in shape.** Same DB, same APIs, same scrapers,
-  same `#token=…` fragment auth. Recent additions: `loan_id` column
-  on transactions (schema v33/v34) + loan matcher + per-account
-  sync backfill; DictaLM 2.0 in the LLM catalog; persistent dev
-  token on disk.
-- **Tests:** `cd web && npm test` → **292** passing. `cd sidecar &&
-  npm test` → **55** passing. `cd web && npm run typecheck` clean.
-- **Most recent commit:** `45d3ff8 sidecar: TXN_COLS — expose
-  loan_id as loanId on transaction reads`. **The user must restart
-  the engine to load this** before the Activity-row `→ Loan name`
-  chip will render. `tsx` doesn't watch — see § "Restart workflow".
+- **SnapTrade portal flow shipped this session.** Add Account →
+  Brokerages tile → if no SnapTrade conn, inline credentials form;
+  if conn exists, inline brokerage list → click broker →
+  `SnapTradeLinkFlow` opens with broker pre-selected, polls
+  `/snaptrade/connections/:id/count` (new endpoint) every 3s for up
+  to 5 min, auto-syncs on detection, shows "N accounts added". Also
+  reachable via "Link another brokerage" button on the SnapTrade
+  card. Matches the legacy SPA's category-tile picker design 1:1
+  (Banks / Credit cards / Brokerages / Car / Pension & savings /
+  Loan / Other asset — Car + Pension disabled until React flows ship).
+- **Tests:** `cd web && npm test` → **315** passing. `cd sidecar &&
+  npm test` → **55** passing. Both typechecks clean.
+- **Most recent commit:** `dd5cfd7 web: brokerage drilldown — inline
+  credentials gate + brokerage list`. All pushed to origin/main.
+- **Manual smoke pending:** the full SnapTrade portal flow has been
+  visually verified through to the brokerage picker but the final
+  step (actually linking a real brokerage via the SnapTrade portal)
+  hasn't been smoked end-to-end. Do that first thing next session.
 - **What's left:** see § "Deferred items". Nothing blocks shipping;
   each is its own follow-up.
+
+## What shipped this session (2026-05-27)
+
+Branch `main`, commits `e9ef14d`..`dd5cfd7` (17 commits, all pushed):
+
+1. **Spec + plan** (`e9ef14d`, `136c2e9`) — SnapTrade portal flow
+   design + TDD-ordered implementation plan at `docs/superpowers/`.
+2. **Backend** (`d9fbef3`, `a348c0a`) — exported `countConnections`/
+   `getStoredUser`/`makeClient` from `sidecar/src/snaptrade.ts`;
+   added `GET /snaptrade/connections/:connectionId/count` route.
+3. **Components** (`479eff3`, `637b084`, `48440b4`, `4f59139`,
+   `d6aae90`) — `SnapTradeBrokeragePicker`, `useSnapTradeConnectionPoll`,
+   `Countdown`, `SnapTradeLinkFlow` orchestrator. All TDD.
+4. **Wiring** (`4e981d1`, `dd6524b`, `c9fcc9e`) — Add Account flow
+   routing through SnapTrade; "Link another brokerage" button on
+   SnapTrade connection card; integration tests.
+5. **Tile picker port** (`3f92d8c`, `cf87d1f`, `f728313`) — category
+   tile picker matching legacy SPA, with disabled Car + Pension tiles.
+6. **CSS overflow fixes** (`ec744ff`, `2060bdc`) — `minmax(0, 1fr)`
+   + override the global `button { white-space: nowrap }` so tile
+   sub-text wraps.
+7. **Behavioral rules** (`a955d54`, `30de1d8`) — PROJECT-RULES.md
+   with visual-verification workflow; HANDOFF.md pointer.
+8. **Brokerage drilldown refactor** (`dd5cfd7`) — Brokerages tile no
+   longer drills into a single SnapTrade row; it opens the legacy-
+   style inline credentials → brokerage list flow instead. Reuses
+   `SnapTradeBrokeragePicker` (now a vertical list, no search);
+   `SnapTradeLinkFlow` accepts `initialBrokerSlug` to skip its own
+   picker when the broker was already chosen in the Add-asset modal.
 
 ## Restart workflow (you'll need this)
 
@@ -192,19 +232,33 @@ All 10 tabs render with rich, near-legacy parity. Highlights:
 
 ## Deferred items
 
-- **#30 SnapTrade portal flow** — OAuth + portal handoff for IBKR.
-- **#31 Pension flows (5 variants)** — Migdal/Harel/Clal automated,
-  Meitav/Menora visible-window sign-in, Altshuler manual.
-- Smaller polish: per-account filter pills + inception-date input
-  on the Brokerage chart; smooth bezier curve in `ValueChart`
-  (polyline today); Splitwise card body in Settings + Activity
-  sidebar Splitwise section (`/splitwise/*`);
-  `expectedFixedThisCycle` for the Overview projection (lift
+**Highest-value next steps**:
+
+- **Manual smoke of SnapTrade portal end-to-end** — visually
+  verified through to the brokerage picker but never actually
+  completed an OAuth handshake with a real broker. Pick IBKR, walk
+  through, confirm accounts appear + 3s poll detects the link.
+- **Car flow port to React** — tile is visible-but-disabled today.
+  Legacy `renderCarStep` in `sidecar/public/app.html` is the
+  reference: plate-lookup via data.gov.il, deep-link to Yad2 for
+  price (CAPTCHA-walled per memory).
+- **Pension flow port to React** — tile is visible-but-disabled
+  today. Pension scrapers (Migdal/Harel/Clal automated +
+  Meitav/Menora visible-window + Altshuler manual) all work in the
+  legacy SPA / engine; just no React UI yet.
+
+**Smaller polish**:
+
+- Per-account filter pills + inception-date input on Brokerage chart.
+- Smooth bezier curve in `ValueChart` (polyline today).
+- Splitwise card body in Settings + Activity sidebar Splitwise
+  section (`/splitwise/*`).
+- `expectedFixedThisCycle` for the Overview projection (lift
   `detectMerchants` out of `RecurringView.tsx` and feed `/budget`).
 
 ## Tests + Superpowers usage
 
-- `cd web && npm test` → 292.
+- `cd web && npm test` → 315.
 - `cd sidecar && npm test` → 55.
 - `cd web && npm run typecheck` → clean.
 - **Use `/test-driven-development`** for each new component:
