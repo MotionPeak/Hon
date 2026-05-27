@@ -10,6 +10,7 @@ import type { Account, Loan } from '../accounts/types';
 import type { Category } from '../settings/CategoriesPanel';
 import type { Transaction } from './types';
 import { merchantKey, recurrenceChoices, type Frequency } from '../recurring/helpers';
+import { isExcludedFromCycle, ruleMatches } from './excluded';
 
 /** Stored merchant-frequency value. 'income'/'ignore' are tags the editor
  *  here doesn't expose, but we keep them in the type to round-trip safely. */
@@ -143,9 +144,23 @@ export function ActivityView() {
         .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
     : [];
 
-  const monthTxns = transactions.filter((t) =>
+  const monthTxnsAll = transactions.filter((t) =>
     !t.refundForId && cycleKey(t.date, settings.monthStartDay) === activeMonth,
   );
+
+  // Split into "counted toward the cycle" and "excluded" buckets. Excluded
+  // rows skip the regular category grouping and render in a dedicated
+  // section at the bottom — visible, manageable, but out of the totals.
+  const exclusionSettings = {
+    hideCardTotals: settings.hideCardTotals,
+    cardProviders: settings.cardProviders,
+  };
+  const monthTxns: Transaction[] = [];
+  const excludedTxns: Transaction[] = [];
+  for (const t of monthTxnsAll) {
+    if (isExcludedFromCycle(t, exclusionSettings)) excludedTxns.push(t);
+    else monthTxns.push(t);
+  }
 
   // Group by category. The category order comes from the engine's sortOrder.
   const grouped = new Map<string, Transaction[]>();
@@ -217,7 +232,7 @@ export function ActivityView() {
         <span className="act-count">
           {inSearchMode
             ? `${searchResults.length} match${searchResults.length === 1 ? '' : 'es'}`
-            : `${monthTxns.length} transaction${monthTxns.length === 1 ? '' : 's'}`}
+            : `${monthTxnsAll.length} transaction${monthTxnsAll.length === 1 ? '' : 's'}`}
         </span>
         {batchMode ? (
           <button
@@ -326,20 +341,32 @@ export function ActivityView() {
             </ul>
           </section>
         )
-      ) : monthTxns.length === 0 ? (
+      ) : monthTxns.length === 0 && excludedTxns.length === 0 ? (
         <p className="blank">
           No transactions in {activeMonth ? cycleLabel(activeMonth) : 'this period'}.
         </p>
       ) : (
-        <UmbrellaSections
-          orderedCats={orderedCats}
-          grouped={grouped}
-          categoryByName={categoryByName}
-          accountById={accountById}
-          loans={loans}
-          onPickTxn={pickTxn}
-          selectedIds={selectedIds}
-        />
+        <>
+          {monthTxns.length > 0 && (
+            <UmbrellaSections
+              orderedCats={orderedCats}
+              grouped={grouped}
+              categoryByName={categoryByName}
+              accountById={accountById}
+              loans={loans}
+              onPickTxn={pickTxn}
+              selectedIds={selectedIds}
+            />
+          )}
+          {excludedTxns.length > 0 && (
+            <ExcludedSection
+              transactions={excludedTxns}
+              accountById={accountById}
+              onPickTxn={pickTxn}
+              selectedIds={selectedIds}
+            />
+          )}
+        </>
       )}
       {moving && (
         <CategoryPickerSidebar
@@ -366,6 +393,21 @@ export function ActivityView() {
           currentFreq={
             (merchantFreqs[merchantKey(moving.description)] as Frequency | undefined) ?? null
           }
+          excluded={isExcludedFromCycle(moving, exclusionSettings)}
+          ruleMatched={ruleMatches(moving, exclusionSettings)}
+          onSetExcluded={async (next: boolean) => {
+            // When the user's choice already matches the rule, clear the
+            // manual override so future rule changes propagate. Otherwise
+            // store an explicit true/false that wins over the rule.
+            const matched = ruleMatches(moving, exclusionSettings);
+            const value: boolean | null = next === matched ? null : next;
+            await api(
+              `/transactions/${encodeURIComponent(moving.id)}/excluded`,
+              'PATCH',
+              { excluded: value },
+            );
+            await refresh();
+          }}
           onClose={() => setMoving(null)}
           onSaved={async (cat, opts) => {
             const catChanged = cat !== (moving.category ?? '');
@@ -498,6 +540,86 @@ function UmbrellaSections({
   );
 }
 
+interface ExcludedSectionProps {
+  transactions: Transaction[];
+  accountById: Map<string, Account>;
+  onPickTxn: (t: Transaction) => void;
+  selectedIds: Set<string>;
+}
+
+/** Bottom-of-page collapsible holding every transaction that is excluded
+ *  from cycle calculations — either because it matched the card-bill rule
+ *  in Settings or because the user manually parked it via the sidebar.
+ *  Clicking any row re-opens the sidebar so the user can put it back. */
+function ExcludedSection({
+  transactions, accountById, onPickTxn, selectedIds,
+}: ExcludedSectionProps) {
+  const [open, setOpen] = useState(false);
+  const total = transactions.reduce((s, t) => s + t.amount, 0);
+  const cur = transactions[0]?.currency ?? 'ILS';
+  return (
+    <section className="act-excluded">
+      <button
+        type="button"
+        className="act-excluded-head"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="act-excluded-caret">{open ? '▾' : '▸'}</span>
+        <span className="act-excluded-name">
+          Excluded from cycle ({transactions.length})
+        </span>
+        <span className="act-excluded-line" />
+        <span className="act-excluded-total">{money(total, cur)}</span>
+      </button>
+      {open && (
+        <ul className="txn-list">
+          {transactions
+            .slice()
+            .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+            .map((t) => {
+              const acct = accountById.get(t.accountId);
+              const pos = t.amount > 0;
+              const selected = selectedIds.has(t.id);
+              return (
+                <li
+                  key={t.id}
+                  className={`txn act-excluded-row${selected ? ' selected' : ''}`}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => onPickTxn(t)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      onPickTxn(t);
+                    }
+                  }}
+                >
+                  <span className="txn-icon">▫️</span>
+                  <div className="txn-main">
+                    <div className="txn-name">{t.description}</div>
+                    <div className="txn-sub">
+                      {fmtDate(t.date)}
+                      {acct && (
+                        <>
+                          <span className="sep"> · </span>
+                          {acct.label || acct.connectionName}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  <div className={`txn-amt${pos ? ' pos' : ''}`}>
+                    {money(t.amount, t.currency)}
+                  </div>
+                </li>
+              );
+            })}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 interface CatCardProps {
   catName: string;
   cat: Category | undefined;
@@ -618,6 +740,12 @@ interface CategoryPickerProps {
   loans: Loan[];
   /** Stored billing frequency for this txn's merchant, or null if unset. */
   currentFreq: Frequency | null;
+  /** Effective excluded-from-cycle state (rule + manual override merged). */
+  excluded: boolean;
+  /** Whether the live card-bill rule matches this txn — used to show the
+   *  caller why it's excluded by default. */
+  ruleMatched: boolean;
+  onSetExcluded: (next: boolean) => void | Promise<void>;
   onClose: () => void;
   onSaved: (
     category: string,
@@ -631,7 +759,9 @@ interface CategoryPickerProps {
 
 function CategoryPickerSidebar(
   {
-    transaction, allTransactions, categories, loans, currentFreq, onClose, onSaved,
+    transaction, allTransactions, categories, loans, currentFreq,
+    excluded, ruleMatched, onSetExcluded,
+    onClose, onSaved,
     onLinkRefund, onUnlinkRefund, onLinkLoan, onUnlinkLoan,
   }: CategoryPickerProps,
 ) {
@@ -810,6 +940,29 @@ function CategoryPickerSidebar(
                 + Split on Splitwise
               </button>
               <p className="txn-sidebar-hint">Coming soon.</p>
+            </div>
+
+            <div className="txn-sidebar-section">
+              <div className="label">Cycle calculations</div>
+              <label className="txn-sidebar-toggle">
+                <span className="txn-sidebar-toggle-main">
+                  <span className="txn-sidebar-toggle-name">Exclude from cycle</span>
+                  <span className="txn-sidebar-toggle-sub">
+                    {excluded
+                      ? ruleMatched
+                        ? 'Matched the card-bill rule — already out of totals.'
+                        : 'Hidden from monthly totals + projection.'
+                      : 'Counted in monthly totals + projection.'}
+                  </span>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={excluded}
+                  disabled={busy}
+                  onChange={(e) => { void onSetExcluded(e.target.checked); }}
+                  aria-label="Exclude from cycle calculations"
+                />
+              </label>
             </div>
 
             {error && <div className="modal-err">{error}</div>}

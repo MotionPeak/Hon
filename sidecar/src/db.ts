@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-export const SCHEMA_VERSION = 34;
+export const SCHEMA_VERSION = 35;
 
 export interface DbHandle {
   db: Database.Database;
@@ -656,6 +656,15 @@ const MIGRATIONS: { version: number; sql: string }[] = [
     // size cost of indexing every NULL row.
     version: 34,
     sql: `CREATE INDEX IF NOT EXISTS idx_txn_loan_id ON transactions (loan_id) WHERE loan_id IS NOT NULL;`,
+  },
+  {
+    // Per-transaction "exclude from cycle calculations" override. NULL means
+    // the live cardProviders rule (web/settings) decides; 1 forces excluded;
+    // 0 forces included even when the rule would match. Lets a user park
+    // any transaction out of monthly totals (one-off card chargebacks,
+    // misposted business spend, etc.) AND override the rule per-row.
+    version: 35,
+    sql: `ALTER TABLE transactions ADD COLUMN excluded_manual INTEGER;`,
   },
 ];
 

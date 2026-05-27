@@ -1696,6 +1696,60 @@ button.mini { padding: 5px 11px; font-size: 12px; }
 }
 .freq-opt:disabled { opacity: 0.6; cursor: not-allowed; }
 
+/* "Exclude from cycle" toggle inside the sidebar — text on the left,
+   native checkbox on the right with the amber accent-color. */
+.txn-sidebar-toggle {
+  display: flex; align-items: center; gap: 12px;
+  padding: 6px 0; cursor: pointer; user-select: none;
+}
+.txn-sidebar-toggle-main {
+  display: flex; flex-direction: column; gap: 2px;
+  flex: 1; min-width: 0;
+}
+.txn-sidebar-toggle-name {
+  font-size: 13px; font-weight: 600; color: var(--text);
+}
+.txn-sidebar-toggle-sub {
+  font-size: 11.5px; color: var(--muted); line-height: 1.35;
+}
+.txn-sidebar-toggle input[type='checkbox'] {
+  flex: 0 0 auto;
+  width: 18px; height: 18px;
+  accent-color: var(--accent); cursor: pointer;
+}
+.txn-sidebar-toggle:has(input:disabled) { opacity: 0.6; cursor: not-allowed; }
+
+/* Excluded-from-cycle section on the Activity page — collapsible by
+   default, sits below the regular categorised grouping. */
+.act-excluded {
+  margin-top: 24px;
+  border-top: 1px dashed var(--hairline);
+  padding-top: 14px;
+}
+.act-excluded-head {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  background: transparent; border: 0; padding: 4px 2px;
+  color: var(--muted); font-size: 12px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.07em;
+  cursor: pointer;
+}
+.act-excluded-head:hover { color: var(--text); }
+.act-excluded-caret {
+  display: inline-flex; width: 12px; justify-content: center;
+  font-size: 10px;
+}
+.act-excluded-name { flex: 0 0 auto; }
+.act-excluded-line {
+  flex: 1; height: 1px; background: var(--hairline);
+}
+.act-excluded-total {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums; color: var(--text);
+}
+.act-excluded .txn-list { margin-top: 8px; }
+.act-excluded-row { opacity: 0.78; }
+.act-excluded-row:hover { opacity: 1; }
+
 /* Delayed loader — appears only when a request runs longer than the
    250ms threshold the component holds for. Centred in the content area
    instead of clinging to the top-left, so when it does appear it reads

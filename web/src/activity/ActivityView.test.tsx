@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ActivityView } from './ActivityView';
@@ -664,5 +664,99 @@ describe('ActivityView — refund linking', () => {
     await user.click(within(sidebar).getByRole('button', { name: /unlink/i }));
     await waitFor(() => expect(del).toHaveBeenCalled());
     await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe('ActivityView — exclude from cycle', () => {
+  beforeEach(() => {
+    localStorage.setItem('honSettings', JSON.stringify({
+      hideCardTotals: true, cardProviders: ['מקס'],
+    }));
+  });
+
+  const txnsWithCardBill = {
+    transactions: [
+      TXNS.transactions[0]!, // Aroma Coffee
+      {
+        id: 't-card', accountId: 'a-1', externalId: 'xc',
+        date: `${thisMonth}-10`, processedDate: null, amount: -2500,
+        currency: 'ILS', description: 'מקס איט פיננסים', memo: null,
+        kind: null, status: null, category: null, createdAt: '2026-05-10',
+      },
+    ],
+  };
+
+  it('rule-matched rows render under the "Excluded from cycle" section, not the main grouping', async () => {
+    const user = userEvent.setup();
+    installFetchMock({ ...FULL, 'GET /api/transactions': () => txnsWithCardBill });
+    renderView();
+    // The card-bill row exists, but it's collapsed inside the Excluded section.
+    expect(await screen.findByText(/excluded from cycle \(1\)/i)).toBeInTheDocument();
+    expect(screen.queryByText('מקס איט פיננסים')).not.toBeInTheDocument();
+    // Aroma Coffee (variable) still renders normally.
+    expect(screen.getByText('Aroma Coffee')).toBeInTheDocument();
+    // Expand the section and the card-bill row appears.
+    await user.click(screen.getByRole('button', { name: /excluded from cycle/i }));
+    expect(await screen.findByText('מקס איט פיננסים')).toBeInTheDocument();
+  });
+
+  it('manually excluding a row PATCHes /excluded with true and moves it to the section', async () => {
+    const user = userEvent.setup();
+    const patch = vi.fn((_b: unknown) => ({ ok: true }));
+    let calls = 0;
+    installFetchMock({
+      ...FULL,
+      'GET /api/transactions': () => {
+        calls += 1;
+        if (calls === 1) return TXNS;
+        return { transactions: [{ ...TXNS.transactions[0]!, excludedManual: true }] };
+      },
+      'PATCH /api/transactions/t-1/excluded': patch,
+    });
+    renderView();
+    await user.click(await screen.findByText('Aroma Coffee'));
+    const sidebar = screen.getByRole('dialog', { name: /move to category/i });
+    const toggle = within(sidebar).getByRole('checkbox', {
+      name: /exclude from cycle calculations/i,
+    });
+    expect(toggle).not.toBeChecked();
+    await user.click(toggle);
+    await waitFor(() => expect(patch).toHaveBeenCalled());
+    expect(patch.mock.calls[0]?.[0]).toEqual({ excluded: true });
+  });
+
+  it('re-including a rule-matched row PATCHes /excluded with false (the manual override)', async () => {
+    const user = userEvent.setup();
+    const patch = vi.fn((_b: unknown) => ({ ok: true }));
+    installFetchMock({
+      ...FULL,
+      'GET /api/transactions': () => txnsWithCardBill,
+      'PATCH /api/transactions/t-card/excluded': patch,
+    });
+    renderView();
+    await user.click(await screen.findByRole('button', { name: /excluded from cycle/i }));
+    await user.click(await screen.findByText('מקס איט פיננסים'));
+    const sidebar = screen.getByRole('dialog', { name: /move to category/i });
+    const toggle = within(sidebar).getByRole('checkbox', {
+      name: /exclude from cycle calculations/i,
+    });
+    expect(toggle).toBeChecked();
+    await user.click(toggle);
+    await waitFor(() => expect(patch).toHaveBeenCalled());
+    expect(patch.mock.calls[0]?.[0]).toEqual({ excluded: false });
+  });
+
+  it('explicit excludedManual=false overrides the rule and keeps the row in the main grouping', async () => {
+    installFetchMock({
+      ...FULL,
+      'GET /api/transactions': () => ({
+        transactions: [
+          { ...TXNS.transactions[0]!, description: 'מקס איט פיננסים', excludedManual: false, category: 'Coffee' },
+        ],
+      }),
+    });
+    renderView();
+    expect(await screen.findByText('מקס איט פיננסים')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /excluded from cycle/i })).not.toBeInTheDocument();
   });
 });

@@ -1681,6 +1681,33 @@ app.patch('/transactions/:id/loan', async (req, reply) => {
   }
 });
 
+/**
+ * Per-transaction override for the "exclude from cycle calculations"
+ * flag. Body `{ excluded: true | false | null }`:
+ *   - true  → force the row out of monthly totals.
+ *   - false → force the row IN, even when the client's card-bill rule
+ *             would have matched it.
+ *   - null  → clear the override; the live rule decides.
+ *
+ * The rule itself lives in the web app's Settings (`cardProviders` +
+ * `hideCardTotals`) and is applied client-side — this endpoint only
+ * persists the manual override.
+ */
+app.patch('/transactions/:id/excluded', async (req, reply) => {
+  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+  const { id } = req.params as { id: string };
+  const body = (req.body ?? {}) as { excluded?: boolean | null };
+  const excluded = body.excluded === undefined ? null : body.excluded;
+  if (excluded !== null && typeof excluded !== 'boolean') {
+    return reply.code(400).send({ error: 'excluded must be a boolean or null' });
+  }
+  if (!repo.getTransaction(id)) {
+    return reply.code(404).send({ error: 'transaction not found' });
+  }
+  repo.setTransactionExcluded(id, excluded);
+  return { ok: true, excluded };
+});
+
 app.post('/loans', async (req, reply) => {
   if (!repo) return reply.code(503).send({ error: 'database unavailable' });
   const body = (req.body ?? {}) as {

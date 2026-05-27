@@ -19,4 +19,9 @@ export interface Transaction {
   /** Optional link to a Loan row when the matcher (or the user via
    *  PATCH /transactions/:id/loan) tagged this txn as a loan payment. */
   loanId?: string | null;
+  /** Per-transaction override for the "exclude from cycle" rule:
+   *  true forces excluded, false forces included, null/undefined defers
+   *  to the live card-bill rule (settings.cardProviders +
+   *  settings.hideCardTotals). Set via PATCH /transactions/:id/excluded. */
+  excludedManual?: boolean | null;
 }
