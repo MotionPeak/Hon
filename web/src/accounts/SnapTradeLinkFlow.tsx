@@ -219,7 +219,11 @@ function DonePanel(
   return (
     <div className="snaptrade-flow">
       <h2>Connected {brokerName}</h2>
-      <p>{accountsAdded} account{accountsAdded === 1 ? '' : 's'} added.</p>
+      <p>
+        {accountsAdded === 0
+          ? `${brokerName} connection refreshed.`
+          : `${accountsAdded} account${accountsAdded === 1 ? '' : 's'} added.`}
+      </p>
       <div className="modal-actions"><button type="button" onClick={onDone}>Done</button></div>
     </div>
   );

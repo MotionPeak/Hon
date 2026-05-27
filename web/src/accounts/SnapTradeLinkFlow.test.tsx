@@ -128,6 +128,29 @@ describe('SnapTradeLinkFlow', () => {
     });
   });
 
+  it('shows "connection refreshed" copy when accountsAdded is 0 (re-link of same broker)', async () => {
+    installFetchMock(defaultRoutes({
+      // count stays at baseline 0, but server reports done:true after portal callback
+      'GET /api/snaptrade/connections/conn-1/count': () => ({ count: 0, done: true }),
+    }));
+    const onLinked = vi.fn().mockResolvedValue({ accountsAdded: 0 });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(<SnapTradeLinkFlow connectionId="conn-1" onLinked={onLinked} onCancel={() => {}} />);
+
+    await vi.advanceTimersByTimeAsync(0);
+    await screen.findByRole('button', { name: /Interactive Brokers/i });
+    await user.click(screen.getByRole('button', { name: /Interactive Brokers/i }));
+
+    await waitFor(() => expect(openSpy).toHaveBeenCalled());
+    await vi.advanceTimersByTimeAsync(0);
+
+    await waitFor(() => expect(onLinked).toHaveBeenCalled());
+    await waitFor(() => {
+      expect(screen.getByText(/connection refreshed/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/0 accounts? added/i)).toBeNull();
+  });
+
   it('shows the atLimit error when /portal reports atLimit', async () => {
     installFetchMock(defaultRoutes({
       'POST /api/snaptrade/portal': () => ({
