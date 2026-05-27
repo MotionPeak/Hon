@@ -16,4 +16,7 @@ export interface Transaction {
   createdAt: string;
   refundId?: string | null;
   refundForId?: string | null;
+  /** Optional link to a Loan row when the matcher (or the user via
+   *  PATCH /transactions/:id/loan) tagged this txn as a loan payment. */
+  loanId?: string | null;
 }

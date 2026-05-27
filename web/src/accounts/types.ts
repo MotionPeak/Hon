@@ -89,6 +89,19 @@ export interface Loan {
   rateType?: RateType;
   /** Computed Spitzer state. Engine fills it when serving /loans. */
   state?: LoanState;
+  /** Bank-detected payments linked to this loan, newest-first. Empty for
+   *  manual / SnapTrade / pension loans. Server-populated by listLoanPayments. */
+  payments?: LoanPayment[];
+}
+
+/** A single linked loan-payment transaction. Mirrors the shape the engine
+ *  attaches to each Loan on GET /loans. */
+export interface LoanPayment {
+  id: string;
+  date: string;
+  amount: number;
+  accountId: string;
+  description: string;
 }
 
 /** A single brokerage security position. Mirrors HoldingRow in repo.ts. */
