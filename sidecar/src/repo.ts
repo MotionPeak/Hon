@@ -292,7 +292,8 @@ const RUN_COLS =
 const TXN_COLS =
   'id, account_id AS accountId, external_id AS externalId, date, ' +
   'processed_date AS processedDate, amount, currency, description, memo, ' +
-  'kind, status, category, created_at AS createdAt, loan_id AS loanId';
+  'kind, status, category, created_at AS createdAt, loan_id AS loanId, ' +
+  'excluded_manual AS excludedManual';
 
 /** All database reads/writes go through this typed repository. */
 export class Repo {
@@ -1859,6 +1860,17 @@ export class Repo {
     this.db
       .prepare('UPDATE transactions SET loan_id = ? WHERE id = ?')
       .run(loanId, txnId);
+  }
+
+  /** Sets (or clears) the per-transaction "exclude from cycle" override.
+   *  `true` forces the row out of monthly totals; `false` forces it in
+   *  even when the client's card-bill rule would have matched; `null`
+   *  clears the override and lets the rule decide. */
+  setTransactionExcluded(txnId: string, excluded: boolean | null): void {
+    const value = excluded === null ? null : excluded ? 1 : 0;
+    this.db
+      .prepare('UPDATE transactions SET excluded_manual = ? WHERE id = ?')
+      .run(value, txnId);
   }
 
   /** Every transaction linked to this loan, newest-first. */
