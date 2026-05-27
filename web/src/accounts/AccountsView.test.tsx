@@ -15,13 +15,13 @@ const COMPANIES = {
 const CONNECTIONS = {
   connections: [
     { id: 'c-bank-1', companyId: 'hapoalim', displayName: 'Hapoalim main',
-      createdAt: '2025-01-01', lastScrapeAt: '2026-05-25', lastStatus: 'success', hasCredentials: true },
+      createdAt: '2025-01-01', lastScrapeAt: '2026-05-25', lastStatus: 'success', hasCredentials: true, historyMonths: 12 },
     { id: 'c-card-1', companyId: 'max', displayName: 'Max card',
-      createdAt: '2025-01-01', lastScrapeAt: '2026-05-25', lastStatus: 'success', hasCredentials: true },
+      createdAt: '2025-01-01', lastScrapeAt: '2026-05-25', lastStatus: 'success', hasCredentials: true, historyMonths: 12 },
     { id: 'c-brk-1', companyId: 'snaptrade', displayName: 'IBKR',
-      createdAt: '2025-01-01', lastScrapeAt: '2026-05-25', lastStatus: 'success', hasCredentials: true },
+      createdAt: '2025-01-01', lastScrapeAt: '2026-05-25', lastStatus: 'success', hasCredentials: true, historyMonths: 12 },
     { id: 'c-pen-1', companyId: 'harel', displayName: 'Harel pension',
-      createdAt: '2025-01-01', lastScrapeAt: '2026-05-25', lastStatus: 'success', hasCredentials: true },
+      createdAt: '2025-01-01', lastScrapeAt: '2026-05-25', lastStatus: 'success', hasCredentials: true, historyMonths: 12 },
   ],
 };
 const ACCOUNTS = {
@@ -789,7 +789,7 @@ describe('AccountsView — add connection (picker + bank/card form)', () => {
     const user = userEvent.setup();
     const post = vi.fn((_body: unknown) => ({ connection: {
       id: 'new-1', companyId: 'hapoalim', displayName: 'My Hapoalim',
-      createdAt: '2026-05-26', lastScrapeAt: null, lastStatus: null, hasCredentials: true,
+      createdAt: '2026-05-26', lastScrapeAt: null, lastStatus: null, hasCredentials: true, historyMonths: 12,
     } }));
     const get = vi.fn(() => CONNECTIONS);
     installFetchMock({
@@ -890,7 +890,7 @@ describe('AccountsView — SnapTrade link flow', () => {
     'POST /api/connections': () => ({
       connection: {
         id: 'new-st-conn', companyId: 'snaptrade', displayName: 'SnapTrade (brokerages)',
-        createdAt: '2026-05-27T00:00:00Z', lastScrapeAt: null, lastStatus: null, hasCredentials: true,
+        createdAt: '2026-05-27T00:00:00Z', lastScrapeAt: null, lastStatus: null, hasCredentials: true, historyMonths: 12,
       },
     }),
     'POST /api/snaptrade/brokerages': () => ({
@@ -929,7 +929,7 @@ describe('AccountsView — SnapTrade link flow', () => {
         connections: [
           {
             id: 'existing-st', companyId: 'snaptrade', displayName: 'SnapTrade',
-            createdAt: '2026-05-27T00:00:00Z', lastScrapeAt: null, lastStatus: null, hasCredentials: true,
+            createdAt: '2026-05-27T00:00:00Z', lastScrapeAt: null, lastStatus: null, hasCredentials: true, historyMonths: 12,
           },
         ],
       }),
@@ -952,7 +952,7 @@ describe('AccountsView — SnapTrade link flow', () => {
         connections: [
           {
             id: 'existing-st', companyId: 'snaptrade', displayName: 'SnapTrade',
-            createdAt: '2026-05-27T00:00:00Z', lastScrapeAt: null, lastStatus: null, hasCredentials: true,
+            createdAt: '2026-05-27T00:00:00Z', lastScrapeAt: null, lastStatus: null, hasCredentials: true, historyMonths: 12,
           },
         ],
       }),

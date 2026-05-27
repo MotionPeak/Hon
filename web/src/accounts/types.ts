@@ -21,6 +21,8 @@ export interface Connection {
   lastScrapeAt: string | null;
   lastStatus: string | null;
   hasCredentials: boolean;
+  /** Months of transaction history to fetch each sync. Default 12; range [1, 24]. */
+  historyMonths: number;
 }
 
 export interface Account {
