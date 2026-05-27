@@ -12,8 +12,11 @@
   scrapers, same token-on-URL-fragment auth.
 - All 10 tabs are migrated end-to-end and now render close to
   legacy parity (CRUD flows + Insights depth landed since the
-  initial migration). **267 tests pass, typecheck clean.**
-  `npm run dev` and `npm test` both work from `web/`.
+  initial migration). **292 web + 55 sidecar tests pass, typecheck
+  clean.** `npm run dev` and `npm test` both work from `web/`. The
+  top-level `npm run dev` launches engine + vite together via
+  concurrently; the dev token is persisted to `<dataDir>/dev-token`
+  so the URL is bookmarkable.
 - The legacy SPA at `sidecar/public/app.html` is still served by
   `npm run web` and remains the production UI. The new React app
   ships from `cd web && npm run dev` — append `#token=<uuid>` from
@@ -162,9 +165,12 @@ All 10 tabs render with rich, near-legacy-parity flows. Per-tab notes:
    headline with per-currency chips.
 2. **Accounts (Assets)** — Full display, edits (balance, inception,
    net-worth toggle), sync + OTP flow, remove connection,
-   set-credentials, brokerage holdings expansion, asset/loan edit,
+   set-credentials, brokerage holdings expansion, asset edit,
    add-connection picker with bank/card credential form, manual
-   asset, manual loan, provider favicons.
+   asset, manual loan, provider favicons. **Loans no longer
+   rendered here** — they live exclusively in the Loans tab.
+   **Post-sync new-loan banner** appears at the top when a sync
+   detects a loan id that wasn't in `localStorage['hon.knownLoanIds']`.
    *Deferred:* SnapTrade portal flow (#30), pension flows 5
    variants (#31).
 3. **Activity** — Transactions list with month picker, category
@@ -187,7 +193,14 @@ All 10 tabs render with rich, near-legacy-parity flows. Per-tab notes:
    inputs, 4 monthly-set-aside preset cards (3/6/12/24 mo), live
    "you'll reach X in N months" ETA. Per-card kebab menu (Edit /
    Pause-or-Resume / Delete) with a confirm Dialog on delete.
-7. **Loans** — Loans read + manual-loan picker.
+7. **Loans** — Loans read + manual-loan picker. **Bank-scraped loans
+   auto-link payment transactions** via `sidecar/src/loanMatcher.ts`
+   (externalId hit → name-token hit → single-loan stopword fallback).
+   Each loan card grows a green/amber "Last payment" badge + a
+   collapsible `▾ N payments` history. Manual link/unlink lives in
+   the Activity move sidebar's Loans section (PATCH
+   `/transactions/:id/loan`). An amber pulse dot on the Loans nav
+   button surfaces an unseen loan id detected by Assets.
 8. **Vouchers** — List + add / edit / delete / toggle-excluded.
    *Deferred:* sync flows for Shufersal / BuyMe / HTZone (#4).
 9. **Insights** — Spending and Brokerage sub-tabs (`.ins-tabs`
@@ -202,27 +215,29 @@ All 10 tabs render with rich, near-legacy-parity flows. Per-tab notes:
      USD↔ILS toggle when multi-currency holdings exist, holdings
      rows with color dots + weight bars + ▲/▼ gain badges, sorted
      by value desc.
-   *Deferred:* AI rollup card (#20), per-account filter pills +
-   inception-date input on the Brokerage chart, smooth bezier curve.
+   **AI rollup card** under the Spending sub-tab — POST `/insights`
+   triggers, polls 1.5s, parses tagged lines (WIN/WATCH/TREND/TIP)
+   into colour-bordered cards with cascade animation.
+   *Deferred:* per-account filter pills + inception-date input on
+   the Brokerage chart, smooth bezier curve.
 10. **Settings** — All 6 cards (Billing cycle, Spending projection,
-    Credit-card bills, Categories CRUD, AI engine stub, Splitwise
-    stub).
+    Credit-card bills, Categories CRUD, **AI engine** (full /llm/*
+    wiring: 3-mode provider segment, local catalog with download
+    progress + DictaLM 2.0 Hebrew model, Ollama/API forms with
+    Test+Save, Categorize-all panel), Splitwise stub).
 
 ## What's left
 
-- **#4 Voucher sync flows** — Shufersal, BuyMe, HTZone modal +
-  polling. Three providers each with start / OTP / status / cancel
-  endpoints; the biggest single remaining chunk.
-- **#20 Insights AI rollup** — narrative summary card via
-  `POST /insights` + `GET /insights` polling.
+- **#4 Voucher sync flows** — *DONE.* All three providers (Shufersal /
+  BuyMe / HTZone) land with credential persistence, per-card
+  ↻ Sync button, and an identity-checked cookie profile.
 - **#30 SnapTrade portal flow** — OAuth + portal handoff for IBKR.
 - **#31 Pension flows (5 variants)** — Migdal/Harel/Clal automated,
   Meitav/Menora visible-window sign-in, Altshuler manual.
 - Smaller polish: per-account filter pills + inception-date input
   on the Brokerage chart; smooth bezier curve in `ValueChart` (it's
-  a polyline today); AI engine card body in Settings (`/llm/*`);
-  Splitwise card body in Settings + the Activity sidebar's
-  Splitwise section (`/splitwise/*`); `expectedFixedThisCycle` for
+  a polyline today); Splitwise card body in Settings + the Activity
+  sidebar's Splitwise section (`/splitwise/*`); `expectedFixedThisCycle` for
   the Overview projection (lift `detectMerchants` out of
   `recurring/RecurringView.tsx` and feed it into `/budget`).
 
@@ -303,8 +318,8 @@ These bit prior sessions:
 ## Tests + Superpowers usage
 
 - `cd sidecar && npm test` runs the 41 backend tests (Vitest).
-- `cd web && npm test` runs the React component tests (**267** as
-  of the Brokerage-depth commit).
+- `cd web && npm test` runs the React component tests (**292** as
+  of the loan-detection commit).
 - `cd web && npm run typecheck` runs `tsc -b --noEmit`.
 - Use `/test-driven-development` for each new component: write the
   test first, watch it fail, write minimal code to pass.
