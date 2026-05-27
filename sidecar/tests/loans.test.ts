@@ -201,3 +201,48 @@ describe('upsertBankLoan — backfill matcher', () => {
     expect(repo.listLoanPayments(loan.id)).toHaveLength(0);
   });
 });
+
+describe('per-account sync — matcher', () => {
+  it('tags freshly-inserted matching transactions with the loan id', () => {
+    const repo = freshRepo();
+    const conn = repo.createConnection('beinleumi', 'Beinleumi');
+    // Loan exists first.
+    const loan = repo.upsertBankLoan(conn.id, {
+      name: 'משכנתא',
+      principal: 100_000,
+      startDate: '2024-01-01',
+      termMonths: 120,
+      isPrime: false,
+      isCpiLinked: false,
+      rateValue: 0.04,
+      currency: 'ILS',
+      externalId: '12345678',
+    });
+    // Now an account + a fresh transaction land via the sync path.
+    repo.saveScrapeResult(conn.id, [
+      {
+        accountNumber: '1-2-3',
+        label: 'Checking',
+        balance: 1000,
+        currency: 'ILS',
+        transactions: [
+          {
+            externalId: 'txn-new',
+            date: new Date().toISOString().slice(0, 10),
+            processedDate: null,
+            amount: -1747.17,
+            currency: 'ILS',
+            description: 'הלואה-תשלום 12345678',
+            memo: null,
+            kind: null,
+            status: null,
+            raw: null,
+          },
+        ],
+      },
+    ]);
+    const payments = repo.listLoanPayments(loan.id);
+    expect(payments).toHaveLength(1);
+    expect(payments[0]!.externalId).toBe('txn-new');
+  });
+});

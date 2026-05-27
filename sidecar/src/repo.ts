@@ -772,6 +772,16 @@ export class Repo {
          units = excluded.units, price = excluded.price,
          value = excluded.value, currency = excluded.currency`,
     );
+    // Loan-matcher helpers — hoisted out of the per-transaction loop so
+    // SQLite only compiles these statements once per scrape, not once per txn.
+    const selectTxnLoanId = this.db.prepare<[string, string]>(
+      'SELECT id, loan_id FROM transactions WHERE account_id = ? AND external_id = ?',
+    );
+    const updateTxnLoanId = this.db.prepare<[string, string]>(
+      'UPDATE transactions SET loan_id = ? WHERE id = ?',
+    );
+    // Compute the loans for this connection once; the inner loop is pure.
+    const loansForConn = this.listLoans().filter((l) => l.connectionId === connectionId);
 
     let txnCount = 0;
     const now = new Date().toISOString();
@@ -869,6 +879,24 @@ export class Repo {
             createdAt: now,
           });
           txnCount += 1;
+
+          // Auto-link bank-loan payments. loansForConn is computed once
+          // above; the matcher is pure. Skip rows that already carry a
+          // loan_id so a user's manual link isn't clobbered on re-sync.
+          if (loansForConn.length > 0) {
+            const dbTxn = selectTxnLoanId.get(row.id, txn.externalId) as
+              | { id: string; loan_id: string | null }
+              | undefined;
+            if (dbTxn && !dbTxn.loan_id) {
+              const match = matchPaymentToLoan(
+                { description: txn.description, amount: txn.amount },
+                loansForConn,
+              );
+              if (match) {
+                updateTxnLoanId.run(match, dbTxn.id);
+              }
+            }
+          }
         }
 
         // Cancellation sweep: a pending row that was here before but isn't in
