@@ -1,6 +1,11 @@
 # HANDOFF.md — Hon (React migration + loan auto-link)
 
 > **Read this first.** Rolling bridge between Claude Code sessions.
+>
+> **Then read [PROJECT-RULES.md](PROJECT-RULES.md)** — durable
+> behavioral rules (no `preview_start`, visual-verification workflow
+> via chrome-devtools MCP, branch/push policy, workflow discipline,
+> Hon-specific gotchas). Non-negotiable before touching code.
 
 ## TL;DR — state of the world
 
