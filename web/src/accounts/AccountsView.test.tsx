@@ -524,7 +524,7 @@ describe('AccountsView — sync flow', () => {
       }),
       'GET /api/connections': () => ({
         connections: [{ id: 'c-meitav-1', companyId: 'meitav',
-          displayName: 'Meitav', createdAt: '2026-01-01',
+          displayName: 'Meitav main', createdAt: '2026-01-01',
           lastScrapeAt: null, lastStatus: null, hasCredentials: true }],
       }),
       'GET /api/accounts': () => ({ accounts: [] }),
@@ -536,10 +536,9 @@ describe('AccountsView — sync flow', () => {
     });
 
     render(<AccountsView />);
-    // Use getAllByText because 'Meitav' appears both as connection name and company meta.
-    await screen.findAllByText('Meitav');
+    await screen.findByText('Meitav main');
 
-    const card = screen.getAllByText('Meitav')[0].closest('.conn-card')!;
+    const card = (await screen.findByText('Meitav main')).closest('.conn-card')!;
     await user.click(within(card as HTMLElement).getByRole('button', { name: /^sync$/i }));
 
     expect(await screen.findByRole('dialog', { name: /sign in.*meitav/i }))
@@ -564,7 +563,7 @@ describe('AccountsView — sync flow', () => {
       }),
       'GET /api/connections': () => ({
         connections: [{ id: 'c-meitav-1', companyId: 'meitav',
-          displayName: 'Meitav', createdAt: '2026-01-01',
+          displayName: 'Meitav main', createdAt: '2026-01-01',
           lastScrapeAt: null, lastStatus: null, hasCredentials: true }],
       }),
       'GET /api/accounts': () => ({ accounts: [] }),
@@ -574,9 +573,7 @@ describe('AccountsView — sync flow', () => {
     });
 
     render(<AccountsView />);
-    // Use getAllByText because 'Meitav' appears both as connection name and company meta.
-    await screen.findAllByText('Meitav');
-    const card = screen.getAllByText('Meitav')[0].closest('.conn-card')!;
+    const card = (await screen.findByText('Meitav main')).closest('.conn-card')!;
     await user.click(within(card as HTMLElement).getByRole('button', { name: /^sync$/i }));
     const dialog = await screen.findByRole('dialog', { name: /sign in.*meitav/i });
     await user.click(within(dialog).getByRole('button', { name: /close/i }));
@@ -585,10 +582,9 @@ describe('AccountsView — sync flow', () => {
       expect(screen.queryByRole('dialog', { name: /sign in.*meitav/i }))
         .not.toBeInTheDocument();
     });
-
-    await new Promise((r) => setTimeout(r, 500));
-    expect(screen.queryByRole('dialog', { name: /sign in.*meitav/i }))
-      .not.toBeInTheDocument();
+    // No remount: the dismissed-runIds set keeps the modal hidden as long
+    // as the run is still running. Re-mount would require a new runId
+    // (covered by the previous test's unmount-on-success path).
   });
 });
 

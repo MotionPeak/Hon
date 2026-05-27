@@ -247,6 +247,8 @@ export function AccountsView() {
         );
       } else if (run.status === 'success') {
         setSyncForConnection(connectionId, { kind: 'idle' });
+        // Cleared before refresh() flushes — both setters batch together
+        // before the await, so the dismissed entry never outlives the run.
         setDismissedInteractiveRunIds((prev) => {
           if (!prev.has(runId)) return prev;
           const next = new Set(prev);
