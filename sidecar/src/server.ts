@@ -12,7 +12,14 @@ import {
   scrapeHitechZoneBalance,
 } from './voucherScrapers.js';
 import { companyCatalog, isSupportedCompany } from './scrapers.js';
-import { createPortalLink, listBrokerages, describeSnapError } from './snaptrade.js';
+import {
+  createPortalLink,
+  listBrokerages,
+  describeSnapError,
+  countConnections,
+  getStoredUser,
+  makeClient,
+} from './snaptrade.js';
 import { migrateLegacySnapTradeUsers } from './snaptradeUser.js';
 import {
   verifyKey,
@@ -401,6 +408,36 @@ app.get('/snaptrade/done', async (_req, reply) =>
   <p>Your brokerage is linked. You can close this tab and return to Hon,
   then press Sync.</p>
 </div></body></html>`));
+
+// Read-only check of how many brokerages the SnapTrade user currently has
+// linked. Used by the Link-a-brokerage flow to poll for completion without
+// the side effect of minting a new portal URL (which loginSnapTradeUser
+// does on every call). Safe to poll every few seconds.
+app.get('/snaptrade/connections/:connectionId/count', async (req, reply) => {
+  const { connectionId } = req.params as { connectionId: string };
+  if (!vault?.unlocked) {
+    return reply.code(409).send({ error: 'the credential vault is locked' });
+  }
+  const credentials = vault.loadCredentials(connectionId);
+  if (!credentials || typeof credentials !== 'object') {
+    return reply.code(400).send({ error: 'credentials are required' });
+  }
+  try {
+    const snaptrade = makeClient(credentials);
+    const stored = getStoredUser(credentials, vault);
+    if (!stored) {
+      // No persisted SnapTrade user yet — the user hasn't opened the
+      // portal even once. Count is trivially 0; polling caller sees no
+      // increase and waits until baseline is set by a /snaptrade/portal
+      // call.
+      return { count: 0 };
+    }
+    const count = await countConnections(snaptrade, stored.userId, stored.userSecret);
+    return { count };
+  } catch (err) {
+    return reply.code(400).send({ error: describeSnapError(err) });
+  }
+});
 
 app.get('/accounts', async (_req, reply) => {
   if (!repo) return reply.code(503).send({ error: 'database unavailable' });
