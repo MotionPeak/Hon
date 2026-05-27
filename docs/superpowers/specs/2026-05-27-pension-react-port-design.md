@@ -105,11 +105,11 @@ type PickerStep =
 
 - Pension tile loses `comingSoon: true`; click handler in `renderCategoryStep` adds a branch for `tile.key === 'pension'` → `setStep({ kind: 'pension' })`.
 - `PensionPickerStep` callbacks:
-  - `onPickProvider(company)` → `onPickCompany(company)` (existing parent prop — closes picker, parent opens `AddConnectionForm` exactly as for banks).
-  - `onPickCustom()` → `onPickManualAsset()` with a new `initialKind: 'pension'` arg (parent's `onPickManualAsset` will pass that through to `AddManualAssetForm`'s new `initialKind` prop).
+  - `onPickProvider(company)` → calls the existing `onPickCompany(company)` picker prop — closes picker, parent's `AddConnectionForm` opens (exactly the bank/card path).
+  - `onPickCustom()` → calls a new `onPickManualPension()` picker prop. Parent maps it to `setAddFlow('manual-pension')`. AccountsView renders `<AddManualAssetForm initialKind='pension' …/>` for that AddFlow value.
   - `onBack()` → `setStep({ kind: 'category' })`.
-- **No `institution-credentials` or `manual-pension` step variants needed** — the picker closes and the parent's existing credentials/manual-asset flows take over.
-- **`onPickManualAsset` signature change:** add optional `initialKind?: string` arg, propagated to `AddManualAssetForm`. Existing call sites pass nothing → defaults to `'cash'` → unchanged behavior.
+- **`AddFlow` union extension:** add `'manual-pension'` literal alongside `'manual-asset'` / `'manual-loan'`. Keeps the existing `typeof === 'object'` check for the Company variant intact.
+- **`AddManualAssetForm` prop change:** add optional `initialKind?: string` (defaults to `'cash'`). Used by the new `'manual-pension'` branch in AccountsView.
 - **Interactive modal trigger:** the AccountsView render gains a second IIFE next to the existing OtpModal one, scanning `syncStates` for the first entry where `state.kind === 'running'` AND the corresponding connection's company has `interactive: true`. That mounts `InteractiveSignInModal`. Same single-modal-at-a-time pattern as OtpModal.
 - New local state `dismissedInteractiveModalRunIds: Set<string>` (or equivalent) so the user's "Close" click on the modal doesn't immediately re-mount it on the next poll tick. Cleared when the run terminates.
 
