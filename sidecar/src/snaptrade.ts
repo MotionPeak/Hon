@@ -51,7 +51,7 @@ export function describeSnapError(err: unknown): string {
  * from the persistent store, or migrated from legacy per-connection creds.
  * Does not register a new user.
  */
-function getStoredUser(
+export function getStoredUser(
   creds: Record<string, string>,
   vault: Vault,
 ): SnapTradeUser | null {
@@ -103,7 +103,7 @@ export interface PortalResult {
   error?: string;
 }
 
-function makeClient(creds: Record<string, string>): Snaptrade {
+export function makeClient(creds: Record<string, string>): Snaptrade {
   const clientId = (creds.clientId ?? '').trim();
   const consumerKey = (creds.consumerKey ?? '').trim();
   if (!clientId || !consumerKey) {
@@ -359,7 +359,7 @@ export async function runSnapTradeSync(
   }
 }
 
-async function countConnections(
+export async function countConnections(
   snaptrade: Snaptrade,
   userId: string,
   userSecret: string,
