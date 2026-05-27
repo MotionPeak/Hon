@@ -75,7 +75,7 @@ interface PensionPickerStepProps {
 ```ts
 interface InteractiveSignInModalProps {
   company: Company;          // for header (name + logo)
-  onCancel: () => void;      // → POST /scrape/:runId/cancel
+  onClose: () => void;       // hides modal locally; scrape continues engine-side
   hints?: ReactNode;         // per-provider hint slot
 }
 ```
@@ -88,8 +88,8 @@ interface InteractiveSignInModalProps {
 
 ### Reuses (no contract changes)
 
-- **`InstitutionCredentialsStep`** (~`AccountsView.tsx:1571`) — already generic, driven by `company.loginFields` + `company.interactive`. Pension providers' fields come straight from `PENSION_COMPANIES` on the engine.
-- **`AddManualAssetForm`** (~`AccountsView.tsx:1487`) — already branches on `kind`; `kind: 'pension'` swaps the value label to "Amount accumulated". We pass it the preset.
+- **`AddConnectionForm`** (~`AccountsView.tsx:1571`) — the existing credentials form, already generic over `company.loginFields`. **Mounted by `AccountsView` itself, not by the picker** — the picker calls `onPickCompany(c)` and the parent handles the rest. Pension providers route through the exact same path as banks/cards; nothing new to wire on the picker side beyond the `onPickCompany` callback.
+- **`AddManualAssetForm`** (~`AccountsView.tsx:1487`) — currently defaults `kind` to `'cash'` and shows the same "Value" label regardless of kind. **Extension needed:** add an optional `initialKind?: string` prop (defaults to `'cash'`) so the picker can preset `'pension'`. The legacy SPA's "Amount accumulated" label tweak per kind is not currently implemented in this React form — out of scope for the first cut (label stays "Value"; the form still creates an asset with `kind: 'pension'`, which is what dashboard rendering keys off).
 - **`OtpSheet`** — covers any `needs-otp` from the engine. Pension scrapes that emit `needs-otp` get the existing path for free.
 
 ### `AccountsView.tsx` edits
@@ -100,27 +100,27 @@ type PickerStep =
   | { kind: 'institution'; category: 'bank' | 'card' }
   | { kind: 'pension' }                                    // NEW
   | { kind: 'snaptrade-credentials' }
-  | { kind: 'snaptrade-brokerages'; connectionId: string }
-  | { kind: 'institution-credentials'; company: Company }
-  | { kind: 'manual-pension' };                            // NEW
+  | { kind: 'snaptrade-brokerages'; connectionId: string };
 ```
 
-- Pension tile loses `comingSoon: true`; click sets `{ kind: 'pension' }`.
+- Pension tile loses `comingSoon: true`; click handler in `renderCategoryStep` adds a branch for `tile.key === 'pension'` → `setStep({ kind: 'pension' })`.
 - `PensionPickerStep` callbacks:
-  - `onPickProvider(company)` → `setStep({ kind: 'institution-credentials', company })`
-  - `onPickCustom()` → `setStep({ kind: 'manual-pension' })`
-- New local state `interactiveModalForConnectionId: string | null`.
-  - Sync starter sets it when `company.interactive`.
-  - Poll loop unsets it when status leaves `running`.
+  - `onPickProvider(company)` → `onPickCompany(company)` (existing parent prop — closes picker, parent opens `AddConnectionForm` exactly as for banks).
+  - `onPickCustom()` → `onPickManualAsset()` with a new `initialKind: 'pension'` arg (parent's `onPickManualAsset` will pass that through to `AddManualAssetForm`'s new `initialKind` prop).
+  - `onBack()` → `setStep({ kind: 'category' })`.
+- **No `institution-credentials` or `manual-pension` step variants needed** — the picker closes and the parent's existing credentials/manual-asset flows take over.
+- **`onPickManualAsset` signature change:** add optional `initialKind?: string` arg, propagated to `AddManualAssetForm`. Existing call sites pass nothing → defaults to `'cash'` → unchanged behavior.
+- **Interactive modal trigger:** the AccountsView render gains a second IIFE next to the existing OtpModal one, scanning `syncStates` for the first entry where `state.kind === 'running'` AND the corresponding connection's company has `interactive: true`. That mounts `InteractiveSignInModal`. Same single-modal-at-a-time pattern as OtpModal.
+- New local state `dismissedInteractiveModalRunIds: Set<string>` (or equivalent) so the user's "Close" click on the modal doesn't immediately re-mount it on the next poll tick. Cleared when the run terminates.
 
 ## Data flow & state ownership
 
 | State | Owner | Why here |
 |---|---|---|
-| `PickerStep` | `AddConnectionPicker` local `useState` | Picker concern only; pension adds two variants. |
+| `PickerStep` | `AddConnectionPicker` local `useState` | Picker concern only; pension adds one variant (`{ kind: 'pension' }`). |
 | `companies`, `connections` | `AccountsView` (already fetched) | Pension providers are part of the same companies list — no new fetch. |
 | `syncStateByConnection` (run status) | `AccountsView` map (existing) | Existing poll loop covers pension runs unchanged. |
-| `interactiveModalForConnectionId` | `AccountsView` (NEW local state) | Co-located with sync state so modal lifecycle tracks poll updates. |
+| `dismissedInteractiveRunIds: Set<string>` | `AccountsView` (NEW local state) | Tracks runIds the user dismissed so the modal doesn't re-mount on the next poll tick. Cleared when a run terminates. Modal-render decision is derived: `state.kind === 'running' && company.interactive && !dismissedInteractiveRunIds.has(runId)`. |
 | Vault unlock | `AccountsView` global (existing) | Pension scrapes require unlocked vault — same path as banks. |
 
 **Customization seam:** modal trigger is a single `string | null` — straightforward to evolve into a richer shape later without touching call sites.
@@ -131,38 +131,46 @@ type PickerStep =
 
 ```
 Click pension tile → setStep({ kind: 'pension' })
-PensionPickerStep → click provider →
-  setStep({ kind: 'institution-credentials', company })
-InstitutionCredentialsStep → fill loginFields → POST /connections (existing)
-  → refresh connections → close picker → toast "Connected."
+PensionPickerStep → click provider → onPickCompany(company)
+  → picker closes → parent opens AddConnectionForm (existing)
+AddConnectionForm → fill loginFields → POST /connections (existing)
+  → refresh connections → close form → toast (existing path).
 ```
 
 **First sync on an interactive fund (Meitav/Menora):**
 
 ```
-Click Sync → POST /connections/:id/scrape (existing) → { runId }
-  → syncState = { kind: 'running', runId }
-  → company.interactive === true → interactiveModalForConnectionId = id
-Poll /scrape/:runId every ~1.5s (existing)
+Click Sync → existing startSync(connection) → POST /connections/:id/scrape → { runId }
+  → syncState[connectionId] = { kind: 'starting' }
+Poll /scrape/:runId (existing pollRun) → syncState = { kind: 'running', runId }
+  → AccountsView render detects: state.kind === 'running'
+                              && company.interactive === true
+                              && !dismissedInteractiveRunIds.has(runId)
+  → mounts <InteractiveSignInModal company={...} onClose={...} />
   → engine pops OS Chrome window (OS-side, not in our DOM)
   → status stays 'running' while user signs in there
-  → InteractiveSignInModal stays open
 User completes sign-in → engine finishes → next poll returns 'success'
-  → syncState transitions → interactiveModalForConnectionId = null
-  → modal unmounts → card shows fresh balances
+  → existing path: setSyncForConnection(id, { kind: 'idle' }) + refresh()
+  → render condition no longer true → modal unmounts
+  → card shows fresh balances
 
-Cancel button → POST /scrape/:runId/cancel (existing)
-  → poll terminates → modal unmounts
+Close button → adds runId to dismissedInteractiveRunIds
+  → render condition no longer true → modal unmounts
+  → engine scrape continues; card still shows 'running' pill until poll terminates
+  → on terminal status (success/error) the runId is removed from the dismissed set
 ```
 
 **Custom pension:**
 
 ```
-Click "Custom pension account" → setStep({ kind: 'manual-pension' })
-AddManualAssetForm preset { kind: 'pension' }
-  → fill name + amount → POST /assets (existing)
-  → refresh assets → close picker → toast "Pension added."
+Click "Custom pension account" → onPickManualAsset('pension')
+  → picker closes → parent opens AddManualAssetForm with initialKind='pension'
+AddManualAssetForm (pension preselected in the Kind dropdown)
+  → fill name + value → POST /assets (existing)
+  → refresh assets → close form → existing path.
 ```
+
+`AddManualAssetForm` gets an optional `initialKind?: string` prop (defaults to `'cash'`). The picker passes `'pension'`; user can still change the Kind dropdown if they hit the wrong row. The legacy SPA's "Amount accumulated" label tweak per kind is deferred (called out in non-goals).
 
 ### Non-changes
 
@@ -188,7 +196,7 @@ AddManualAssetForm preset { kind: 'pension' }
 | Chrome window can't launch | Engine: `errorType: 'browser-launch'` | Modal closes; card red pill: "Couldn't open browser window." + "Show what happened" |
 | User closes window without signing in | Engine: `INTERACTIVE_TIMEOUT_MS` exceeded → `errorType: 'login-timeout'` | Modal closes; card pill: "Sign-in window was closed. Try again." |
 | Portal layout shifted (selectors miss) | Engine: error + HTML dump to `<dataDir>/debug/<companyId>-otp.html` | Modal closes; card pill: "Couldn't read the portal." + "Show what happened" |
-| User clicks Cancel in modal | `POST /scrape/:runId/cancel` | Modal closes optimistically; poll → `error: cancelled`; neutral card pill "Sync cancelled." |
+| User clicks Close in modal | Local state clears `interactiveModalForConnectionId` | Modal unmounts; scrape continues engine-side; card still shows `running` pill until the scrape terminates (success / error / engine timeout). If the user also closes the OS Chrome window, the engine's interactive-timeout will surface as `error` on the next poll tick. |
 | Network blip between poll ticks | Existing retry/backoff | Modal stays open during transient; only closes on terminal status |
 
 ### Sync-time (automatic funds)
@@ -233,7 +241,7 @@ Same path as bank scrapes. No new handling. If engine emits `needs-otp`, the exi
 
 - **Replace** the assertion that the pension tile is disabled with: clicking it advances to `PensionPickerStep`.
 - **New:** clicking Sync on an interactive pension connection mounts `InteractiveSignInModal`; mocked poll → `success` unmounts it.
-- **New:** clicking Cancel in the modal POSTs `/scrape/:runId/cancel`.
+- **New:** clicking Close in the modal hides it locally without posting anything; the connection's sync state stays `running` until the next poll tick resolves.
 - **New:** custom-pension row → `AddManualAssetForm` mounts with `kind='pension'` preset; submit posts to `/assets`.
 - **Keep** the existing "Harel pension renders in Pension section" test as-is (already passes).
 
@@ -251,7 +259,7 @@ After tests pass, before claiming done:
 4. Walk three paths, screenshot each:
    - **Path A (auto):** Assets → Add → Pension tile → picker shows providers + custom row → click Migdal → credential step renders one row per `loginFields` entry.
    - **Path B (interactive):** Pension tile → click Meitav → credential step shows interactive-fund copy.
-   - **Path C (custom):** Pension tile → "Custom pension account" → `AddManualAssetForm` renders with "Amount accumulated" label.
+   - **Path C (custom):** Pension tile → "Custom pension account" → `AddManualAssetForm` renders with the Kind dropdown preselected to "Pension".
 5. `mcp__chrome-devtools__take_screenshot` → `Read` each PNG → confirm with own eyes.
 6. If anything off: debug via `evaluate_script` (don't guess at CSS).
 
