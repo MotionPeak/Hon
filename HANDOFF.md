@@ -51,10 +51,19 @@
   npm test` → **55** passing. Both typechecks clean.
 - **Most recent commit:** `dd5cfd7 web: brokerage drilldown — inline
   credentials gate + brokerage list`. All pushed to origin/main.
-- **Manual smoke pending:** the full SnapTrade portal flow has been
-  visually verified through to the brokerage picker but the final
-  step (actually linking a real brokerage via the SnapTrade portal)
-  hasn't been smoked end-to-end. Do that first thing next session.
+- **SnapTrade portal flow smoke-verified end-to-end (2026-05-27,
+  session/snaptrade-smoke-2026-05-27).** The smoke surfaced a design
+  gap: re-linking an already-linked broker (IBKR refreshed via
+  SnapTrade Flex) leaves connectionCount equal to baseline, so the
+  poll's `count > baseline` check never fired. Fix shipped on the
+  same branch: server-side done-flag registry keyed by Hon
+  connectionId, set by `/snaptrade/done` (now reads `honConn` from
+  the customRedirect query), surfaced by `/count` as `done: boolean`.
+  Polling hook treats either `count > baseline` OR `done === true`
+  as success. DonePanel copy switches to "<Broker> connection
+  refreshed." when accountsAdded is 0. `/snaptrade/done` HTML copy
+  also fixed (used to say "press Sync", contradicting the auto-sync
+  design).
 - **What's left:** see § "Deferred items". Nothing blocks shipping;
   each is its own follow-up.
 
