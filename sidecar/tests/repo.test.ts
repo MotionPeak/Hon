@@ -24,6 +24,7 @@ describe('Connection.historyMonths', () => {
     const { repo } = makeRepo();
     repo.createConnection('hapoalim', 'Hapoalim');
     const all = repo.listConnections();
+    expect(all).toHaveLength(1);
     expect(all.every((c) => c.historyMonths === 12)).toBe(true);
   });
 });

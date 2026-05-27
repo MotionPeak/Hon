@@ -21,7 +21,12 @@ export interface Connection {
   lastScrapeAt: string | null;
   lastStatus: string | null;
   hasCredentials: boolean;
-  /** Months of transaction history to fetch each sync. Default 12; range [1, 24]. */
+  /**
+   * Months of transaction history to fetch each sync. Default 12.
+   * Range [1, 24] is enforced at the API + repo layer (see
+   * server.ts PATCH /history-months and repo.setConnectionHistoryMonths);
+   * no DB CHECK constraint.
+   */
   historyMonths: number;
 }
 
