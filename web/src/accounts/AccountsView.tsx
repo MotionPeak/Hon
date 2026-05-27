@@ -622,7 +622,10 @@ function ConnectionCard({ connection, company, accounts, callbacks }: Connection
     <article className="conn-card">
       <header className="conn-head">
         <div className="conn-title-row">
-          <div className="conn-title">{connection.displayName}</div>
+          <div className="conn-title-main">
+            {company && <CompanyLogo company={company} />}
+            <div className="conn-title">{connection.displayName}</div>
+          </div>
           <div className="conn-buttons">
             {!connection.hasCredentials && (
               <button
