@@ -7,6 +7,7 @@ import type {
 } from './types';
 import { DelayedLoader } from '../ui/DelayedLoader';
 import { SnapTradeBrokeragePicker } from './SnapTradeBrokeragePicker';
+import { PensionPickerStep } from './PensionPickerStep';
 
 const SnapTradeLinkFlow = lazy(() =>
   import('./SnapTradeLinkFlow').then((m) => ({ default: m.SnapTradeLinkFlow })),
@@ -134,7 +135,7 @@ export function AccountsView() {
   //   Company         — credential form for a bank/card provider
   //   'manual-asset'  — form for a hand-entered asset (car/property/cash/…)
   //   'manual-loan'   — form for a hand-entered loan (Spitzer amortisation)
-  type AddFlow = null | 'picker' | 'manual-asset' | 'manual-loan' | Company;
+  type AddFlow = null | 'picker' | 'manual-asset' | 'manual-loan' | 'manual-pension' | Company;
   const [addFlow, setAddFlow] = useState<AddFlow>(null);
   // When set, render <SnapTradeLinkFlow> in its own modal portal. Holds the
   // connectionId of the newly-created (or existing) SnapTrade connection,
@@ -434,6 +435,7 @@ export function AccountsView() {
           onPickCompany={(c) => setAddFlow(c)}
           onPickManualAsset={() => setAddFlow('manual-asset')}
           onPickManualLoan={() => setAddFlow('manual-loan')}
+          onPickManualPension={() => setAddFlow('manual-pension')}
           onPickBrokerage={(connectionId, brokerSlug, brokerName) => {
             setAddFlow(null);
             setLinkSnapTradeFor({ connectionId, brokerSlug, brokerName });
@@ -449,6 +451,13 @@ export function AccountsView() {
       )}
       {addFlow === 'manual-loan' && (
         <AddManualLoanForm
+          onClose={() => setAddFlow(null)}
+          onSaved={async () => { setAddFlow(null); await refresh(); }}
+        />
+      )}
+      {addFlow === 'manual-pension' && (
+        <AddManualAssetForm
+          initialKind="pension"
           onClose={() => setAddFlow(null)}
           onSaved={async () => { setAddFlow(null); await refresh(); }}
         />
@@ -1159,6 +1168,10 @@ interface AddConnectionPickerProps {
   onPickCompany: (company: Company) => void;
   onPickManualAsset: () => void;
   onPickManualLoan: () => void;
+  /** Picker's "Custom pension account" row routes here. Parent maps it to
+   *  setAddFlow('manual-pension'), which renders <AddManualAssetForm
+   *  initialKind='pension' …/>. */
+  onPickManualPension: () => void;
   /** Fired when the user picks a brokerage in the inline brokerage list.
    *  The parent closes the picker and opens SnapTradeLinkFlow with the
    *  broker pre-selected. */
@@ -1190,7 +1203,7 @@ const PICKER_TILES: CategoryTile[] = [
   { key: 'car', label: 'Car', emoji: '🚗', subOverride: 'looked up by plate',
     comingSoon: true },
   { key: 'pension', label: 'Pension & savings', emoji: '🪺',
-    subOverride: 'pension, gemel & study fund', comingSoon: true },
+    subOverride: 'pension, gemel & study fund' },
   { key: 'loan', label: 'Loan', emoji: '📉', leaf: 'manual-loan',
     subOverride: 'mortgage, car loan, prime / CPI-linked' },
   { key: 'asset', label: 'Other asset', emoji: '💎', leaf: 'manual-asset',
@@ -1200,12 +1213,13 @@ const PICKER_TILES: CategoryTile[] = [
 type PickerStep =
   | { kind: 'category' }
   | { kind: 'institution'; category: 'bank' | 'card' }
+  | { kind: 'pension' }
   | { kind: 'snaptrade-credentials' }
   | { kind: 'snaptrade-brokerages'; connectionId: string };
 
 function AddConnectionPicker(
   { companies, connections, onPickCompany, onPickManualAsset, onPickManualLoan,
-    onPickBrokerage, onClose }:
+    onPickManualPension, onPickBrokerage, onClose }:
     AddConnectionPickerProps,
 ) {
   const [step, setStep] = useState<PickerStep>({ kind: 'category' });
@@ -1234,6 +1248,7 @@ function AddConnectionPicker(
           const onClick = () => {
             if (tile.leaf === 'manual-asset') { onPickManualAsset(); return; }
             if (tile.leaf === 'manual-loan')  { onPickManualLoan();  return; }
+            if (tile.key === 'pension') { setStep({ kind: 'pension' }); return; }
             if (tile.key === 'brokerage') { openBrokerageStep(); return; }
             if (tile.key === 'bank' || tile.key === 'card') {
               setStep({ kind: 'institution', category: tile.key });
@@ -1297,6 +1312,16 @@ function AddConnectionPicker(
   const renderStep = () => {
     if (step.kind === 'category') return renderCategoryStep();
     if (step.kind === 'institution') return renderInstitutionStep();
+    if (step.kind === 'pension') {
+      return (
+        <PensionPickerStep
+          companies={companies}
+          onPickCompany={(c) => onPickCompany(c)}
+          onPickCustom={() => onPickManualPension()}
+          onBack={() => setStep({ kind: 'category' })}
+        />
+      );
+    }
     if (step.kind === 'snaptrade-credentials') {
       if (!snapTradeCompany) {
         return (

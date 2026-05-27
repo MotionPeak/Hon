@@ -620,20 +620,30 @@ describe('AccountsView — add connection (picker + bank/card form)', () => {
     expect(within(dialog).getByRole('button', { name: /other asset/i })).toBeInTheDocument();
   });
 
-  it('the brokerage drilldown shows SnapTrade; Pension and Car tiles render disabled (flows live in legacy)', async () => {
+  it('the brokerage drilldown shows SnapTrade; Car tile renders disabled (flow lives in legacy)', async () => {
     const user = userEvent.setup();
     installFetchMock({ ...FULL, 'GET /api/companies': () => COMPANIES_FULL });
     render(<AccountsView />);
     await user.click(await screen.findByRole('button', { name: /add asset/i }));
     const dialog = screen.getByRole('dialog', { name: /add an asset/i });
-    // Pension + Car tiles are visible but disabled until their flows are ported.
-    const pension = within(dialog).getByRole('button', { name: /pension/i });
-    const car = within(dialog).getByRole('button', { name: /^car/i });
-    expect(pension).toBeDisabled();
+    const car = within(dialog).getByRole('button', { name: /^car$/i });
     expect(car).toBeDisabled();
-    // Drill into Brokerages → SnapTrade row appears.
     await user.click(within(dialog).getByRole('button', { name: /brokerages/i }));
     expect(within(dialog).getByText(/SnapTrade/i)).toBeInTheDocument();
+  });
+
+  it('clicking the Pension tile opens the PensionPickerStep with providers and a custom row', async () => {
+    const user = userEvent.setup();
+    installFetchMock({ ...FULL, 'GET /api/companies': () => COMPANIES_FULL });
+    render(<AccountsView />);
+    await user.click(await screen.findByRole('button', { name: /add asset/i }));
+    const dialog = screen.getByRole('dialog', { name: /add an asset/i });
+    const pension = within(dialog).getByRole('button', { name: /pension/i });
+    expect(pension).not.toBeDisabled();
+    await user.click(pension);
+    expect(within(dialog).getByRole('button', { name: /harel/i })).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: /custom pension account/i })).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: /all categories/i })).toBeInTheDocument();
   });
 
   it('drilling into Banks shows the bank list and a back button', async () => {
@@ -818,6 +828,19 @@ describe('AccountsView — add connection (picker + bank/card form)', () => {
     });
     await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
   });
+
+  it('the "Custom pension account" row routes to AddManualAssetForm with kind=pension preselected', async () => {
+    const user = userEvent.setup();
+    installFetchMock({ ...FULL, 'GET /api/companies': () => COMPANIES_FULL });
+    render(<AccountsView />);
+    await user.click(await screen.findByRole('button', { name: /add asset/i }));
+    const dialog = screen.getByRole('dialog', { name: /add an asset/i });
+    await user.click(within(dialog).getByRole('button', { name: /pension/i }));
+    await user.click(within(dialog).getByRole('button', { name: /custom pension account/i }));
+    const assetDialog = await screen.findByRole('dialog', { name: /add a manual asset/i });
+    const kind = within(assetDialog).getByLabelText(/kind/i) as HTMLSelectElement;
+    expect(kind.value).toBe('pension');
+  });
 });
 
 describe('AccountsView — asset edit + remove', () => {
@@ -987,3 +1010,4 @@ describe('AddManualAssetForm — initialKind prop', () => {
     expect(kind.value).toBe('pension');
   });
 });
+
