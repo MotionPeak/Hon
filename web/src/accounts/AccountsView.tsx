@@ -291,8 +291,8 @@ export function AccountsView() {
     }
   }, [refresh, setSyncForConnection]);
 
-  const startSync = useCallback(async (connection: Connection) => {
-    setSyncForConnection(connection.id, { kind: 'starting' });
+  const startSync = useCallback(async (connectionId: string) => {
+    setSyncForConnection(connectionId, { kind: 'starting' });
     try {
       // interactive=true picks the engine's runInteractiveScrape path,
       // which wires the OTP watcher for the banks in
@@ -301,14 +301,14 @@ export function AccountsView() {
       // LOGGING_IN when the bank shows its 2FA page.
       // Engine picks the per-connection historyMonths default.
       const { runId } = await api<{ runId: string }>(
-        `/connections/${encodeURIComponent(connection.id)}/scrape`,
+        `/connections/${encodeURIComponent(connectionId)}/scrape`,
         'POST',
         { interactive: true },
       );
-      setSyncForConnection(connection.id, { kind: 'running', runId, message: 'Starting…' });
-      void pollRun(connection.id, runId);
+      setSyncForConnection(connectionId, { kind: 'running', runId, message: 'Starting…' });
+      void pollRun(connectionId, runId);
     } catch (e) {
-      setSyncForConnection(connection.id, {
+      setSyncForConnection(connectionId, {
         kind: 'error',
         message: e instanceof ApiError ? e.message : String(e),
       });
@@ -417,7 +417,7 @@ export function AccountsView() {
                   onToggleLoanExcluded: toggleLoanExcluded,
                   onRemoveConnection: setRemovingConnection,
                   onSetCredentials: setEditingCredentials,
-                  onSync: startSync,
+                  onSync: (c) => startSync(c.id),
                   onSetHistoryMonths: setHistoryMonths,
                   onToggleHoldings: toggleHoldings,
                   onEditAsset: setEditingAsset,
@@ -538,7 +538,15 @@ export function AccountsView() {
               setAddFlow(null);
               setLinkSnapTradeFor({ connectionId });
             } else {
+              // Scraped connection (bank / card / pension): kick off the
+              // first sync immediately so the user doesn't have to find and
+              // press Sync after connecting. refresh() above has already
+              // put the connection into `data`, so the running-state UI
+              // (incl. the interactive sign-in modal for Meitav/Menora) can
+              // resolve it. Brokerages skip this — they sync via the
+              // SnapTrade link flow instead.
               setAddFlow(null);
+              void startSync(connectionId);
             }
           }}
         />
