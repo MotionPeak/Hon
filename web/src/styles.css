@@ -608,6 +608,18 @@ input[type="radio"], input[type="checkbox"] {
 button.mini { padding: 5px 11px; font-size: 12px; }
 .conn-sync-msg { font-size: 12px; color: var(--amber); margin-top: 6px; }
 .conn-sync-err { font-size: 12px; color: var(--red); margin-top: 6px; }
+.conn-sync-done { font-size: 12px; color: var(--green); margin-top: 6px; }
+@media (prefers-reduced-motion: reduce) { .conn-sync-done { transition: none; } }
+.conn-history-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.8rem;
+}
+.conn-history-select.mini {
+  padding: 2px 4px;
+  font: inherit;
+}
 
 /* --- Subscriptions view ----------------------------------------------- */
 .subscriptions-view { max-width: 900px; margin: 0 auto; }

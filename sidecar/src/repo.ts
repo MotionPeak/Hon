@@ -21,6 +21,13 @@ export interface Connection {
   lastScrapeAt: string | null;
   lastStatus: string | null;
   hasCredentials: boolean;
+  /**
+   * Months of transaction history to fetch each sync. Default 12.
+   * Range [1, 24] is enforced at the API + repo layer (see
+   * server.ts PATCH /history-months and repo.setConnectionHistoryMonths);
+   * no DB CHECK constraint.
+   */
+  historyMonths: number;
 }
 
 // SQLite has no boolean type, so `hasCredentials` arrives as 0 | 1.
@@ -280,7 +287,8 @@ function toSplitwiseLink(row: SplitwiseLinkRow): SplitwiseLink {
 const CONNECTION_COLS =
   'c.id, c.company_id AS companyId, c.display_name AS displayName, ' +
   'c.created_at AS createdAt, c.last_scrape_at AS lastScrapeAt, ' +
-  'c.last_status AS lastStatus, (cr.connection_id IS NOT NULL) AS hasCredentials';
+  'c.last_status AS lastStatus, c.history_months AS historyMonths, ' +
+  '(cr.connection_id IS NOT NULL) AS hasCredentials';
 
 const CONNECTION_FROM =
   'FROM connections c LEFT JOIN credentials cr ON cr.connection_id = c.id';
@@ -337,6 +345,29 @@ export class Repo {
     } else {
       this.db.prepare('UPDATE connections SET last_status = ? WHERE id = ?').run(status, id);
     }
+  }
+
+  /**
+   * Updates the per-connection history window used by sync.
+   *
+   * Validates [1, 24] (matches the API-layer clamp). Throws on out-of-range
+   * or non-integer input, and on unknown connection id, so the server
+   * route can rely on the throw to translate into a 4xx.
+   */
+  setConnectionHistoryMonths(id: string, months: number): Connection {
+    if (!Number.isInteger(months)) {
+      throw new Error(`historyMonths must be an integer, got ${months}`);
+    }
+    if (months < 1 || months > 24) {
+      throw new Error(`historyMonths out of range [1, 24]: ${months}`);
+    }
+    const result = this.db
+      .prepare('UPDATE connections SET history_months = ? WHERE id = ?')
+      .run(months, id);
+    if (result.changes === 0) {
+      throw new Error(`connection not found: ${id}`);
+    }
+    return this.getConnection(id)!;
   }
 
   // --- Accounts & transactions ---------------------------------------------

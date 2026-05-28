@@ -59,6 +59,7 @@ type SyncState =
   | { kind: 'starting' }
   | { kind: 'running'; runId: string; message: string }
   | { kind: 'needs-otp'; runId: string; message: string }
+  | { kind: 'success'; accountsCount: number; transactionsCount: number }
   | { kind: 'error'; message: string };
 
 // Modals escape stacking contexts (cards have transforms / animations that
@@ -247,9 +248,14 @@ export function AccountsView() {
           SCRAPE_POLL_INTERVAL_MS,
         );
       } else if (run.status === 'success') {
-        setSyncForConnection(connectionId, { kind: 'idle' });
-        // Cleared before refresh() flushes — both setters batch together
-        // before the await, so the dismissed entry never outlives the run.
+        setSyncForConnection(connectionId, {
+          kind: 'success',
+          accountsCount: run.accountsCount,
+          transactionsCount: run.transactionsCount,
+        });
+        // Clear any dismissed interactive-run marker for this run before
+        // refresh() flushes — both setters batch together before the await,
+        // so the dismissed entry never outlives the run.
         setDismissedInteractiveRunIds((prev) => {
           if (!prev.has(runId)) return prev;
           const next = new Set(prev);
@@ -257,6 +263,11 @@ export function AccountsView() {
           return next;
         });
         await refresh();
+        // Auto-clear after 5s. Stash the timer in pollTimers so the
+        // existing unmount-cleanup catches it.
+        pollTimers.current[connectionId] = setTimeout(() => {
+          setSyncForConnection(connectionId, { kind: 'idle' });
+        }, 5000);
       } else {
         setSyncForConnection(connectionId, { kind: 'error', message: run.message || 'Sync failed' });
         setDismissedInteractiveRunIds((prev) => {
@@ -283,18 +294,16 @@ export function AccountsView() {
   const startSync = useCallback(async (connection: Connection) => {
     setSyncForConnection(connection.id, { kind: 'starting' });
     try {
-      // Mirror the legacy app's POST body. interactive=true picks the
-      // engine's runInteractiveScrape path, which wires the OTP watcher
-      // for the banks in HON_OTP_WATCHER_COMPANIES (Beinleumi, Hapoalim,
-      // Otsar Hahayal, Massad, Pagi). Headless mode has no watcher and
-      // hangs at LOGGING_IN when the bank shows its 2FA page.
-      // monthsBack=24 matches the legacy default so initial syncs pull
-      // a sensible window even when the engine's incremental shortcut
-      // can't kick in.
+      // interactive=true picks the engine's runInteractiveScrape path,
+      // which wires the OTP watcher for the banks in
+      // HON_OTP_WATCHER_COMPANIES (Beinleumi, Hapoalim, Otsar Hahayal,
+      // Massad, Pagi). Headless mode has no watcher and hangs at
+      // LOGGING_IN when the bank shows its 2FA page.
+      // Engine picks the per-connection historyMonths default.
       const { runId } = await api<{ runId: string }>(
         `/connections/${encodeURIComponent(connection.id)}/scrape`,
         'POST',
-        { interactive: true, monthsBack: 24 },
+        { interactive: true },
       );
       setSyncForConnection(connection.id, { kind: 'running', runId, message: 'Starting…' });
       void pollRun(connection.id, runId);
@@ -305,6 +314,32 @@ export function AccountsView() {
       });
     }
   }, [pollRun, setSyncForConnection]);
+
+  const setHistoryMonths = useCallback(async (connection: Connection, months: number) => {
+    // Optimistic update.
+    const previous = connection.historyMonths;
+    setData((d) => d && ({
+      ...d,
+      connections: d.connections.map((c) =>
+        c.id === connection.id ? { ...c, historyMonths: months } : c,
+      ),
+    }));
+    try {
+      await api(
+        `/connections/${encodeURIComponent(connection.id)}/history-months`,
+        'PATCH',
+        { historyMonths: months },
+      );
+    } catch {
+      // Revert on failure.
+      setData((d) => d && ({
+        ...d,
+        connections: d.connections.map((c) =>
+          c.id === connection.id ? { ...c, historyMonths: previous } : c,
+        ),
+      }));
+    }
+  }, []);
 
   const toggleAccountExcluded = useCallback(async (a: Account, excluded: boolean) => {
     try {
@@ -383,6 +418,7 @@ export function AccountsView() {
                   onRemoveConnection: setRemovingConnection,
                   onSetCredentials: setEditingCredentials,
                   onSync: startSync,
+                  onSetHistoryMonths: setHistoryMonths,
                   onToggleHoldings: toggleHoldings,
                   onEditAsset: setEditingAsset,
                   onRemoveAsset: setRemovingAsset,
@@ -593,6 +629,7 @@ interface RowCallbacks {
   onRemoveConnection: (connection: Connection) => void;
   onSetCredentials: (connection: Connection) => void;
   onSync: (connection: Connection) => void;
+  onSetHistoryMonths: (connection: Connection, months: number) => void;
   onToggleHoldings: (accountId: string) => void;
   onEditAsset: (asset: ManualAsset) => void;
   onRemoveAsset: (asset: ManualAsset) => void;
@@ -724,6 +761,23 @@ function ConnectionCard({ connection, company, accounts, callbacks }: Connection
                 {syncing ? 'Syncing…' : 'Sync'}
               </button>
             )}
+            {connection.hasCredentials && (
+              <label className="conn-history-label">
+                <span className="conn-history-text">History</span>
+                <select
+                  className="conn-history-select mini"
+                  aria-label="History months"
+                  value={connection.historyMonths}
+                  onChange={(e) => callbacks.onSetHistoryMonths(connection, Number(e.target.value))}
+                >
+                  <option value={3}>3 mo</option>
+                  <option value={6}>6 mo</option>
+                  <option value={12}>12 mo</option>
+                  <option value={18}>18 mo</option>
+                  <option value={24}>24 mo</option>
+                </select>
+              </label>
+            )}
             <button
               type="button"
               className="mini danger"
@@ -739,6 +793,12 @@ function ConnectionCard({ connection, company, accounts, callbacks }: Connection
         )}
         {syncState.kind === 'error' && (
           <div className="conn-sync-err">{syncState.message}</div>
+        )}
+        {syncState.kind === 'success' && (
+          <div className="conn-sync-done" role="status">
+            ✓ Done — {syncState.transactionsCount} transaction
+            {syncState.transactionsCount === 1 ? '' : 's'}
+          </div>
         )}
       </header>
       <ul className="conn-accounts">

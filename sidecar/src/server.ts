@@ -296,10 +296,11 @@ app.post('/connections/:id/scrape', async (req, reply) => {
   }
   // Each scraper returns whatever history it actually holds, so asking for a
   // long window simply means "as far back as the institution allows".
+  // Per-connection default (historyMonths); body override clamped to [1, 24].
   const monthsBack =
     typeof body.monthsBack === 'number' && Number.isFinite(body.monthsBack)
       ? Math.max(1, Math.min(24, Math.round(body.monthsBack)))
-      : 12;
+      : connection.historyMonths;
 
   const runId = runner.start({
     connectionId: connection.id,
@@ -309,6 +310,27 @@ app.post('/connections/:id/scrape', async (req, reply) => {
     interactive: body.interactive === true,
   });
   return { runId };
+});
+
+app.patch('/connections/:id/history-months', async (req, reply) => {
+  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+  const { id } = req.params as { id: string };
+  const body = (req.body ?? {}) as { historyMonths?: unknown };
+
+  // 404 first so callers can distinguish "bad id" from "bad value".
+  if (!repo.getConnection(id)) {
+    return reply.code(404).send({ error: 'connection not found' });
+  }
+
+  const months = body.historyMonths;
+  if (typeof months !== 'number' || !Number.isInteger(months) || months < 1 || months > 24) {
+    return reply.code(400).send({
+      error: 'historyMonths must be an integer in [1, 24]',
+    });
+  }
+
+  const connection = repo.setConnectionHistoryMonths(id, months);
+  return { connection };
 });
 
 app.get('/scrape/:runId', async (req, reply) => {

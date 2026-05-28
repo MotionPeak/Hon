@@ -33,15 +33,24 @@
 
 ## TL;DR — state of the world (2026-05-28)
 
-- **Pension flow ported to React this session** (branch
-  `session/pension-react-port-2026-05-27`, 14 commits, NOT yet merged
-  to main). The Assets-picker Pension tile is now live: scraped
-  providers (Clal/Harel/Migdal automatic, Meitav/Menora browser-
-  window), custom manual-pension entry, and an `InteractiveSignInModal`
+- **Pension flow ported to React** (branch
+  `session/pension-react-port-2026-05-27`). The Assets-picker Pension tile is
+  now live: scraped providers (Clal/Harel/Migdal automatic, Meitav/Menora
+  browser-window), custom manual-pension entry, and an `InteractiveSignInModal`
   for the visible-window sync. All three paths visually verified via
-  chrome-devtools against the real engine. See § "What shipped this
-  session (2026-05-28)". **Car tile remains disabled** (its flow ports
-  separately).
+  chrome-devtools against the real engine. **Car tile remains disabled** (its
+  flow ports separately).
+- **Sync window + completion feedback shipped this session.** Per-connection
+  `history_months` (migration 36, default 12) now drives every sync's start
+  date; the old `lastSuccess − 14d` incremental shortcut in
+  `runner.chooseStartDate` is gone (it was the reason React-triggered syncs
+  only ended up with ~2 months of data). React: each connection card has an
+  inline **History months `<select>`** (3/6/12/18/24), and a sync now ends with
+  a **`✓ Done — N transactions`** pill that auto-clears after 5s. New route
+  `PATCH /connections/:id/history-months`. Verified live: Max synced 12 months,
+  pill rendered `✓ Done — 1116 transactions`, re-sync left the row count flat
+  (0 duplicate `(account_id, external_id)` groups — DB dedup proven).
+  Branch `session/sync-window-12mo-2026-05-27` (not yet merged at time of writing).
 - **React migration done, structurally.** All 10 tabs ship from
   `web/` at near-legacy parity. The legacy SPA at
   `sidecar/public/app.html` is still served by the engine and is the
@@ -133,7 +142,47 @@ legacy SPA's credential step did. The `InteractiveSignInModal` surfaces
 that explanation at sync time instead (the more important moment), so
 this is a deferred polish item, not a blocker.
 
-## What shipped last session (2026-05-27)
+## What shipped this session (2026-05-28) — sync window + completion pill
+
+Branch `session/sync-window-12mo-2026-05-27`. Spec + plan at
+`docs/superpowers/{specs,plans}/2026-05-27-sync-window-12mo*`.
+
+1. **Migration 36** — `connections.history_months INTEGER NOT NULL DEFAULT 12`
+   (`sidecar/src/db.ts`, `SCHEMA_VERSION = 36`).
+2. **Repo** — `Connection.historyMonths` + `CONNECTION_COLS` carry it (load-bearing,
+   same hazard as `TXN_COLS`); new `repo.setConnectionHistoryMonths(id, n)` with
+   `[1,24]` validation (throws → server translates to 4xx).
+3. **Runner** — `chooseStartDate` gutted to `return startDateMonthsAgo(monthsBack)`;
+   the `lastSuccess − 14d` shortcut and the now-unused `CARD_COMPANIES` const are
+   removed. New `persist.skipped` log line per scrape.
+4. **Server** — `POST /connections/:id/scrape` falls back to
+   `connection.historyMonths` when the body omits `monthsBack`; new
+   `PATCH /connections/:id/history-months` (404/400/200, token-gated).
+5. **React** — `Connection.historyMonths` type; `startSync` no longer sends the
+   hard-coded `monthsBack: 24` (engine picks per-connection default); new
+   `success` `SyncState` variant → `✓ Done — N transactions` pill, 5s auto-clear
+   (timer stashed in `pollTimers` for unmount cleanup); inline history-months
+   `<select>` on each conn-card (optimistic PATCH, reverts on error).
+6. **Tests** — sidecar 63 → ~71 (migration, repo getter/setter, runner); web
+   315 → ~321 (sync payload, Done pill render + 5s clear + unmount, history
+   select render/PATCH/revert). All green, both typechecks clean.
+
+### Known follow-ups from this session
+
+- **`persist.skipped` always logs `skipped=0`.** `repo.saveScrapeResult` counts
+  upserted rows as "saved", so `fetched − saved` is always 0. The real dedup is
+  proven (re-sync leaves row count flat, 0 dup `(account_id, external_id)`), but
+  the metric is cosmetic. To make it meaningful, count net-new via better-sqlite3
+  `changes()` on the INSERT-OR-IGNORE path.
+- **Worktree-vs-dev-server friction.** `git worktree` doesn't copy gitignored
+  `node_modules`. The worktree's `web/` + `sidecar/` happened to have their own
+  `node_modules` this session, but the top-level `npm run dev` (concurrently)
+  needs root `node_modules` which the worktree lacks. To verify a worktree branch
+  live: run vite from `<worktree>/web` and the engine from `<worktree>/sidecar`
+  directly (not the root launcher). Watch for stale vite instances piling onto
+  5174/5175 when 5173 is taken.
+
+## What shipped (prior session, 2026-05-27)
 
 Branch `main`, commits `e9ef14d`..`dd5cfd7` (17 commits, all pushed):
 

@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-export const SCHEMA_VERSION = 35;
+export const SCHEMA_VERSION = 36;
 
 export interface DbHandle {
   db: Database.Database;
@@ -665,6 +665,16 @@ const MIGRATIONS: { version: number; sql: string }[] = [
     // misposted business spend, etc.) AND override the rule per-row.
     version: 35,
     sql: `ALTER TABLE transactions ADD COLUMN excluded_manual INTEGER;`,
+  },
+  {
+    // Per-connection history window. Drives runner.chooseStartDate
+    // and POST /connections/:id/scrape's default monthsBack. Range
+    // [1, 24] enforced at API + repo layer (no DB CHECK constraint).
+    // Default 12 means every existing connection recovers to a full
+    // year on its next sync — see runner.ts where the lastSuccess-
+    // based incremental shortcut was removed in the same change.
+    version: 36,
+    sql: `ALTER TABLE connections ADD COLUMN history_months INTEGER NOT NULL DEFAULT 12;`,
   },
 ];
 

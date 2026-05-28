@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor, within, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AccountsView, AddManualAssetForm } from './AccountsView';
 import { installFetchMock, jsonResponse } from '../test/mockFetch';
+import { ApiError } from '../api';
 
 const COMPANIES = {
   companies: [
@@ -15,13 +16,13 @@ const COMPANIES = {
 const CONNECTIONS = {
   connections: [
     { id: 'c-bank-1', companyId: 'hapoalim', displayName: 'Hapoalim main',
-      createdAt: '2025-01-01', lastScrapeAt: '2026-05-25', lastStatus: 'success', hasCredentials: true },
+      createdAt: '2025-01-01', lastScrapeAt: '2026-05-25', lastStatus: 'success', hasCredentials: true, historyMonths: 12 },
     { id: 'c-card-1', companyId: 'max', displayName: 'Max card',
-      createdAt: '2025-01-01', lastScrapeAt: '2026-05-25', lastStatus: 'success', hasCredentials: true },
+      createdAt: '2025-01-01', lastScrapeAt: '2026-05-25', lastStatus: 'success', hasCredentials: true, historyMonths: 12 },
     { id: 'c-brk-1', companyId: 'snaptrade', displayName: 'IBKR',
-      createdAt: '2025-01-01', lastScrapeAt: '2026-05-25', lastStatus: 'success', hasCredentials: true },
+      createdAt: '2025-01-01', lastScrapeAt: '2026-05-25', lastStatus: 'success', hasCredentials: true, historyMonths: 12 },
     { id: 'c-pen-1', companyId: 'harel', displayName: 'Harel pension',
-      createdAt: '2025-01-01', lastScrapeAt: '2026-05-25', lastStatus: 'success', hasCredentials: true },
+      createdAt: '2025-01-01', lastScrapeAt: '2026-05-25', lastStatus: 'success', hasCredentials: true, historyMonths: 12 },
   ],
 };
 const ACCOUNTS = {
@@ -586,6 +587,91 @@ describe('AccountsView — sync flow', () => {
     // as the run is still running. Re-mount would require a new runId
     // (covered by the previous test's unmount-on-success path).
   });
+
+  const connectionsFixture = [{
+    id: 'c-bank-1', companyId: 'hapoalim', displayName: 'Hapoalim',
+    createdAt: '2026-01-01T00:00:00Z', lastScrapeAt: null, lastStatus: null,
+    hasCredentials: true, historyMonths: 18,
+  }];
+
+  it('sync POST omits monthsBack so engine uses connection default', async () => {
+    const user = userEvent.setup();
+    const postSpy = vi.fn((_body: unknown) => ({ runId: 'r-1' }));
+    installFetchMock({
+      'GET /api/companies': () => ({ companies: [{ id: 'hapoalim', name: 'Hapoalim', loginFields: ['username', 'password'], type: 'bank', interactive: true }] }),
+      'GET /api/connections': () => ({ connections: connectionsFixture }),
+      'GET /api/accounts': () => ({ accounts: [] }),
+      'GET /api/assets': () => ({ assets: [] }),
+      'GET /api/loans': () => ({ loans: [] }),
+      'GET /api/brokerage': () => ({ holdings: [] }),
+      'POST /api/connections/c-bank-1/scrape': postSpy,
+      'GET /api/scrape/r-1': () => ({ run: {
+        runId: 'r-1', connectionId: 'c-bank-1', status: 'success',
+        message: 'Imported 1 account(s) and 42 transaction(s).',
+        accountsCount: 1, transactionsCount: 42,
+        startedAt: '2026-05-27T10:00:00Z', finishedAt: '2026-05-27T10:00:30Z',
+      } }),
+    });
+    render(<AccountsView />);
+    await user.click(await screen.findByRole('button', { name: /^sync$/i }));
+    await waitFor(() => expect(postSpy).toHaveBeenCalled());
+    const callPayload = postSpy.mock.calls[0]?.[0];
+    expect(callPayload).toEqual({ interactive: true });
+    expect(callPayload).not.toHaveProperty('monthsBack');
+  });
+
+  it('renders ✓ Done — N transactions for ~5s after successful sync, then clears', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) });
+    installFetchMock({
+      'GET /api/companies': () => ({ companies: [{ id: 'hapoalim', name: 'Hapoalim', loginFields: ['username', 'password'], type: 'bank', interactive: true }] }),
+      'GET /api/connections': () => ({ connections: connectionsFixture }),
+      'GET /api/accounts': () => ({ accounts: [] }),
+      'GET /api/assets': () => ({ assets: [] }),
+      'GET /api/loans': () => ({ loans: [] }),
+      'GET /api/brokerage': () => ({ holdings: [] }),
+      'POST /api/connections/c-bank-1/scrape': () => ({ runId: 'r-1' }),
+      'GET /api/scrape/r-1': () => ({ run: {
+        runId: 'r-1', connectionId: 'c-bank-1', status: 'success',
+        message: 'Imported 1 account(s) and 42 transaction(s).',
+        accountsCount: 1, transactionsCount: 42,
+        startedAt: '2026-05-27T10:00:00Z', finishedAt: '2026-05-27T10:00:30Z',
+      } }),
+    });
+    render(<AccountsView />);
+    await user.click(await screen.findByRole('button', { name: /^sync$/i }));
+    expect(await screen.findByText(/Done.*42 transactions/i)).toBeInTheDocument();
+
+    await act(async () => { vi.advanceTimersByTime(5100); });
+    expect(screen.queryByText(/Done.*42 transactions/i)).not.toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
+  it('clears the 5s timer on unmount without warning', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) });
+    installFetchMock({
+      'GET /api/companies': () => ({ companies: [{ id: 'hapoalim', name: 'Hapoalim', loginFields: ['username', 'password'], type: 'bank', interactive: true }] }),
+      'GET /api/connections': () => ({ connections: connectionsFixture }),
+      'GET /api/accounts': () => ({ accounts: [] }),
+      'GET /api/assets': () => ({ assets: [] }),
+      'GET /api/loans': () => ({ loans: [] }),
+      'GET /api/brokerage': () => ({ holdings: [] }),
+      'POST /api/connections/c-bank-1/scrape': () => ({ runId: 'r-1' }),
+      'GET /api/scrape/r-1': () => ({ run: {
+        runId: 'r-1', connectionId: 'c-bank-1', status: 'success',
+        message: 'Imported 1 account(s) and 42 transaction(s).',
+        accountsCount: 1, transactionsCount: 42,
+        startedAt: '2026-05-27T10:00:00Z', finishedAt: '2026-05-27T10:00:30Z',
+      } }),
+    });
+    const { unmount } = render(<AccountsView />);
+    await user.click(await screen.findByRole('button', { name: /^sync$/i }));
+    await screen.findByText(/Done.*42 transactions/i);
+    unmount();
+    await act(async () => { vi.advanceTimersByTime(10000); });
+    vi.useRealTimers();
+  });
 });
 
 describe('AccountsView — brokerage holdings', () => {
@@ -876,7 +962,7 @@ describe('AccountsView — add connection (picker + bank/card form)', () => {
     const user = userEvent.setup();
     const post = vi.fn((_body: unknown) => ({ connection: {
       id: 'new-1', companyId: 'hapoalim', displayName: 'My Hapoalim',
-      createdAt: '2026-05-26', lastScrapeAt: null, lastStatus: null, hasCredentials: true,
+      createdAt: '2026-05-26', lastScrapeAt: null, lastStatus: null, hasCredentials: true, historyMonths: 12,
     } }));
     const get = vi.fn(() => CONNECTIONS);
     installFetchMock({
@@ -990,7 +1076,7 @@ describe('AccountsView — SnapTrade link flow', () => {
     'POST /api/connections': () => ({
       connection: {
         id: 'new-st-conn', companyId: 'snaptrade', displayName: 'SnapTrade (brokerages)',
-        createdAt: '2026-05-27T00:00:00Z', lastScrapeAt: null, lastStatus: null, hasCredentials: true,
+        createdAt: '2026-05-27T00:00:00Z', lastScrapeAt: null, lastStatus: null, hasCredentials: true, historyMonths: 12,
       },
     }),
     'POST /api/snaptrade/brokerages': () => ({
@@ -1029,7 +1115,7 @@ describe('AccountsView — SnapTrade link flow', () => {
         connections: [
           {
             id: 'existing-st', companyId: 'snaptrade', displayName: 'SnapTrade',
-            createdAt: '2026-05-27T00:00:00Z', lastScrapeAt: null, lastStatus: null, hasCredentials: true,
+            createdAt: '2026-05-27T00:00:00Z', lastScrapeAt: null, lastStatus: null, hasCredentials: true, historyMonths: 12,
           },
         ],
       }),
@@ -1052,7 +1138,7 @@ describe('AccountsView — SnapTrade link flow', () => {
         connections: [
           {
             id: 'existing-st', companyId: 'snaptrade', displayName: 'SnapTrade',
-            createdAt: '2026-05-27T00:00:00Z', lastScrapeAt: null, lastStatus: null, hasCredentials: true,
+            createdAt: '2026-05-27T00:00:00Z', lastScrapeAt: null, lastStatus: null, hasCredentials: true, historyMonths: 12,
           },
         ],
       }),
@@ -1088,3 +1174,57 @@ describe('AddManualAssetForm — initialKind prop', () => {
   });
 });
 
+describe('connection card — history months select', () => {
+  const baseFixtureMocks = (historyMonths: number, patchSpy?: (body: unknown) => unknown) => ({
+    'GET /api/companies': () => ({ companies: [{ id: 'hapoalim', name: 'Hapoalim', loginFields: ['username', 'password'], type: 'bank', interactive: true }] }),
+    'GET /api/connections': () => ({ connections: [{
+      id: 'c-bank-1', companyId: 'hapoalim', displayName: 'Hapoalim',
+      createdAt: '2026-01-01T00:00:00Z', lastScrapeAt: null, lastStatus: null,
+      hasCredentials: true, historyMonths,
+    }] }),
+    'GET /api/accounts': () => ({ accounts: [] }),
+    'GET /api/assets': () => ({ assets: [] }),
+    'GET /api/loans': () => ({ loans: [] }),
+    'GET /api/brokerage': () => ({ holdings: [] }),
+    ...(patchSpy ? { 'PATCH /api/connections/c-bank-1/history-months': patchSpy } : {}),
+  });
+
+  it('connection card renders history-months select with current value', async () => {
+    installFetchMock(baseFixtureMocks(18));
+    render(<AccountsView />);
+    const select = await screen.findByLabelText(/history months/i) as HTMLSelectElement;
+    expect(select.value).toBe('18');
+  });
+
+  it('changing the select PATCHes /connections/:id/history-months', async () => {
+    const user = userEvent.setup();
+    const patchCalls: unknown[] = [];
+    const patchSpy = (body: unknown): Promise<unknown> => {
+      patchCalls.push(body);
+      return Promise.resolve({
+        connection: {
+          id: 'c-bank-1', companyId: 'hapoalim', displayName: 'Hapoalim',
+          createdAt: '2026-01-01T00:00:00Z', lastScrapeAt: null, lastStatus: null,
+          hasCredentials: true, historyMonths: 6,
+        },
+      });
+    };
+    installFetchMock(baseFixtureMocks(12, patchSpy));
+    render(<AccountsView />);
+    const select = await screen.findByLabelText(/history months/i);
+    await user.selectOptions(select, '6');
+    await waitFor(() => expect(patchCalls.length).toBeGreaterThan(0));
+    expect(patchCalls[0]).toEqual({ historyMonths: 6 });
+  });
+
+  it('reverts the select when PATCH fails', async () => {
+    const user = userEvent.setup();
+    const patchSpy = (_body: unknown): Promise<unknown> =>
+      Promise.reject(new ApiError('historyMonths must be an integer in [1, 24]', 400));
+    installFetchMock(baseFixtureMocks(12, patchSpy));
+    render(<AccountsView />);
+    const select = await screen.findByLabelText(/history months/i) as HTMLSelectElement;
+    await user.selectOptions(select, '6');
+    await waitFor(() => expect(select.value).toBe('12'));
+  });
+});
