@@ -59,14 +59,16 @@ export function PensionPickerStep(
         <li>
           <button
             type="button"
-            className="add-picker-item add-picker-item--custom"
+            className="add-picker-row"
             onClick={onPickCustom}
           >
             <span className="add-picker-emoji" aria-hidden="true">✍️</span>
-            <span className="add-picker-name">Custom pension account</span>
-            <span className="add-picker-sub">
-              Type the provider and balance yourself — for any fund Hon
-              can't sync
+            <span className="add-picker-text">
+              <span className="add-picker-name">Custom pension account</span>
+              <span className="add-picker-sub">
+                Type the provider and balance yourself — for any fund Hon
+                can't sync
+              </span>
             </span>
           </button>
         </li>
@@ -93,14 +95,16 @@ export function PensionProviderRow(
     <li>
       <button
         type="button"
-        className="add-picker-item"
+        className="add-picker-row"
         onClick={onPick}
       >
-        <span className="add-picker-name">{company.name}</span>
-        <span className="add-picker-sub">
-          {interactive
-            ? 'A browser window opens on each sync to clear a security check'
-            : 'Synced automatically in the background'}
+        <span className="add-picker-text">
+          <span className="add-picker-name">{company.name}</span>
+          <span className="add-picker-sub">
+            {interactive
+              ? 'A browser window opens on each sync to clear a security check'
+              : 'Synced automatically in the background'}
+          </span>
         </span>
         <span
           className={
