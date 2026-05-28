@@ -753,4 +753,52 @@ describe('InsightsView — brokerage account pills', () => {
     await user.click(within(group).getByRole('button', { name: /Vanguard/ }));
     expect(screen.getByText(/since when "ALL" counts/i)).toBeInTheDocument();
   });
+
+  it('scopes the stat tiles + holdings list to the selected account', async () => {
+    installFetchMock(baseMocks);
+    const user = userEvent.setup();
+    await openBrokerage(user);
+    // All accounts: 2 holdings (AAPL $2,000 + VOO $2,000) → portfolio $4,000.
+    const statsAll = screen.getAllByTestId('brokerage-stat');
+    expect(within(statsAll[0]!).getByText(/\$4,?000/)).toBeInTheDocument();
+    expect(within(statsAll[4]!).getByText(/^2$/)).toBeInTheDocument(); // Holdings count
+    // Focus IBKR (a-ibkr) → only AAPL ($2,000), 1 holding.
+    const group = await screen.findByRole('group', { name: /accounts/i });
+    await user.click(within(group).getByRole('button', { name: /IBKR USD/ }));
+    const statsIbkr = screen.getAllByTestId('brokerage-stat');
+    expect(within(statsIbkr[0]!).getByText(/\$2,?000/)).toBeInTheDocument();
+    expect(within(statsIbkr[4]!).getByText(/^1$/)).toBeInTheDocument();
+    // Holdings list shows only AAPL now, not VOO.
+    const list = screen.getByTestId('brokerage-holdings');
+    expect(within(list).getByText('AAPL')).toBeInTheDocument();
+    expect(within(list).queryByText('VOO')).not.toBeInTheDocument();
+  });
+
+  it('uses broker performance for the chart when present (not just local snapshots)', async () => {
+    // Performance for connection c-st has 4 dated points; the snapshots
+    // table has only recent ones. The chart must follow performance.
+    const withPerf = {
+      ...brokerageResp,
+      snapshots: [
+        { accountId: 'a-ibkr', date: '2026-05-26', value: 4000, currency: 'USD' },
+        { accountId: 'a-ibkr', date: '2026-05-27', value: 4000, currency: 'USD' },
+      ],
+      performance: [
+        { connectionId: 'c-st', data: { currency: 'USD', totalEquity: [
+          { date: '2025-06-01', value: 3000, currency: 'USD' },
+          { date: '2025-09-01', value: 3200, currency: 'USD' },
+          { date: '2025-12-01', value: 3600, currency: 'USD' },
+          { date: '2026-03-01', value: 4000, currency: 'USD' },
+        ] } },
+      ],
+    };
+    installFetchMock({ ...baseMocks, 'GET /api/brokerage': () => withPerf });
+    const user = userEvent.setup();
+    await openBrokerage(user);
+    await user.click(screen.getByRole('button', { name: /^ALL$/ }));
+    await screen.findByTestId('brokerage-chart');
+    const points = Number(document.querySelector('.lc-wrap')!.getAttribute('data-points'));
+    // 4 performance points (snapshots would have given 2) → performance wins.
+    expect(points).toBe(4);
+  });
 });

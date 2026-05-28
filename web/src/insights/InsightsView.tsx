@@ -9,6 +9,12 @@ import type { Transaction } from '../activity/types';
 import type { Account } from '../accounts/types';
 import { cycleAnalytics, type MonthBucket } from './analytics';
 import { LineChart } from './LineChart';
+import {
+  buildEquitySeries,
+  sliceRange,
+  type PerformanceEntry,
+  type HoldingSnapshot,
+} from './equitySeries';
 
 function monthLetter(key: string): string {
   // "2026-05" → "M" (English month letter — matches the legacy app).
@@ -243,8 +249,8 @@ interface ValueSnapshot {
 interface BrokerageResp {
   holdings: Holding[];
   snapshots: ValueSnapshot[];
-  holdingSnapshots: unknown[];
-  performance: unknown[];
+  holdingSnapshots: HoldingSnapshot[];
+  performance: PerformanceEntry[];
   ilsRates: Record<string, number> | null;
 }
 
@@ -453,32 +459,23 @@ function BrokerageSubTab() {
     ? null
     : brkAccounts.find((a) => a.id === acctFilter) ?? null;
 
-  // Snapshots scoped to the current acctFilter, with the focused
-  // account's inceptionDate applied as a min-cutoff to drop synthetic
-  // backfill from before the user actually held the account.
-  const scopedSnapshots = acctFilter === 'all'
-    ? data.snapshots
-    : (() => {
-        const focused = brkAccounts.find((a) => a.id === acctFilter);
-        const inception = focused?.inceptionDate ?? null;
-        return data.snapshots.filter((s) =>
-          s.accountId === acctFilter && (!inception || s.date >= inception),
-        );
-      })();
-
-  // Full series (sum across accounts), in the display currency.
-  const dailyTotals = new Map<string, number>();
-  for (const s of scopedSnapshots) {
-    const v = convertAmount(s.value, s.currency, cur, rates);
-    dailyTotals.set(s.date, (dailyTotals.get(s.date) ?? 0) + v);
-  }
-  const fullSeries: SeriesPoint[] = Array.from(dailyTotals.entries())
-    .map(([date, value]) => ({ date, value }))
-    .sort((a, b) => a.date.localeCompare(b.date));
-
-  const latestDate = fullSeries.at(-1)?.date ?? new Date().toISOString().slice(0, 10);
-  const cutoff = rangeStart(range, latestDate);
-  const series = fullSeries.filter((p) => p.date >= cutoff);
+  // Equity series — full 3-tier resolution (broker performance → forward-
+  // filled holding snapshots → local account snapshots), scoped to the
+  // selected account. This is what gives the chart real long-range history
+  // instead of just the last few local snapshots.
+  const convert = (value: number, currency: string): number =>
+    convertAmount(value, currency, cur, rates);
+  const fullSeries = buildEquitySeries({
+    performance: data.performance,
+    snapshots: data.snapshots,
+    holdingSnapshots: data.holdingSnapshots,
+    accounts: accounts.map((a) => ({
+      id: a.id, connectionId: a.connectionId, inceptionDate: a.inceptionDate,
+    })),
+    acctFilter,
+    convert,
+  });
+  const series = sliceRange(fullSeries, range);
 
   const periodChange = (series.at(-1)?.value ?? 0) - (series[0]?.value ?? 0);
   const chartTone: 'good' | 'bad' = periodChange >= 0 ? 'good' : 'bad';
@@ -488,18 +485,27 @@ function BrokerageSubTab() {
   const change = currentValue - startValue;
   const changePct = startValue > 0 ? (change / startValue) * 100 : 0;
 
+  // Holdings scoped to the selected account — every metric below follows
+  // the active pill, not the whole portfolio.
+  const scopedHoldings = acctFilter === 'all'
+    ? data.holdings
+    : data.holdings.filter((h) => h.accountId === acctFilter);
+
   // Holdings totals — convert each holding into the display currency.
   let portfolioValue = 0;
   let unrealized = 0;
   let costBasis = 0;
-  for (const h of data.holdings) {
+  for (const h of scopedHoldings) {
     portfolioValue += convertAmount(h.value ?? 0, h.currency, cur, rates);
     unrealized   += convertAmount(h.openPnl ?? 0, h.currency, cur, rates);
     costBasis    += convertAmount(h.costBasis ?? 0, h.currency, cur, rates);
   }
   const returnOnCost = costBasis > 0 ? (unrealized / costBasis) * 100 : 0;
 
-  // Gain · 1Y: portfolio value now vs the snapshot ~365d back (or earliest).
+  // Gain · 1Y: scoped portfolio value now vs the equity point ~365d back
+  // (or the earliest available). Both sides are scoped to the same account,
+  // so the figure is consistent under filtering.
+  const latestDate = fullSeries.at(-1)?.date ?? new Date().toISOString().slice(0, 10);
   const oneYearAgo = rangeStart('1Y', latestDate);
   const oneYearPoint = fullSeries.find((p) => p.date >= oneYearAgo) ?? fullSeries[0];
   const gain1y = oneYearPoint ? portfolioValue - oneYearPoint.value : 0;
@@ -538,7 +544,7 @@ function BrokerageSubTab() {
         />
         <StatBox
           label="Holdings"
-          value={String(data.holdings.length)}
+          value={String(scopedHoldings.length)}
           tone=""
         />
       </div>
@@ -594,12 +600,12 @@ function BrokerageSubTab() {
         )
       )}
 
-      {data.holdings.length > 0 && (
+      {scopedHoldings.length > 0 && (
         <section className="ins-card">
           <header className="ins-card-head">
             <div className="ins-sub">
-              Holdings · {data.holdings.length}
-              {' '}position{data.holdings.length === 1 ? '' : 's'}
+              Holdings · {scopedHoldings.length}
+              {' '}position{scopedHoldings.length === 1 ? '' : 's'}
             </div>
             <span className="spacer" />
             <div className="ins-totals">
@@ -608,7 +614,7 @@ function BrokerageSubTab() {
             </div>
           </header>
           <ul className="brokerage-holdings" data-testid="brokerage-holdings">
-            {data.holdings
+            {scopedHoldings
               .slice()
               .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
               .map((h, i) => {
@@ -671,8 +677,6 @@ function StatBox({
     </div>
   );
 }
-
-interface SeriesPoint { date: string; value: number }
 
 interface MonthBarsProps {
   months: MonthBucket[];
