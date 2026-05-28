@@ -140,4 +140,21 @@ describe('LineChart — hover', () => {
     fireEvent.touchEnd(wrap);
     expect(container.querySelector('.lc-tip.on')).toBeNull();
   });
+
+  it('drops a stale hover when the series shrinks out from under it', () => {
+    const { container, rerender } = render(
+      <LineChart series={SERIES} currency="USD" tone="good" />,
+    );
+    const wrap = container.querySelector('.lc-wrap')!;
+    stubBox(wrap);
+    // Hover the last point (index 3) of the 4-point series.
+    fireEvent.mouseMove(wrap, { clientX: 398 });
+    expect(container.querySelector('.lc-tip.on')).not.toBeNull();
+    // Parent swaps in a shorter 2-point series; index 3 is now out of range.
+    rerender(
+      <LineChart series={SERIES.slice(0, 2)} currency="USD" tone="good" />,
+    );
+    // No crash, and the overlay is hidden because the index is invalid.
+    expect(container.querySelector('.lc-tip.on')).toBeNull();
+  });
 });

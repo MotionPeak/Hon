@@ -75,15 +75,23 @@ export function LineChart({ series, currency, tone, showAxis = true }: LineChart
     setHover(bestI);
   };
 
-  const hv = hover != null ? series[hover] : null;
-  const hp = hover != null ? pts[hover] : null;
+  // A stored hover index can outlive the series it indexed into: when the
+  // parent swaps in a shorter series (account/range switch), `hover` may now
+  // point past the new array. Treat any out-of-range index as "no hover"
+  // during render rather than relying on the consumers' falsy guards — keeps
+  // the overlay state self-consistent without a setState-in-render.
+  const activeIndex = hover != null && hover < series.length ? hover : null;
+  const hv = activeIndex != null ? series[activeIndex] : null;
+  const hp = activeIndex != null ? pts[activeIndex] : null;
   let sinceStart: { text: string; tone: 'good' | 'bad' } | null = null;
   if (hv && n > 1 && firstValue) {
     const change = hv.value - firstValue;
     const pct = (change / Math.abs(firstValue)) * 100;
+    // U+2212 for the minus so both the money and percent share one glyph;
+    // pct.toFixed() on a negative would otherwise emit an ASCII '-'.
     const sign = change >= 0 ? '+' : '−';
     sinceStart = {
-      text: `${sign}${money(Math.abs(change), currency)} · ${change >= 0 ? '+' : ''}${pct.toFixed(2)}%`,
+      text: `${sign}${money(Math.abs(change), currency)} · ${sign}${Math.abs(pct).toFixed(2)}%`,
       tone: change >= 0 ? 'good' : 'bad',
     };
   }
