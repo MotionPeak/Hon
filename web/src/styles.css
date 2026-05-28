@@ -2589,6 +2589,10 @@ button.mini { padding: 5px 11px; font-size: 12px; }
    horizontal layout, so reset it inside the vertical text wrapper. */
 .add-picker-text {
   flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;
+  /* Override the global `button { white-space: nowrap }` so the longer
+     pension sub-lines wrap inside the row instead of overflowing and
+     clipping at the modal edge. */
+  white-space: normal;
 }
 .add-picker-text .add-picker-name { flex: 0 0 auto; }
 .pension-tag {
