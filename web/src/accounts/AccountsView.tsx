@@ -8,6 +8,7 @@ import type {
 import { DelayedLoader } from '../ui/DelayedLoader';
 import { SnapTradeBrokeragePicker } from './SnapTradeBrokeragePicker';
 import { PensionPickerStep } from './PensionPickerStep';
+import { CompanyLogo } from './CompanyLogo';
 
 const SnapTradeLinkFlow = lazy(() =>
   import('./SnapTradeLinkFlow').then((m) => ({ default: m.SnapTradeLinkFlow })),
@@ -1201,28 +1202,6 @@ function ConfirmRemoveDialog({ title, body, onClose, onConfirmed }: ConfirmRemov
 /** Company favicon overlaid on a typed emoji fallback. The engine serves
  *  the favicon via /logo/:companyId; on error we hide the img and the
  *  emoji shows through. Matches the legacy app's companyLogo() trick. */
-function CompanyLogo({ company }: { company: Company }) {
-  const emoji = company.type === 'card' ? '💳'
-    : company.type === 'brokerage' ? '📈'
-    : company.type === 'pension' ? '🪺'
-    : '🏦';
-  const tokenedSrc = company.domain
-    ? `/api/logo/${encodeURIComponent(company.id)}`
-    : null;
-  return (
-    <span className="logo">
-      <span className="logo-emoji">{emoji}</span>
-      {tokenedSrc && (
-        <img
-          src={tokenedSrc}
-          alt=""
-          onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
-        />
-      )}
-    </span>
-  );
-}
-
 interface AddConnectionPickerProps {
   companies: Company[];
   connections: Connection[];
