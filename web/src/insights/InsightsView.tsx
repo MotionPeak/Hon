@@ -502,13 +502,17 @@ function BrokerageSubTab() {
   }
   const returnOnCost = costBasis > 0 ? (unrealized / costBasis) * 100 : 0;
 
-  // Gain · 1Y: scoped portfolio value now vs the equity point ~365d back
-  // (or the earliest available). Both sides are scoped to the same account,
-  // so the figure is consistent under filtering.
+  // Gain · 1Y: latest equity vs the equity point ~365d back — BOTH taken
+  // from the same equity series so the figure stays internally consistent
+  // and matches the chart. (Using the holdings-value sum as "current" broke
+  // when a broker reports positions with null value — e.g. IBKR's VBR/VT —
+  // making the tile read −100%.) Falls back to the holdings sum only when
+  // the series is empty.
+  const latestEquity = fullSeries.at(-1)?.value ?? portfolioValue;
   const latestDate = fullSeries.at(-1)?.date ?? new Date().toISOString().slice(0, 10);
   const oneYearAgo = rangeStart('1Y', latestDate);
   const oneYearPoint = fullSeries.find((p) => p.date >= oneYearAgo) ?? fullSeries[0];
-  const gain1y = oneYearPoint ? portfolioValue - oneYearPoint.value : 0;
+  const gain1y = oneYearPoint ? latestEquity - oneYearPoint.value : 0;
   const gain1yPct = oneYearPoint && oneYearPoint.value > 0
     ? (gain1y / oneYearPoint.value) * 100
     : 0;
