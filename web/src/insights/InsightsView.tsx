@@ -8,7 +8,7 @@ import type { Category } from '../settings/CategoriesPanel';
 import type { Transaction } from '../activity/types';
 import type { Account } from '../accounts/types';
 import { cycleAnalytics, type MonthBucket } from './analytics';
-import { smoothPath } from './smooth';
+import { LineChart } from './LineChart';
 
 function monthLetter(key: string): string {
   // "2026-05" → "M" (English month letter — matches the legacy app).
@@ -338,10 +338,11 @@ function InceptionInput({ account, onSaved }: InceptionInputProps) {
   return (
     <div className="brk-inception-row">
       <label className="brk-inception-label">
-        <span>Investment start</span>
+        <span>Investment start (since when "ALL" counts):</span>
         <input
           type="date"
           className="brk-inception-input"
+          aria-label="Investment start"
           value={value}
           onChange={(e) => {
             setValue(e.target.value);
@@ -357,11 +358,11 @@ function InceptionInput({ account, onSaved }: InceptionInputProps) {
           onClick={() => { setValue(''); void save(''); }}
         >×</button>
       )}
-      {value && (
-        <span className="brk-inception-hint">
-          Synthetic backfill before this date is hidden.
-        </span>
-      )}
+      <span className="brk-inception-hint">
+        {value
+          ? 'Synthetic backfill before this date is hidden.'
+          : 'Until set, the chart shows whatever the price source returns (Yahoo: up to 10 years).'}
+      </span>
     </div>
   );
 }
@@ -479,6 +480,9 @@ function BrokerageSubTab() {
   const cutoff = rangeStart(range, latestDate);
   const series = fullSeries.filter((p) => p.date >= cutoff);
 
+  const periodChange = (series.at(-1)?.value ?? 0) - (series[0]?.value ?? 0);
+  const chartTone: 'good' | 'bad' = periodChange >= 0 ? 'good' : 'bad';
+
   const currentValue = series.at(-1)?.value ?? 0;
   const startValue = series[0]?.value ?? currentValue;
   const change = currentValue - startValue;
@@ -510,20 +514,6 @@ function BrokerageSubTab() {
 
   return (
     <div className="brokerage-pane">
-      {brkAccounts.length > 0 && (
-        <AccountPills
-          accounts={brkAccounts}
-          value={acctFilter}
-          onChange={setAcctFilter}
-        />
-      )}
-      {acctFilter === 'all' ? (
-        <InceptionBadge earliest={earliestInception} />
-      ) : (
-        focusedAccount && (
-          <InceptionInput account={focusedAccount} onSaved={refresh} />
-        )
-      )}
       <div className="brk-stats" data-testid="brokerage-stats">
         <StatBox
           label="Portfolio value"
@@ -585,12 +575,23 @@ function BrokerageSubTab() {
               </div>
             )}
           </header>
-          <ValueChart series={series} currency={cur} />
-          <div className="brk-chart-axis">
-            <span>{series[0]?.date ?? ''}</span>
-            <span>{series.at(-1)?.date ?? ''}</span>
-          </div>
+          <LineChart series={series} currency={cur} tone={chartTone} />
         </section>
+      )}
+
+      {brkAccounts.length > 0 && (
+        <AccountPills
+          accounts={brkAccounts}
+          value={acctFilter}
+          onChange={setAcctFilter}
+        />
+      )}
+      {acctFilter === 'all' ? (
+        <InceptionBadge earliest={earliestInception} />
+      ) : (
+        focusedAccount && (
+          <InceptionInput account={focusedAccount} onSaved={refresh} />
+        )
       )}
 
       {data.holdings.length > 0 && (
@@ -672,64 +673,6 @@ function StatBox({
 }
 
 interface SeriesPoint { date: string; value: number }
-
-function ValueChart({
-  series, currency = 'ILS',
-}: {
-  series: SeriesPoint[]; currency?: string;
-}) {
-  const W = 600;
-  const H = 180;
-  const PAD = { l: 8, r: 8, t: 8, b: 18 };
-  const innerW = W - PAD.l - PAD.r;
-  const innerH = H - PAD.t - PAD.b;
-  const min = Math.min(...series.map((p) => p.value));
-  const max = Math.max(...series.map((p) => p.value));
-  const range = Math.max(1, max - min);
-  const n = series.length;
-  const x = (i: number): number =>
-    n === 1 ? PAD.l + innerW / 2 : PAD.l + (i / (n - 1)) * innerW;
-  const y = (v: number): number =>
-    PAD.t + innerH - ((v - min) / range) * innerH;
-  const pts = series.map((p, i) => ({ x: x(i), y: y(p.value) }));
-  const path = smoothPath(pts);
-  const area = `${path} L ${x(n - 1)} ${PAD.t + innerH} L ${x(0)} ${PAD.t + innerH} Z`;
-  return (
-    <svg
-      data-testid="brokerage-chart"
-      className="brokerage-chart"
-      viewBox={`0 0 ${W} ${H}`}
-      preserveAspectRatio="none"
-    >
-      <defs>
-        <linearGradient id="bk-area" x1="0" x2="0" y1="0" y2="1">
-          <stop offset="0%" stopColor="var(--accent)" stopOpacity=".28" />
-          <stop offset="100%" stopColor="var(--accent)" stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      <path d={area} fill="url(#bk-area)" />
-      <path
-        d={path}
-        fill="none"
-        stroke="var(--accent)"
-        strokeWidth="2"
-        strokeLinejoin="round"
-        strokeLinecap="round"
-      />
-      {n <= 24 && series.map((p, i) => (
-        <circle
-          key={p.date}
-          cx={x(i)}
-          cy={y(p.value)}
-          r={3}
-          fill="var(--accent)"
-        >
-          <title>{p.date} · {money(p.value, currency)}</title>
-        </circle>
-      ))}
-    </svg>
-  );
-}
 
 interface MonthBarsProps {
   months: MonthBucket[];

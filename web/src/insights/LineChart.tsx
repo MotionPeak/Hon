@@ -100,6 +100,7 @@ export function LineChart({ series, currency, tone, showAxis = true }: LineChart
   return (
     <div
       className={`lc-wrap lc-${tone}`}
+      data-points={n}
       onMouseMove={(e) => onMove(e.clientX, e.currentTarget)}
       onMouseLeave={() => setHover(null)}
       onTouchMove={(e) => {
