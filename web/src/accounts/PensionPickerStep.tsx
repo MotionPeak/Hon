@@ -56,23 +56,24 @@ export function PensionPickerStep(
             onPick={() => onPickCompany(c)}
           />
         ))}
-        <li>
-          <button
-            type="button"
-            className="add-picker-row"
-            onClick={onPickCustom}
-          >
-            <span className="add-picker-emoji" aria-hidden="true">✍️</span>
-            <span className="add-picker-text">
-              <span className="add-picker-name">Custom pension account</span>
-              <span className="add-picker-sub">
-                Type the provider and balance yourself — for any fund Hon
-                can't sync
-              </span>
-            </span>
-          </button>
-        </li>
       </ul>
+      {/* Pinned BELOW the scrollable provider list — it's a different kind of
+          action (manual entry, not a scraped provider) and must stay visible
+          even when the list overflows its max-height and scrolls. */}
+      <button
+        type="button"
+        className="add-picker-row add-picker-custom"
+        onClick={onPickCustom}
+      >
+        <span className="add-picker-emoji" aria-hidden="true">✍️</span>
+        <span className="add-picker-text">
+          <span className="add-picker-name">Custom pension account</span>
+          <span className="add-picker-sub">
+            Type the provider and balance yourself — for any fund Hon
+            can't sync
+          </span>
+        </span>
+      </button>
     </>
   );
 }
