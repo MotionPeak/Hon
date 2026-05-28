@@ -35,17 +35,21 @@ function fmtAxisDate(iso: string): string {
 // hover tooltip lands in Task 2; alias it so TS strict doesn't flag it unused.
 export function LineChart({ series, currency: _currency, tone, showAxis = true }: LineChartProps) {
   const uid = useId().replace(/:/g, '');
-  const max = series.reduce((m, p) => Math.max(m, p.value), -Infinity);
-  const min = series.reduce((m, p) => Math.min(m, p.value), Infinity);
+  const n = series.length;
+  // Guard the empty series: reduce() over [] yields ±Infinity, which would
+  // poison range/yAt and emit a malformed area path (no opening moveto).
+  const max = n ? series.reduce((m, p) => Math.max(m, p.value), -Infinity) : 0;
+  const min = n ? series.reduce((m, p) => Math.min(m, p.value), Infinity) : 0;
   const flat = max === min;
   const range = flat ? 1 : max - min;
-  const n = series.length;
   const xAt = (i: number): number => (n > 1 ? (i / (n - 1)) * W : W / 2);
   const yAt = (v: number): number =>
     flat ? H / 2 : H - PAD - ((v - min) / range) * (H - PAD * 2);
 
   const line = smoothPath(series.map((p, i) => ({ x: xAt(i), y: yAt(p.value) })));
-  const area = `${line} L ${W} ${H} L 0 ${H} Z`;
+  // Only close the fill region when there's a line to anchor it to; an empty
+  // series leaves both paths blank rather than a stray " L … Z" fragment.
+  const area = line ? `${line} L ${W} ${H} L 0 ${H} Z` : '';
 
   // 4 faint horizontal grid bands.
   const grid = [1, 2, 3, 4].map((i) => (H / 5) * i);

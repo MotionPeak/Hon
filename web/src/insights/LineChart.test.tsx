@@ -61,4 +61,14 @@ describe('LineChart — static render', () => {
     render(<LineChart series={[{ date: '2026-01-01', value: 100 }]} currency="USD" tone="good" />);
     expect(screen.getByTestId('brokerage-chart')).toBeInTheDocument();
   });
+
+  it('renders without a broken path for an empty series', () => {
+    render(<LineChart series={[]} currency="USD" tone="good" />);
+    const svg = screen.getByTestId('brokerage-chart');
+    const area = svg.querySelector('path.lc-area')?.getAttribute('d') ?? '';
+    // No area path, or a well-formed one starting with a moveto.
+    expect(area === '' || area.startsWith('M')).toBe(true);
+    // And it doesn't crash — chart still in the DOM.
+    expect(svg).toBeInTheDocument();
+  });
 });
