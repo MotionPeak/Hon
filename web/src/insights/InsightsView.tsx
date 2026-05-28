@@ -516,22 +516,41 @@ function BrokerageSubTab() {
   const change = currentValue - startValue;
   const changePct = startValue > 0 ? (change / startValue) * 100 : 0;
 
-  // Holdings scoped to the selected account — every metric below follows
-  // the active pill, not the whole portfolio.
+  // Holdings + accounts scoped to the selected pill — every metric below
+  // follows the active account, not the whole portfolio.
   const scopedHoldings = acctFilter === 'all'
     ? data.holdings
     : data.holdings.filter((h) => h.accountId === acctFilter);
+  const scopedBrkAccounts = acctFilter === 'all'
+    ? brkAccounts
+    : brkAccounts.filter((a) => a.id === acctFilter);
 
-  // Holdings totals — convert each holding into the display currency.
-  let portfolioValue = 0;
+  // Portfolio value = sum of in-scope account balances (INCLUDES cash) —
+  // the legacy SPA's definition. The holdings-value sum can be smaller
+  // (uninvested cash) or, for brokers that report positions with null
+  // value, would understate the account. Fall back to the holdings-value
+  // sum only when no in-scope account exposes a balance.
+  let balanceTotal = 0;
+  let haveBalance = false;
+  for (const a of scopedBrkAccounts) {
+    if (a.balance == null) continue;
+    balanceTotal += convertAmount(a.balance, a.currency, cur, rates);
+    haveBalance = true;
+  }
+
+  // Cost + unrealized gain come from priced positions only (holdingStats).
+  // holdingsValueTotal drives each row's allocation weight — relative to
+  // the priced holdings, not the cash-inclusive balance.
+  let holdingsValueTotal = 0;
   let unrealized = 0;
   let costBasis = 0;
   for (const h of scopedHoldings) {
     const s = holdingStats(h);
-    portfolioValue += convertAmount(s.value ?? 0, h.currency, cur, rates);
-    unrealized   += convertAmount(s.gain ?? 0, h.currency, cur, rates);
-    costBasis    += convertAmount(s.cost ?? 0, h.currency, cur, rates);
+    holdingsValueTotal += convertAmount(s.value ?? 0, h.currency, cur, rates);
+    unrealized        += convertAmount(s.gain ?? 0, h.currency, cur, rates);
+    costBasis         += convertAmount(s.cost ?? 0, h.currency, cur, rates);
   }
+  const portfolioValue = haveBalance ? balanceTotal : holdingsValueTotal;
   const returnOnCost = costBasis > 0 ? (unrealized / costBasis) * 100 : 0;
 
   // Gain · 1Y: latest equity vs the equity point ~365d back — BOTH taken
@@ -656,7 +675,7 @@ function BrokerageSubTab() {
               .map((h, i) => {
                 const s = holdingStats(h);
                 const valCur = convertAmount(s.value ?? 0, h.currency, cur, rates);
-                const weight = portfolioValue > 0 ? (valCur / portfolioValue) * 100 : 0;
+                const weight = holdingsValueTotal > 0 ? (valCur / holdingsValueTotal) * 100 : 0;
                 const pnlCur = convertAmount(s.gain ?? 0, h.currency, cur, rates);
                 const pnlPct = s.gainPct ?? 0;
                 const palette = ['#5C9EF5', '#5CC773', '#A880ED', '#F59942', '#E96B6B'];

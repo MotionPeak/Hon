@@ -761,15 +761,16 @@ describe('InsightsView — brokerage account pills', () => {
     installFetchMock(baseMocks);
     const user = userEvent.setup();
     await openBrokerage(user);
-    // All accounts: 2 holdings (AAPL $2,000 + VOO $2,000) → portfolio $4,000.
+    // Portfolio value = sum of in-scope account BALANCES (includes cash).
+    // All accounts: a-ibkr $4,302.44 + a-vg $1,234 = $5,536.44.
     const statsAll = screen.getAllByTestId('brokerage-stat');
-    expect(within(statsAll[0]!).getByText(/\$4,?000/)).toBeInTheDocument();
+    expect(within(statsAll[0]!).getByText(/\$5,?536/)).toBeInTheDocument();
     expect(within(statsAll[4]!).getByText(/^2$/)).toBeInTheDocument(); // Holdings count
-    // Focus IBKR (a-ibkr) → only AAPL ($2,000), 1 holding.
+    // Focus IBKR (a-ibkr) → its balance $4,302.44, 1 holding (AAPL).
     const group = await screen.findByRole('group', { name: /accounts/i });
     await user.click(within(group).getByRole('button', { name: /IBKR USD/ }));
     const statsIbkr = screen.getAllByTestId('brokerage-stat');
-    expect(within(statsIbkr[0]!).getByText(/\$2,?000/)).toBeInTheDocument();
+    expect(within(statsIbkr[0]!).getByText(/\$4,?302/)).toBeInTheDocument();
     expect(within(statsIbkr[4]!).getByText(/^1$/)).toBeInTheDocument();
     // Holdings list shows only AAPL now, not VOO.
     const list = screen.getByTestId('brokerage-holdings');
@@ -792,12 +793,11 @@ describe('InsightsView — brokerage account pills', () => {
     installFetchMock({ ...baseMocks, 'GET /api/brokerage': () => nullValueHoldings });
     const user = userEvent.setup();
     await openBrokerage(user);
-    const stats = screen.getAllByTestId('brokerage-stat');
-    // 3 × 100 = $300 (USD rate 1 → ₪300), NOT ₪0.
-    expect(within(stats[0]!).getByText(/300/)).toBeInTheDocument();
-    // Holdings list shows the same value, not ₪0.
+    // The holding's value comes from units × price (3 × 100 = $300), NOT ₪0
+    // — shown in the holdings list. (Portfolio value is balance-based.)
     const list = screen.getByTestId('brokerage-holdings');
-    expect(within(list).getByText(/300/)).toBeInTheDocument();
+    expect(within(list).getByText(/\$300/)).toBeInTheDocument();
+    expect(within(list).queryByText('₪0')).not.toBeInTheDocument();
   });
 
   it('uses broker performance for the chart when present (not just local snapshots)', async () => {
