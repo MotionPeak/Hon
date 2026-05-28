@@ -398,15 +398,18 @@ describe('InsightsView — Brokerage sub-tab', () => {
       'GET /api/brokerage': () => ({
         holdings: [
           {
+            // costBasis/openPnl are PER UNIT (as SnapTrade reports them):
+            // value 1000, cost 10×80 = 800, gain = 1000 − 800 = 200.
             accountId: 'b1', symbol: 'VT', description: 'Vanguard Total World',
             units: 10, price: 100, currency: 'USD',
-            costBasis: 800, openPnl: 200, value: 1000,
+            costBasis: 80, openPnl: 20, value: 1000,
             updatedAt: today.toISOString().slice(0, 10),
           },
           {
+            // value 250, cost 5×40 = 200, gain = 250 − 200 = 50.
             accountId: 'b1', symbol: 'VBR', description: 'Vanguard Small-Cap',
             units: 5, price: 50, currency: 'USD',
-            costBasis: 200, openPnl: 50, value: 250,
+            costBasis: 40, openPnl: 10, value: 250,
             updatedAt: today.toISOString().slice(0, 10),
           },
         ],
@@ -772,6 +775,29 @@ describe('InsightsView — brokerage account pills', () => {
     const list = screen.getByTestId('brokerage-holdings');
     expect(within(list).getByText('AAPL')).toBeInTheDocument();
     expect(within(list).queryByText('VOO')).not.toBeInTheDocument();
+  });
+
+  it('values a null-value holding from units × price (not ₪0)', async () => {
+    // SnapTrade leaves `value` null for some IBKR positions but reports
+    // units + price — the real market value is units × price.
+    const nullValueHoldings = {
+      ...brokerageResp,
+      holdings: [
+        { accountId: 'a-ibkr', symbol: 'VBR', description: 'Small-Cap',
+          units: 3, price: 100, currency: 'USD',
+          costBasis: 160, openPnl: 75, value: null, updatedAt: '2026-05-25' },
+      ],
+      ilsRates: { USD: 1 },
+    };
+    installFetchMock({ ...baseMocks, 'GET /api/brokerage': () => nullValueHoldings });
+    const user = userEvent.setup();
+    await openBrokerage(user);
+    const stats = screen.getAllByTestId('brokerage-stat');
+    // 3 × 100 = $300 (USD rate 1 → ₪300), NOT ₪0.
+    expect(within(stats[0]!).getByText(/300/)).toBeInTheDocument();
+    // Holdings list shows the same value, not ₪0.
+    const list = screen.getByTestId('brokerage-holdings');
+    expect(within(list).getByText(/300/)).toBeInTheDocument();
   });
 
   it('uses broker performance for the chart when present (not just local snapshots)', async () => {

@@ -257,6 +257,37 @@ interface BrokerageResp {
 type Range = '1M' | '3M' | 'YTD' | '1Y' | 'ALL';
 const RANGES: Range[] = ['1M', '3M', 'YTD', '1Y', 'ALL'];
 
+interface HoldingStats {
+  value: number | null;
+  cost: number | null;
+  gain: number | null;
+  gainPct: number | null;
+}
+
+/** Per-holding value / cost / gain in the holding's native currency.
+ *  Faithful port of the legacy SPA's holdingStats() — the key subtlety is
+ *  that SnapTrade reports `costBasis` and `openPnl` PER UNIT, so the
+ *  position totals are `units × …`. `value` is the position total when the
+ *  broker supplies it (Israeli funds); otherwise `units × price` (IBKR's
+ *  VBR/VT leave value null). Gain prefers value − cost and falls back to
+ *  the reported openPnl only when value or cost is unknown. Treating these
+ *  as totals (the earlier React bug) made Portfolio value read ₪0 and the
+ *  P&L wildly wrong. */
+function holdingStats(h: {
+  value: number | null; units: number; price: number | null;
+  costBasis: number | null; openPnl: number | null;
+}): HoldingStats {
+  const value = h.value != null
+    ? h.value
+    : (h.price != null ? h.units * h.price : null);
+  const cost = h.costBasis != null ? h.units * h.costBasis : null;
+  const gain = value != null && cost != null
+    ? value - cost
+    : (h.openPnl != null ? h.openPnl : null);
+  const gainPct = gain != null && cost ? (gain / Math.abs(cost)) * 100 : null;
+  return { value, cost, gain, gainPct };
+}
+
 function convertAmount(
   amount: number, from: string, to: string, rates: Record<string, number> | null,
 ): number {
@@ -496,9 +527,10 @@ function BrokerageSubTab() {
   let unrealized = 0;
   let costBasis = 0;
   for (const h of scopedHoldings) {
-    portfolioValue += convertAmount(h.value ?? 0, h.currency, cur, rates);
-    unrealized   += convertAmount(h.openPnl ?? 0, h.currency, cur, rates);
-    costBasis    += convertAmount(h.costBasis ?? 0, h.currency, cur, rates);
+    const s = holdingStats(h);
+    portfolioValue += convertAmount(s.value ?? 0, h.currency, cur, rates);
+    unrealized   += convertAmount(s.gain ?? 0, h.currency, cur, rates);
+    costBasis    += convertAmount(s.cost ?? 0, h.currency, cur, rates);
   }
   const returnOnCost = costBasis > 0 ? (unrealized / costBasis) * 100 : 0;
 
@@ -620,13 +652,13 @@ function BrokerageSubTab() {
           <ul className="brokerage-holdings" data-testid="brokerage-holdings">
             {scopedHoldings
               .slice()
-              .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
+              .sort((a, b) => (holdingStats(b).value ?? 0) - (holdingStats(a).value ?? 0))
               .map((h, i) => {
-                const valCur = convertAmount(h.value ?? 0, h.currency, cur, rates);
+                const s = holdingStats(h);
+                const valCur = convertAmount(s.value ?? 0, h.currency, cur, rates);
                 const weight = portfolioValue > 0 ? (valCur / portfolioValue) * 100 : 0;
-                const pnlCur = convertAmount(h.openPnl ?? 0, h.currency, cur, rates);
-                const costCur = convertAmount(h.costBasis ?? 0, h.currency, cur, rates);
-                const pnlPct = costCur > 0 ? (pnlCur / costCur) * 100 : 0;
+                const pnlCur = convertAmount(s.gain ?? 0, h.currency, cur, rates);
+                const pnlPct = s.gainPct ?? 0;
                 const palette = ['#5C9EF5', '#5CC773', '#A880ED', '#F59942', '#E96B6B'];
                 const dot = palette[i % palette.length];
                 return (
@@ -651,7 +683,7 @@ function BrokerageSubTab() {
                       {money(valCur, cur)}
                       <div className="bh-weight-pct">{weight.toFixed(1)}%</div>
                     </div>
-                    {h.openPnl != null && (
+                    {s.gain != null && (
                       <span className={`brk-pnl ${pnlCur >= 0 ? 'good' : 'bad'}`}>
                         {pnlCur >= 0 ? '▲' : '▼'} {Math.abs(pnlPct).toFixed(2)}%
                         {' '}
