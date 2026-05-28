@@ -992,6 +992,34 @@ describe('AccountsView — add connection (picker + bank/card form)', () => {
     await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
   });
 
+  it('auto-starts a sync right after a scraped connection is added (no manual Sync needed)', async () => {
+    const user = userEvent.setup();
+    const scrape = vi.fn(() => ({ runId: 'r-new' }));
+    installFetchMock({
+      ...FULL,
+      'GET /api/companies': () => COMPANIES_FULL,
+      'POST /api/connections': () => ({ connection: {
+        id: 'new-1', companyId: 'hapoalim', displayName: 'My Hapoalim',
+        createdAt: '2026-05-26', lastScrapeAt: null, lastStatus: null,
+        hasCredentials: true, historyMonths: 12,
+      } }),
+      'POST /api/connections/new-1/scrape': scrape,
+      'GET /api/scrape/r-new': () => ({ run: { status: 'running', message: 'Starting…' } }),
+    });
+    render(<AccountsView />);
+    await user.click(await screen.findByRole('button', { name: /add asset/i }));
+    const picker = screen.getByRole('dialog', { name: /add an asset/i });
+    await user.click(within(picker).getByRole('button', { name: /banks/i }));
+    await user.click(within(picker).getByText('Bank Hapoalim'));
+    const dialog = screen.getByRole('dialog', { name: /add bank hapoalim/i });
+    await user.type(within(dialog).getByLabelText(/userCode/i), '12345');
+    await user.type(within(dialog).getByLabelText(/password/i), 'secret');
+    await user.click(within(dialog).getByRole('button', { name: /add$/i }));
+    // The new connection's first sync fires automatically — the user never
+    // had to find and press Sync.
+    await waitFor(() => expect(scrape).toHaveBeenCalledTimes(1));
+  });
+
   it('the "Custom pension account" row routes to AddManualAssetForm with kind=pension preselected', async () => {
     const user = userEvent.setup();
     installFetchMock({ ...FULL, 'GET /api/companies': () => COMPANIES_FULL });
