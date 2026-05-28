@@ -65,6 +65,24 @@ describe('PensionPickerStep', () => {
     expect(screen.getByRole('button', { name: /custom pension account/i })).toBeInTheDocument();
   });
 
+  it('renders the custom row OUTSIDE the scrollable provider list so it is not clipped', () => {
+    // Regression: the provider list (.add-picker) has a max-height and
+    // scrolls; the custom row must live outside it or it gets pushed
+    // below the fold and becomes undiscoverable.
+    const { container } = render(
+      <PensionPickerStep
+        companies={companies}
+        onPickCompany={() => {}}
+        onPickCustom={() => {}}
+        onBack={() => {}}
+      />,
+    );
+    const list = container.querySelector('.add-picker');
+    const custom = screen.getByRole('button', { name: /custom pension account/i });
+    expect(list).not.toBeNull();
+    expect(list!.contains(custom)).toBe(false);
+  });
+
   it('calls onPickCompany with the picked provider', async () => {
     const user = userEvent.setup();
     const onPickCompany = vi.fn();

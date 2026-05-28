@@ -2604,6 +2604,13 @@ button.mini { padding: 5px 11px; font-size: 12px; }
   background: color-mix(in srgb, var(--amber) 20%, transparent);
   color: var(--amber);
 }
+/* Pinned manual-entry row: sits below the scrollable provider list so it
+   stays visible even when the list overflows its max-height. The top
+   hairline + spacing set it apart from the scraped-provider list above. */
+.add-picker-custom {
+  margin-top: 10px; padding-top: 14px;
+  border-top: 1px solid var(--hairline-2);
+}
 
 /* --- Logo (favicon-over-emoji) --------------------------------------- */
 .logo {
