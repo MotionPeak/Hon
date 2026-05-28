@@ -1,4 +1,5 @@
 import type { Company } from './types';
+import { CompanyLogo } from './CompanyLogo';
 
 interface PensionPickerStepProps {
   /** All companies known to the engine. The component filters internally to
@@ -99,6 +100,7 @@ export function PensionProviderRow(
         className="add-picker-row"
         onClick={onPick}
       >
+        <CompanyLogo company={company} />
         <span className="add-picker-text">
           <span className="add-picker-name">{company.name}</span>
           <span className="add-picker-sub">
