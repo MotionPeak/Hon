@@ -1,4 +1,5 @@
-import { useId } from 'react';
+import { useId, useState } from 'react';
+import { money } from '../format';
 import { smoothPath } from './smooth';
 
 export interface SeriesPoint {
@@ -28,12 +29,9 @@ function fmtAxisDate(iso: string): string {
 /**
  * Full port of the legacy SPA's lineChart() (sidecar/public/app.html).
  * Smooth equity curve with grid, glow, gradient fill, tone color and an
- * interactive hover crosshair + dot + tooltip. Hover wiring lands in a
- * follow-up step; this render covers the static SVG.
+ * interactive hover crosshair + dot + tooltip.
  */
-// `currency` is part of the stable prop contract but only consumed once the
-// hover tooltip lands in Task 2; alias it so TS strict doesn't flag it unused.
-export function LineChart({ series, currency: _currency, tone, showAxis = true }: LineChartProps) {
+export function LineChart({ series, currency, tone, showAxis = true }: LineChartProps) {
   const uid = useId().replace(/:/g, '');
   const n = series.length;
   // Guard the empty series: reduce() over [] yields ±Infinity, which would
@@ -54,8 +52,54 @@ export function LineChart({ series, currency: _currency, tone, showAxis = true }
   // 4 faint horizontal grid bands.
   const grid = [1, 2, 3, 4].map((i) => (H / 5) * i);
 
+  const [hover, setHover] = useState<number | null>(null);
+
+  // Percentage positions for the overlay (crosshair/dot/tooltip live in
+  // CSS % space, not SVG units).
+  const pts = series.map((p, i) => ({
+    xp: n > 1 ? (i / (n - 1)) * 100 : 50,
+    yp: (yAt(p.value) / H) * 100,
+  }));
+  const firstValue = series[0]?.value ?? 0;
+
+  const onMove = (clientX: number, currentTarget: HTMLElement): void => {
+    const rect = currentTarget.getBoundingClientRect();
+    if (rect.width === 0) return;
+    const xPct = ((clientX - rect.left) / rect.width) * 100;
+    let bestI = 0;
+    let bestD = Infinity;
+    for (let i = 0; i < pts.length; i++) {
+      const d = Math.abs(pts[i]!.xp - xPct);
+      if (d < bestD) { bestD = d; bestI = i; }
+    }
+    setHover(bestI);
+  };
+
+  const hv = hover != null ? series[hover] : null;
+  const hp = hover != null ? pts[hover] : null;
+  let sinceStart: { text: string; tone: 'good' | 'bad' } | null = null;
+  if (hv && n > 1 && firstValue) {
+    const change = hv.value - firstValue;
+    const pct = (change / Math.abs(firstValue)) * 100;
+    const sign = change >= 0 ? '+' : '−';
+    sinceStart = {
+      text: `${sign}${money(Math.abs(change), currency)} · ${change >= 0 ? '+' : ''}${pct.toFixed(2)}%`,
+      tone: change >= 0 ? 'good' : 'bad',
+    };
+  }
+  const tipSide = hp && hp.xp > 80 ? 'right' : hp && hp.xp < 20 ? 'left' : '';
+
   return (
-    <div className={`lc-wrap lc-${tone}`}>
+    <div
+      className={`lc-wrap lc-${tone}`}
+      onMouseMove={(e) => onMove(e.clientX, e.currentTarget)}
+      onMouseLeave={() => setHover(null)}
+      onTouchMove={(e) => {
+        const t = e.touches[0];
+        if (t) onMove(t.clientX, e.currentTarget);
+      }}
+      onTouchEnd={() => setHover(null)}
+    >
       <svg
         data-testid="brokerage-chart"
         className="lc-svg"
@@ -110,6 +154,33 @@ export function LineChart({ series, currency: _currency, tone, showAxis = true }
           vectorEffect="non-scaling-stroke"
         />
       </svg>
+
+      <div
+        className={`lc-cross${hp ? ' on' : ''}`}
+        style={hp ? { left: `${hp.xp}%` } : undefined}
+      />
+      <div
+        className={`lc-dot lc-${tone}${hp ? ' on' : ''}`}
+        style={hp ? { left: `${hp.xp}%`, top: `${hp.yp}%` } : undefined}
+      >
+        <span className="lc-dot-pulse" />
+      </div>
+      <div
+        className={`lc-tip lc-${tone}${hp ? ' on' : ''}${tipSide ? ' ' + tipSide : ''}`}
+        style={hp ? { left: `${hp.xp}%` } : undefined}
+      >
+        <div className="lc-tip-val">{hv ? money(hv.value, currency) : ''}</div>
+        <div className="lc-tip-date">{hv ? fmtAxisDate(hv.date) : ''}</div>
+        <div className="lc-tip-extras">
+          {sinceStart && (
+            <div className="lc-tip-row">
+              <span className="lc-tip-k">Since start</span>
+              <span className={`lc-tip-v ${sinceStart.tone}`}>{sinceStart.text}</span>
+            </div>
+          )}
+        </div>
+      </div>
+
       {showAxis && (
         <div className="lc-axis" data-testid="brokerage-chart-axis">
           <span>{fmtAxisDate(series[0]?.date ?? '')}</span>

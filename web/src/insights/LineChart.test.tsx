@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { LineChart } from './LineChart';
 
 const SERIES = [
@@ -70,5 +70,74 @@ describe('LineChart — static render', () => {
     expect(area === '' || area.startsWith('M')).toBe(true);
     // And it doesn't crash — chart still in the DOM.
     expect(svg).toBeInTheDocument();
+  });
+});
+
+describe('LineChart — hover', () => {
+  // jsdom gives every element a 0x0 box; stub a real width so the
+  // hover math (clientX → xPct → nearest index) has something to chew on.
+  function stubBox(el: Element, width = 400, left = 0) {
+    el.getBoundingClientRect = () => ({
+      width, height: 200, left, top: 0, right: left + width, bottom: 200,
+      x: left, y: 0, toJSON: () => ({}),
+    });
+  }
+
+  it('shows crosshair + dot + tooltip on mouse move and hides on leave', () => {
+    const { container } = render(
+      <LineChart series={SERIES} currency="USD" tone="good" />,
+    );
+    const wrap = container.querySelector('.lc-wrap')!;
+    stubBox(wrap);
+    // Move near the far right → last point (value 150).
+    fireEvent.mouseMove(wrap, { clientX: 398 });
+    expect(container.querySelector('.lc-cross.on')).not.toBeNull();
+    expect(container.querySelector('.lc-dot.on')).not.toBeNull();
+    const tip = container.querySelector('.lc-tip.on')!;
+    expect(tip).not.toBeNull();
+    expect(tip.querySelector('.lc-tip-val')!.textContent).toMatch(/150/);
+    // Leave clears.
+    fireEvent.mouseLeave(wrap);
+    expect(container.querySelector('.lc-cross.on')).toBeNull();
+    expect(container.querySelector('.lc-tip.on')).toBeNull();
+  });
+
+  it('tooltip shows the matching date and a "Since start" extra', () => {
+    const { container } = render(
+      <LineChart series={SERIES} currency="USD" tone="good" />,
+    );
+    const wrap = container.querySelector('.lc-wrap')!;
+    stubBox(wrap);
+    fireEvent.mouseMove(wrap, { clientX: 398 });
+    const tip = container.querySelector('.lc-tip')!;
+    expect(tip.querySelector('.lc-tip-date')!.textContent).toMatch(/Apr/);
+    // Since start: 150 vs first 100 → +50 / +50%.
+    const extras = tip.querySelector('.lc-tip-extras')!;
+    expect(extras.textContent).toMatch(/Since start/i);
+    expect(extras.textContent).toMatch(/50/);
+  });
+
+  it('flips the tooltip to .right near the right edge and .left near the left', () => {
+    const { container } = render(
+      <LineChart series={SERIES} currency="USD" tone="good" />,
+    );
+    const wrap = container.querySelector('.lc-wrap')!;
+    stubBox(wrap);
+    fireEvent.mouseMove(wrap, { clientX: 398 }); // ~99% → right
+    expect(container.querySelector('.lc-tip.right')).not.toBeNull();
+    fireEvent.mouseMove(wrap, { clientX: 2 });   // ~0% → left
+    expect(container.querySelector('.lc-tip.left')).not.toBeNull();
+  });
+
+  it('responds to touchmove and clears on touchend', () => {
+    const { container } = render(
+      <LineChart series={SERIES} currency="USD" tone="good" />,
+    );
+    const wrap = container.querySelector('.lc-wrap')!;
+    stubBox(wrap);
+    fireEvent.touchMove(wrap, { touches: [{ clientX: 398 }] });
+    expect(container.querySelector('.lc-tip.on')).not.toBeNull();
+    fireEvent.touchEnd(wrap);
+    expect(container.querySelector('.lc-tip.on')).toBeNull();
   });
 });
