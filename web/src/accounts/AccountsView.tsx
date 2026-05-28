@@ -7,9 +7,14 @@ import type {
 } from './types';
 import { DelayedLoader } from '../ui/DelayedLoader';
 import { SnapTradeBrokeragePicker } from './SnapTradeBrokeragePicker';
+import { PensionPickerStep } from './PensionPickerStep';
 
 const SnapTradeLinkFlow = lazy(() =>
   import('./SnapTradeLinkFlow').then((m) => ({ default: m.SnapTradeLinkFlow })),
+);
+
+const InteractiveSignInModal = lazy(() =>
+  import('./InteractiveSignInModal').then((m) => ({ default: m.InteractiveSignInModal })),
 );
 
 // Polling interval while a scrape is in-flight. Short enough that tests
@@ -128,13 +133,18 @@ export function AccountsView() {
   const [removingAsset, setRemovingAsset] = useState<ManualAsset | null>(null);
   const [editingLoan, setEditingLoan] = useState<Loan | null>(null);
   const [removingLoan, setRemovingLoan] = useState<Loan | null>(null);
+  // runIds that the user has dismissed from the InteractiveSignInModal.
+  // The engine-side scrape continues; we just hide the modal locally.
+  // Cleared when the run terminates so a re-sync shows the modal again.
+  const [dismissedInteractiveRunIds, setDismissedInteractiveRunIds] =
+    useState<Set<string>>(() => new Set());
   // Add-asset flow:
   //   null            — closed
   //   'picker'        — list of companies + manual-asset / manual-loan rows
   //   Company         — credential form for a bank/card provider
   //   'manual-asset'  — form for a hand-entered asset (car/property/cash/…)
   //   'manual-loan'   — form for a hand-entered loan (Spitzer amortisation)
-  type AddFlow = null | 'picker' | 'manual-asset' | 'manual-loan' | Company;
+  type AddFlow = null | 'picker' | 'manual-asset' | 'manual-loan' | 'manual-pension' | Company;
   const [addFlow, setAddFlow] = useState<AddFlow>(null);
   // When set, render <SnapTradeLinkFlow> in its own modal portal. Holds the
   // connectionId of the newly-created (or existing) SnapTrade connection,
@@ -237,14 +247,34 @@ export function AccountsView() {
         );
       } else if (run.status === 'success') {
         setSyncForConnection(connectionId, { kind: 'idle' });
+        // Cleared before refresh() flushes — both setters batch together
+        // before the await, so the dismissed entry never outlives the run.
+        setDismissedInteractiveRunIds((prev) => {
+          if (!prev.has(runId)) return prev;
+          const next = new Set(prev);
+          next.delete(runId);
+          return next;
+        });
         await refresh();
       } else {
         setSyncForConnection(connectionId, { kind: 'error', message: run.message || 'Sync failed' });
+        setDismissedInteractiveRunIds((prev) => {
+          if (!prev.has(runId)) return prev;
+          const next = new Set(prev);
+          next.delete(runId);
+          return next;
+        });
       }
     } catch (e) {
       setSyncForConnection(connectionId, {
         kind: 'error',
         message: e instanceof ApiError ? e.message : String(e),
+      });
+      setDismissedInteractiveRunIds((prev) => {
+        if (!prev.has(runId)) return prev;
+        const next = new Set(prev);
+        next.delete(runId);
+        return next;
       });
     }
   }, [refresh, setSyncForConnection]);
@@ -434,6 +464,7 @@ export function AccountsView() {
           onPickCompany={(c) => setAddFlow(c)}
           onPickManualAsset={() => setAddFlow('manual-asset')}
           onPickManualLoan={() => setAddFlow('manual-loan')}
+          onPickManualPension={() => setAddFlow('manual-pension')}
           onPickBrokerage={(connectionId, brokerSlug, brokerName) => {
             setAddFlow(null);
             setLinkSnapTradeFor({ connectionId, brokerSlug, brokerName });
@@ -449,6 +480,13 @@ export function AccountsView() {
       )}
       {addFlow === 'manual-loan' && (
         <AddManualLoanForm
+          onClose={() => setAddFlow(null)}
+          onSaved={async () => { setAddFlow(null); await refresh(); }}
+        />
+      )}
+      {addFlow === 'manual-pension' && (
+        <AddManualAssetForm
+          initialKind="pension"
           onClose={() => setAddFlow(null)}
           onSaved={async () => { setAddFlow(null); await refresh(); }}
         />
@@ -508,6 +546,38 @@ export function AccountsView() {
               // running or success. Don't reset to idle here.
             }}
           />
+        );
+      })()}
+      {(() => {
+        // Mount one InteractiveSignInModal at a time, for the first connection
+        // observed running an interactive sync that the user hasn't dismissed.
+        const entry = Object.entries(syncStates).find(([connectionId, s]) => {
+          if (s.kind !== 'running') return false;
+          if (dismissedInteractiveRunIds.has(s.runId)) return false;
+          const conn = data.connections.find((c) => c.id === connectionId);
+          if (!conn) return false;
+          const company = data.companies.find((c) => c.id === conn.companyId);
+          return Boolean(company?.interactive);
+        });
+        if (!entry) return null;
+        const [connectionId, state] = entry;
+        if (state.kind !== 'running') return null; // TS narrowing
+        const conn = data.connections.find((c) => c.id === connectionId);
+        const company = conn && data.companies.find((c) => c.id === conn.companyId);
+        if (!conn || !company) return null;
+        return (
+          <Suspense fallback={null}>
+            <InteractiveSignInModal
+              company={company}
+              onClose={() => {
+                setDismissedInteractiveRunIds((prev) => {
+                  const next = new Set(prev);
+                  next.add(state.runId);
+                  return next;
+                });
+              }}
+            />
+          </Suspense>
         );
       })()}
     </div>
@@ -1159,6 +1229,10 @@ interface AddConnectionPickerProps {
   onPickCompany: (company: Company) => void;
   onPickManualAsset: () => void;
   onPickManualLoan: () => void;
+  /** Picker's "Custom pension account" row routes here. Parent maps it to
+   *  setAddFlow('manual-pension'), which renders <AddManualAssetForm
+   *  initialKind='pension' …/>. */
+  onPickManualPension: () => void;
   /** Fired when the user picks a brokerage in the inline brokerage list.
    *  The parent closes the picker and opens SnapTradeLinkFlow with the
    *  broker pre-selected. */
@@ -1190,7 +1264,7 @@ const PICKER_TILES: CategoryTile[] = [
   { key: 'car', label: 'Car', emoji: '🚗', subOverride: 'looked up by plate',
     comingSoon: true },
   { key: 'pension', label: 'Pension & savings', emoji: '🪺',
-    subOverride: 'pension, gemel & study fund', comingSoon: true },
+    subOverride: 'pension, gemel & study fund' },
   { key: 'loan', label: 'Loan', emoji: '📉', leaf: 'manual-loan',
     subOverride: 'mortgage, car loan, prime / CPI-linked' },
   { key: 'asset', label: 'Other asset', emoji: '💎', leaf: 'manual-asset',
@@ -1200,12 +1274,13 @@ const PICKER_TILES: CategoryTile[] = [
 type PickerStep =
   | { kind: 'category' }
   | { kind: 'institution'; category: 'bank' | 'card' }
+  | { kind: 'pension' }
   | { kind: 'snaptrade-credentials' }
   | { kind: 'snaptrade-brokerages'; connectionId: string };
 
 function AddConnectionPicker(
   { companies, connections, onPickCompany, onPickManualAsset, onPickManualLoan,
-    onPickBrokerage, onClose }:
+    onPickManualPension, onPickBrokerage, onClose }:
     AddConnectionPickerProps,
 ) {
   const [step, setStep] = useState<PickerStep>({ kind: 'category' });
@@ -1234,6 +1309,7 @@ function AddConnectionPicker(
           const onClick = () => {
             if (tile.leaf === 'manual-asset') { onPickManualAsset(); return; }
             if (tile.leaf === 'manual-loan')  { onPickManualLoan();  return; }
+            if (tile.key === 'pension') { setStep({ kind: 'pension' }); return; }
             if (tile.key === 'brokerage') { openBrokerageStep(); return; }
             if (tile.key === 'bank' || tile.key === 'card') {
               setStep({ kind: 'institution', category: tile.key });
@@ -1297,6 +1373,16 @@ function AddConnectionPicker(
   const renderStep = () => {
     if (step.kind === 'category') return renderCategoryStep();
     if (step.kind === 'institution') return renderInstitutionStep();
+    if (step.kind === 'pension') {
+      return (
+        <PensionPickerStep
+          companies={companies}
+          onPickCompany={onPickCompany}
+          onPickCustom={onPickManualPension}
+          onBack={() => setStep({ kind: 'category' })}
+        />
+      );
+    }
     if (step.kind === 'snaptrade-credentials') {
       if (!snapTradeCompany) {
         return (
@@ -1470,22 +1556,35 @@ function SnapTradeBrokeragesStep(
   );
 }
 
-const ASSET_KINDS: Array<[string, string]> = [
+const ASSET_KINDS = [
   ['cash', 'Cash / savings'],
   ['property', 'Property'],
   ['car', 'Car'],
   ['crypto', 'Crypto'],
   ['pension', 'Pension'],
   ['other', 'Other'],
-];
+] as const;
+
+/** The legal kind values for a manual asset. Derived from ASSET_KINDS
+ *  so a new entry there is automatically allowed as an initialKind. */
+export type AssetKind = typeof ASSET_KINDS[number][0];
 
 interface AddManualAssetFormProps {
   onClose: () => void;
   onSaved: () => void | Promise<void>;
+  /** Preselects the Kind dropdown. Defaults to 'cash'. Used by the pension
+   *  picker's "Custom pension account" row to land on the right kind. */
+  initialKind?: AssetKind;
 }
 
-function AddManualAssetForm({ onClose, onSaved }: AddManualAssetFormProps) {
-  const [kind, setKind] = useState('cash');
+/**
+ * Modal form for adding a manual (non-scraped) asset to the user's
+ * net-worth view. Used both from the standalone "Other asset" picker
+ * tile and from the pension picker's "Custom pension account" row
+ * (which preselects the Kind dropdown via the `initialKind` prop).
+ */
+export function AddManualAssetForm({ onClose, onSaved, initialKind }: AddManualAssetFormProps) {
+  const [kind, setKind] = useState(initialKind ?? 'cash');
   const [name, setName] = useState('');
   const [value, setValue] = useState('');
   const [currency, setCurrency] = useState('ILS');
@@ -1514,7 +1613,7 @@ function AddManualAssetForm({ onClose, onSaved }: AddManualAssetFormProps) {
           </p>
           <label className="field">
             <span>Kind</span>
-            <select value={kind} onChange={(e) => setKind(e.target.value)}>
+            <select value={kind} onChange={(e) => setKind(e.target.value as AssetKind)}>
               {ASSET_KINDS.map(([id, label]) => (
                 <option key={id} value={id}>{label}</option>
               ))}

@@ -2584,6 +2584,27 @@ button.mini { padding: 5px 11px; font-size: 12px; }
 }
 .add-picker-emoji { font-size: 18px; line-height: 1; }
 
+/* Pension picker rows stack name + sub vertically with a status chip on
+   the right; the shared .add-picker-name sets flex:1 for the bank row's
+   horizontal layout, so reset it inside the vertical text wrapper. */
+.add-picker-text {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;
+}
+.add-picker-text .add-picker-name { flex: 0 0 auto; }
+.pension-tag {
+  flex: 0 0 auto; align-self: center;
+  font-size: 10px; font-weight: 600; letter-spacing: .02em;
+  padding: 3px 9px; border-radius: 999px; white-space: nowrap;
+}
+.pension-tag--auto {
+  background: color-mix(in srgb, var(--green) 18%, transparent);
+  color: var(--green);
+}
+.pension-tag--manual {
+  background: color-mix(in srgb, var(--amber) 20%, transparent);
+  color: var(--amber);
+}
+
 /* --- Logo (favicon-over-emoji) --------------------------------------- */
 .logo {
   position: relative; flex: 0 0 32px; width: 32px; height: 32px;

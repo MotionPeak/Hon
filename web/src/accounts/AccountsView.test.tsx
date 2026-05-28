@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { AccountsView } from './AccountsView';
+import { AccountsView, AddManualAssetForm } from './AccountsView';
 import { installFetchMock, jsonResponse } from '../test/mockFetch';
 
 const COMPANIES = {
@@ -509,6 +509,83 @@ describe('AccountsView — sync flow', () => {
     await waitFor(() => expect(submitOtp).toHaveBeenCalledTimes(1));
     expect(submitOtp.mock.calls[0]?.[0]).toEqual({ code: '123456' });
   });
+
+  it('mounts InteractiveSignInModal while a scrape runs on an interactive pension connection', async () => {
+    const user = userEvent.setup();
+
+    let done = false;
+    installFetchMock({
+      ...FULL,
+      'GET /api/companies': () => ({
+        companies: [
+          { id: 'meitav', name: 'Meitav', loginFields: ['id', 'phone'],
+            type: 'pension', interactive: true },
+        ],
+      }),
+      'GET /api/connections': () => ({
+        connections: [{ id: 'c-meitav-1', companyId: 'meitav',
+          displayName: 'Meitav main', createdAt: '2026-01-01',
+          lastScrapeAt: null, lastStatus: null, hasCredentials: true }],
+      }),
+      'GET /api/accounts': () => ({ accounts: [] }),
+      'POST /api/connections/c-meitav-1/scrape': () => ({ runId: 'r-meitav' }),
+      'GET /api/scrape/r-meitav': () =>
+        done
+          ? ({ run: { status: 'success', message: 'ok' } })
+          : ({ run: { status: 'running', message: 'signing in' } }),
+    });
+
+    render(<AccountsView />);
+    await screen.findByText('Meitav main');
+
+    const card = (await screen.findByText('Meitav main')).closest('.conn-card')!;
+    await user.click(within(card as HTMLElement).getByRole('button', { name: /^sync$/i }));
+
+    expect(await screen.findByRole('dialog', { name: /sign in.*meitav/i }))
+      .toBeInTheDocument();
+
+    done = true;
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: /sign in.*meitav/i }))
+        .not.toBeInTheDocument();
+    });
+  });
+
+  it('Close button hides InteractiveSignInModal without cancelling the scrape', async () => {
+    const user = userEvent.setup();
+    installFetchMock({
+      ...FULL,
+      'GET /api/companies': () => ({
+        companies: [
+          { id: 'meitav', name: 'Meitav', loginFields: ['id', 'phone'],
+            type: 'pension', interactive: true },
+        ],
+      }),
+      'GET /api/connections': () => ({
+        connections: [{ id: 'c-meitav-1', companyId: 'meitav',
+          displayName: 'Meitav main', createdAt: '2026-01-01',
+          lastScrapeAt: null, lastStatus: null, hasCredentials: true }],
+      }),
+      'GET /api/accounts': () => ({ accounts: [] }),
+      'POST /api/connections/c-meitav-1/scrape': () => ({ runId: 'r-meitav' }),
+      'GET /api/scrape/r-meitav': () =>
+        ({ run: { status: 'running', message: 'signing in' } }),
+    });
+
+    render(<AccountsView />);
+    const card = (await screen.findByText('Meitav main')).closest('.conn-card')!;
+    await user.click(within(card as HTMLElement).getByRole('button', { name: /^sync$/i }));
+    const dialog = await screen.findByRole('dialog', { name: /sign in.*meitav/i });
+    await user.click(within(dialog).getByRole('button', { name: /close/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: /sign in.*meitav/i }))
+        .not.toBeInTheDocument();
+    });
+    // No remount: the dismissed-runIds set keeps the modal hidden as long
+    // as the run is still running. Re-mount would require a new runId
+    // (covered by the previous test's unmount-on-success path).
+  });
 });
 
 describe('AccountsView — brokerage holdings', () => {
@@ -620,20 +697,30 @@ describe('AccountsView — add connection (picker + bank/card form)', () => {
     expect(within(dialog).getByRole('button', { name: /other asset/i })).toBeInTheDocument();
   });
 
-  it('the brokerage drilldown shows SnapTrade; Pension and Car tiles render disabled (flows live in legacy)', async () => {
+  it('the brokerage drilldown shows SnapTrade; Car tile renders disabled (flow lives in legacy)', async () => {
     const user = userEvent.setup();
     installFetchMock({ ...FULL, 'GET /api/companies': () => COMPANIES_FULL });
     render(<AccountsView />);
     await user.click(await screen.findByRole('button', { name: /add asset/i }));
     const dialog = screen.getByRole('dialog', { name: /add an asset/i });
-    // Pension + Car tiles are visible but disabled until their flows are ported.
-    const pension = within(dialog).getByRole('button', { name: /pension/i });
-    const car = within(dialog).getByRole('button', { name: /^car/i });
-    expect(pension).toBeDisabled();
+    const car = within(dialog).getByRole('button', { name: /^car$/i });
     expect(car).toBeDisabled();
-    // Drill into Brokerages → SnapTrade row appears.
     await user.click(within(dialog).getByRole('button', { name: /brokerages/i }));
     expect(within(dialog).getByText(/SnapTrade/i)).toBeInTheDocument();
+  });
+
+  it('clicking the Pension tile opens the PensionPickerStep with providers and a custom row', async () => {
+    const user = userEvent.setup();
+    installFetchMock({ ...FULL, 'GET /api/companies': () => COMPANIES_FULL });
+    render(<AccountsView />);
+    await user.click(await screen.findByRole('button', { name: /add asset/i }));
+    const dialog = screen.getByRole('dialog', { name: /add an asset/i });
+    const pension = within(dialog).getByRole('button', { name: /^pension & savings$/i });
+    expect(pension).not.toBeDisabled();
+    await user.click(pension);
+    expect(within(dialog).getByRole('button', { name: /harel/i })).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: /custom pension account/i })).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: /all categories/i })).toBeInTheDocument();
   });
 
   it('drilling into Banks shows the bank list and a back button', async () => {
@@ -818,6 +905,19 @@ describe('AccountsView — add connection (picker + bank/card form)', () => {
     });
     await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
   });
+
+  it('the "Custom pension account" row routes to AddManualAssetForm with kind=pension preselected', async () => {
+    const user = userEvent.setup();
+    installFetchMock({ ...FULL, 'GET /api/companies': () => COMPANIES_FULL });
+    render(<AccountsView />);
+    await user.click(await screen.findByRole('button', { name: /add asset/i }));
+    const dialog = screen.getByRole('dialog', { name: /add an asset/i });
+    await user.click(within(dialog).getByRole('button', { name: /^pension & savings$/i }));
+    await user.click(within(dialog).getByRole('button', { name: /custom pension account/i }));
+    const assetDialog = await screen.findByRole('dialog', { name: /add a manual asset/i });
+    const kind = within(assetDialog).getByLabelText(/kind/i) as HTMLSelectElement;
+    expect(kind.value).toBe('pension');
+  });
 });
 
 describe('AccountsView — asset edit + remove', () => {
@@ -965,3 +1065,26 @@ describe('AccountsView — SnapTrade link flow', () => {
     expect(await screen.findByRole('button', { name: /Interactive Brokers/i })).toBeInTheDocument();
   });
 });
+
+describe('AddManualAssetForm — initialKind prop', () => {
+  it('defaults the Kind dropdown to "cash" when no initialKind is given', () => {
+    installFetchMock({});
+    render(<AddManualAssetForm onClose={() => {}} onSaved={async () => {}} />);
+    const kind = screen.getByLabelText(/kind/i) as HTMLSelectElement;
+    expect(kind.value).toBe('cash');
+  });
+
+  it('preselects the Kind dropdown to the provided initialKind', () => {
+    installFetchMock({});
+    render(
+      <AddManualAssetForm
+        initialKind="pension"
+        onClose={() => {}}
+        onSaved={async () => {}}
+      />,
+    );
+    const kind = screen.getByLabelText(/kind/i) as HTMLSelectElement;
+    expect(kind.value).toBe('pension');
+  });
+});
+

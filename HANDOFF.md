@@ -31,8 +31,17 @@
    feature → invoke `superpowers:brainstorming` → `writing-plans` →
    `executing-plans`.
 
-## TL;DR — state of the world (2026-05-27)
+## TL;DR — state of the world (2026-05-28)
 
+- **Pension flow ported to React this session** (branch
+  `session/pension-react-port-2026-05-27`, 14 commits, NOT yet merged
+  to main). The Assets-picker Pension tile is now live: scraped
+  providers (Clal/Harel/Migdal automatic, Meitav/Menora browser-
+  window), custom manual-pension entry, and an `InteractiveSignInModal`
+  for the visible-window sync. All three paths visually verified via
+  chrome-devtools against the real engine. See § "What shipped this
+  session (2026-05-28)". **Car tile remains disabled** (its flow ports
+  separately).
 - **React migration done, structurally.** All 10 tabs ship from
   `web/` at near-legacy parity. The legacy SPA at
   `sidecar/public/app.html` is still served by the engine and is the
@@ -47,27 +56,84 @@
   card. Matches the legacy SPA's category-tile picker design 1:1
   (Banks / Credit cards / Brokerages / Car / Pension & savings /
   Loan / Other asset — Car + Pension disabled until React flows ship).
-- **Tests:** `cd web && npm test` → **315** passing. `cd sidecar &&
-  npm test` → **55** passing. Both typechecks clean.
-- **Most recent commit:** `dd5cfd7 web: brokerage drilldown — inline
-  credentials gate + brokerage list`. All pushed to origin/main.
+- **Tests:** `cd web && npm test` → **373** passing. `cd sidecar &&
+  npm test` → **60** passing. Both typechecks clean (verified on the
+  merged tree).
+- **Most recent work:** pension React port merged into `main` (this
+  merge). Just prior on `main`: SnapTrade re-link smoke fix +
+  brokerage-chart polish + nav-hover polish (parallel sessions).
 - **SnapTrade portal flow smoke-verified end-to-end (2026-05-27,
   session/snaptrade-smoke-2026-05-27).** The smoke surfaced a design
   gap: re-linking an already-linked broker (IBKR refreshed via
   SnapTrade Flex) leaves connectionCount equal to baseline, so the
-  poll's `count > baseline` check never fired. Fix shipped on the
-  same branch: server-side done-flag registry keyed by Hon
-  connectionId, set by `/snaptrade/done` (now reads `honConn` from
-  the customRedirect query), surfaced by `/count` as `done: boolean`.
-  Polling hook treats either `count > baseline` OR `done === true`
-  as success. DonePanel copy switches to "<Broker> connection
-  refreshed." when accountsAdded is 0. `/snaptrade/done` HTML copy
-  also fixed (used to say "press Sync", contradicting the auto-sync
-  design).
+  poll's `count > baseline` check never fired. Fix shipped: server-side
+  done-flag registry keyed by Hon connectionId, set by `/snaptrade/done`
+  (now reads `honConn` from the customRedirect query), surfaced by
+  `/count` as `done: boolean`. Polling hook treats either
+  `count > baseline` OR `done === true` as success. DonePanel copy
+  switches to "<Broker> connection refreshed." when accountsAdded is 0.
 - **What's left:** see § "Deferred items". Nothing blocks shipping;
   each is its own follow-up.
 
-## What shipped this session (2026-05-27)
+## What shipped this session (2026-05-28) — Pension React port
+
+Branch `session/pension-react-port-2026-05-27`, commits
+`6cf0547`..`59841c2` (14 commits: 4 docs + 10 code, local-only).
+Built via brainstorming → writing-plans → subagent-driven-development.
+
+**What's now live in the React Assets picker:**
+
+1. **`AddManualAssetForm` gained an `initialKind` prop** (`b9967b8`,
+   `0b01423`) — typed as a derived `AssetKind` union (not bare
+   `string`) so a bad preset is a compile error. Defaults to `'cash'`.
+2. **`PensionPickerStep`** (`e221811`, `3bbac13`, `9dc3b43`) — a
+   dedicated picker component at `web/src/accounts/PensionPickerStep.tsx`.
+   Lists pension providers with an "Automatic" vs "Browser window" tag
+   chip, plus a trailing "Custom pension account" row. Row markup is an
+   exported `PensionProviderRow` sub-component (customization seam for
+   future per-provider variants). Empty-state `<li role="status">`.
+3. **Pension tile wired** (`72d3988`, `b1c1e6b`) — dropped `comingSoon`,
+   added `{ kind: 'pension' }` to the picker's `PickerStep` union and a
+   `'manual-pension'` literal to `AccountsView`'s `AddFlow` union. The
+   custom row routes to `AddManualAssetForm initialKind="pension"`; a
+   scraped provider routes through the existing `onPickCompany` →
+   `AddConnectionForm` path (same as banks).
+4. **`InteractiveSignInModal`** (`cc25c1c`, `eef37ca`, `59841c2`) — at
+   `web/src/accounts/InteractiveSignInModal.tsx`, lazy-loaded (matches
+   `SnapTradeLinkFlow`). Mounted by `AccountsView` whenever a sync is
+   `running` on a connection whose company has `interactive: true`.
+   "Close" dismisses it locally via a `dismissedInteractiveRunIds` Set
+   without cancelling the engine-side scrape; the runId is cleared from
+   that Set when the run terminates. Has a `hints?` slot (seam) for
+   future per-provider tips.
+
+**No engine changes** — `PENSION_COMPANIES`, `runPensionScrape`, the
+visible-window pop, and vault/credential persistence were all already
+in place. UI-only port.
+
+**Visually verified** (chrome-devtools, parallel worktree Vite on 5174
+against the live engine on 4000, real account data):
+- Path A — picker shows Clal/Harel/Migdal "Automatic" + Meitav/Menora
+  "Browser window" + custom row.
+- Path B — clicking Meitav opens `AddConnectionForm` (id + phone fields).
+- Path C — custom row opens `AddManualAssetForm` with Kind=Pension.
+- Pension dashboard section renders real Meitav + Migdal data.
+- Regression: Banks picker + Car-disabled tile both intact.
+
+**Hand-test still owed (needs Shahar's credentials):** the actual
+visible-window Meitav/Menora sign-in → scrape → `InteractiveSignInModal`
+mount cannot be exercised without real Meitav/Menora credentials. The
+modal mount/unmount is covered by unit tests with a mocked poll, but
+the live OS-window handshake has never run end-to-end in React.
+
+**Known minor gap:** the React `AddConnectionForm` shows generic
+"credentials encrypted in the vault" copy for interactive funds — it
+doesn't pre-warn "a browser window will open on sync" the way the
+legacy SPA's credential step did. The `InteractiveSignInModal` surfaces
+that explanation at sync time instead (the more important moment), so
+this is a deferred polish item, not a blocker.
+
+## What shipped last session (2026-05-27)
 
 Branch `main`, commits `e9ef14d`..`dd5cfd7` (17 commits, all pushed):
 
@@ -343,11 +409,29 @@ All 10 tabs render with rich, near-legacy parity. Highlights:
 - **Car flow port to React** — tile is visible-but-disabled today.
   Legacy `renderCarStep` in `sidecar/public/app.html` is the
   reference: plate-lookup via data.gov.il, deep-link to Yad2 for
-  price (CAPTCHA-walled per memory).
-- **Pension flow port to React** — tile is visible-but-disabled
-  today. Pension scrapers (Migdal/Harel/Clal automated +
-  Meitav/Menora visible-window + Altshuler manual) all work in the
-  legacy SPA / engine; just no React UI yet.
+  price (CAPTCHA-walled per memory). **Next React port to do** — and
+  it should follow the same dedicated-PickerStep pattern the pension
+  port just established (see `PensionPickerStep`).
+- ~~**Pension flow port to React**~~ — **DONE 2026-05-28** on branch
+  `session/pension-react-port-2026-05-27` (not yet merged). See
+  § "What shipped this session (2026-05-28)".
+
+**Pension-port follow-ups** (small, deferred from this session for scope):
+
+- **Live hand-test of the interactive (Meitav/Menora) sync** — needs
+  Shahar's real credentials; the visible-window handshake → modal has
+  only been unit-tested with a mocked poll.
+- **Per-provider hints in `InteractiveSignInModal`** — the `hints?`
+  slot exists; no real hint (e.g. a Meitav captcha tip) is wired yet.
+- **Interactive-fund copy on the credential form** — React
+  `AddConnectionForm` shows generic vault copy; it could pre-warn about
+  the browser window the way the legacy SPA did (the sync-time modal
+  covers it for now).
+- **Per-kind label on `AddManualAssetForm`** — legacy SPA relabels
+  "Value" → "Amount accumulated" for pensions; the React form keeps
+  "Value". Trivial follow-up.
+- **`rowComponent` prop on `PensionPickerStep`** — wire it only when a
+  real per-provider row variant actually arrives (YAGNI until then).
 
 **Smaller polish** (also covered in CODE-REVIEW §3):
 
@@ -360,7 +444,7 @@ All 10 tabs render with rich, near-legacy parity. Highlights:
 
 ## Tests + Superpowers usage
 
-- `cd web && npm test` → 315.
+- `cd web && npm test` → 355.
 - `cd sidecar && npm test` → 55.
 - `cd web && npm run typecheck` → clean.
 - **Use `/test-driven-development`** for each new component:
