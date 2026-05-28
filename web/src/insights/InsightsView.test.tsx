@@ -373,9 +373,10 @@ describe('InsightsView — Brokerage sub-tab', () => {
     await user.click(await screen.findByRole('tab', { name: /brokerage/i }));
     const chart = await screen.findByTestId('brokerage-chart');
     expect(chart).toBeInTheDocument();
-    // The line should have one point per snapshot (3 in this case).
-    const points = chart.querySelectorAll('circle');
-    expect(points.length).toBe(3);
+    // LineChart renders a smooth path (no per-point circles); the axis
+    // reflects the visible window end date (last snapshot: Mar 15).
+    const axis = screen.getByTestId('brokerage-chart-axis');
+    expect(axis.lastChild!.textContent).toMatch(/Mar/);
   });
 
   it('Brokerage shows 5 stat tiles (Portfolio / Gain·1Y / Unrealized P&L / Return on cost / Holdings)', async () => {
@@ -460,19 +461,24 @@ describe('InsightsView — Brokerage sub-tab', () => {
     });
     renderView();
     await user.click(await screen.findByRole('tab', { name: /brokerage/i }));
-    const chart = await screen.findByTestId('brokerage-chart');
+    await screen.findByTestId('brokerage-chart');
+    // LineChart has no per-point circles; it exposes the visible point
+    // count via data-points on the .lc-wrap, which still reflects the
+    // active range filter.
+    const points = (): number =>
+      Number(document.querySelector('.lc-wrap')!.getAttribute('data-points'));
     // Default 1Y → ~13 monthly points (12 months back + current).
-    const oneYearPoints = chart.querySelectorAll('circle').length;
+    const oneYearPoints = points();
     // 3M → fewer points than 1Y.
     await user.click(screen.getByRole('button', { name: /^3M$/ }));
-    const threeMPoints = (await screen.findByTestId('brokerage-chart'))
-      .querySelectorAll('circle').length;
+    await screen.findByTestId('brokerage-chart');
+    const threeMPoints = points();
     expect(threeMPoints).toBeLessThan(oneYearPoints);
     expect(threeMPoints).toBeGreaterThan(0);
     // ALL → at least as many as 1Y.
     await user.click(screen.getByRole('button', { name: /^ALL$/ }));
-    const allPoints = (await screen.findByTestId('brokerage-chart'))
-      .querySelectorAll('circle').length;
+    await screen.findByTestId('brokerage-chart');
+    const allPoints = points();
     expect(allPoints).toBeGreaterThanOrEqual(oneYearPoints);
   });
 
@@ -643,7 +649,7 @@ describe('InsightsView — brokerage account pills', () => {
     await openBrokerage(user);
     const group = await screen.findByRole('group', { name: /accounts/i });
     await user.click(within(group).getByRole('button', { name: /Vanguard/ }));
-    const input = screen.getByLabelText(/investment start/i) as HTMLInputElement;
+    const input = screen.getByLabelText('Investment start') as HTMLInputElement;
     expect(input).toHaveValue('2024-06-01');
   });
 
@@ -659,7 +665,7 @@ describe('InsightsView — brokerage account pills', () => {
     await openBrokerage(user);
     const group = await screen.findByRole('group', { name: /accounts/i });
     await user.click(within(group).getByRole('button', { name: /Vanguard/ }));
-    const input = screen.getByLabelText(/investment start/i) as HTMLInputElement;
+    const input = screen.getByLabelText('Investment start') as HTMLInputElement;
     fireEvent.change(input, { target: { value: '2025-01-01' } });
     await waitFor(() => expect(patch).toHaveBeenCalled());
     expect(patch.mock.calls[0]?.[0]).toEqual({ inceptionDate: '2025-01-01' });
@@ -668,10 +674,12 @@ describe('InsightsView — brokerage account pills', () => {
 
   it('drops snapshots before account.inceptionDate when a focused account has an inception', async () => {
     // a-vg has inceptionDate '2024-06-01' but a snapshot at '2024-01-01'.
-    // Focusing Vanguard should drop the pre-inception snapshot. We
-    // can't read the SVG path coords reliably, but the chart's dots
-    // re-render once per snapshot — so the count of <circle> drops
-    // from 3 (full Vanguard series) to 2 (post-inception).
+    // Focusing Vanguard should drop the pre-inception snapshot. The
+    // LineChart has no per-point circles; the visible point count is
+    // exposed via data-points on the .lc-wrap. The two post-inception
+    // dates (2025-01-01, 2026-01-01) and 2024-01-01 both format to
+    // "Jan 1", so the axis date can't distinguish them — assert the
+    // point count drops from 3 (full series) to 2 (post-inception).
     installFetchMock({
       ...baseMocks,
       'GET /api/brokerage': () => ({
@@ -683,18 +691,19 @@ describe('InsightsView — brokerage account pills', () => {
     await openBrokerage(user);
     const group = await screen.findByRole('group', { name: /accounts/i });
     await user.click(within(group).getByRole('button', { name: /Vanguard/ }));
-    const chart = await screen.findByTestId('brokerage-chart');
-    const dots = chart.querySelectorAll('circle');
+    await screen.findByTestId('brokerage-chart');
+    const points = (): number =>
+      Number(document.querySelector('.lc-wrap')!.getAttribute('data-points'));
+    const before = points();
     // 3 snapshots total for a-vg; one is pre-inception (2024-01-01);
     // we expect 2 after the cutoff. (Range pill defaults to 1Y which
     // would also clip to ~1 year back from latest, but 2026-01-01 is
     // within 1Y of latest = 2026-01-01, and 2025-01-01 is at the
     // 1Y edge. Use ALL to remove the range filter from the picture.)
     await user.click(screen.getByRole('button', { name: /^ALL$/ }));
-    const dotsAll = (await screen.findByTestId('brokerage-chart'))
-      .querySelectorAll('circle');
-    expect(dotsAll.length).toBe(2);
-    expect(dots.length).toBeGreaterThan(0);
+    await screen.findByTestId('brokerage-chart');
+    expect(points()).toBe(2);
+    expect(before).toBeGreaterThan(0);
   });
 
   it('clearing the inception PATCHes with null', async () => {
@@ -710,5 +719,38 @@ describe('InsightsView — brokerage account pills', () => {
     await user.click(screen.getByRole('button', { name: /clear inception date/i }));
     await waitFor(() => expect(patch).toHaveBeenCalled());
     expect(patch.mock.calls[0]?.[0]).toEqual({ inceptionDate: null });
+  });
+
+  it('renders pills + inception BELOW the chart card in DOM order', async () => {
+    installFetchMock(baseMocks);
+    const user = userEvent.setup();
+    await openBrokerage(user);
+    const pane = document.querySelector('.brokerage-pane')!;
+    const chartCard = pane.querySelector('.brk-chart-card')!;
+    const pillRow = pane.querySelector('.brk-acct-row')!;
+    expect(chartCard).not.toBeNull();
+    expect(pillRow).not.toBeNull();
+    // compareDocumentPosition: FOLLOWING (4) means pillRow comes after chartCard.
+    expect(chartCard.compareDocumentPosition(pillRow) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
+  });
+
+  it('applies a tone class on the chart wrapper based on the period direction', async () => {
+    installFetchMock(baseMocks);
+    const user = userEvent.setup();
+    await openBrokerage(user);
+    // IBKR-only series rises 1500 → 2000 over the window → good (green).
+    const group = await screen.findByRole('group', { name: /accounts/i });
+    await user.click(within(group).getByRole('button', { name: /IBKR USD/ }));
+    expect(document.querySelector('.lc-wrap.lc-good')).not.toBeNull();
+  });
+
+  it('uses the legacy inception wording when an account is focused', async () => {
+    installFetchMock(baseMocks);
+    const user = userEvent.setup();
+    await openBrokerage(user);
+    const group = await screen.findByRole('group', { name: /accounts/i });
+    await user.click(within(group).getByRole('button', { name: /Vanguard/ }));
+    expect(screen.getByText(/since when "ALL" counts/i)).toBeInTheDocument();
   });
 });
