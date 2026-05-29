@@ -1098,6 +1098,97 @@ describe('InsightsView — brokerage account pills', () => {
   });
 });
 
+describe('InsightsView — brokerage ALL-range transaction cap', () => {
+  // A single brokerage account with snapshots spanning 2023–2026.
+  // The earliest transaction is 2025-01-01 — ALL should show only
+  // points from that date onward, discarding the 2023/2024 backfill.
+  const capAccounts = {
+    accounts: [
+      { id: 'brk-cap', connectionId: 'c-cap', companyId: 'snaptrade',
+        connectionName: 'IBKR', accountNumber: '111', label: 'Cap Account',
+        balance: 5000, currency: 'USD', updatedAt: '2026-05-01',
+        excluded: false, inceptionDate: null },
+    ],
+  };
+  const capBrokerage = {
+    holdings: [
+      { accountId: 'brk-cap', symbol: 'VT', description: 'Total World',
+        units: 10, price: 100, currency: 'USD',
+        costBasis: 80, openPnl: 20, value: 1000, updatedAt: '2026-05-01' },
+    ],
+    snapshots: [
+      { accountId: 'brk-cap', date: '2023-01-01', value: 3000, currency: 'USD' },
+      { accountId: 'brk-cap', date: '2024-01-01', value: 3500, currency: 'USD' },
+      { accountId: 'brk-cap', date: '2025-01-01', value: 4000, currency: 'USD' },
+      { accountId: 'brk-cap', date: '2026-01-01', value: 5000, currency: 'USD' },
+    ],
+    holdingSnapshots: [],
+    performance: [],
+    ilsRates: { USD: 3.7 },
+  };
+
+  it('caps ALL at the earliest transaction date, dropping pre-ownership backfill', async () => {
+    const user = userEvent.setup();
+    installFetchMock({
+      ...EMPTY_TXNS,
+      // Override transactions: earliest is 2025-01-01 on brk-cap
+      'GET /api/transactions': () => ({
+        transactions: [
+          { id: 't1', accountId: 'brk-cap', externalId: 'x1',
+            date: '2025-03-15', processedDate: null,
+            amount: -200, currency: 'USD',
+            description: 'Buy VT', memo: null,
+            kind: null, status: null,
+            category: 'Other', createdAt: '2025-03-15' },
+          { id: 't2', accountId: 'brk-cap', externalId: 'x2',
+            date: '2025-01-01', processedDate: null,
+            amount: -500, currency: 'USD',
+            description: 'Initial buy', memo: null,
+            kind: null, status: null,
+            category: 'Other', createdAt: '2025-01-01' },
+        ],
+      }),
+      'GET /api/brokerage': () => capBrokerage,
+      'GET /api/accounts': () => capAccounts,
+    });
+    renderView();
+    await user.click(await screen.findByRole('tab', { name: /brokerage/i }));
+    await user.click(await screen.findByRole('button', { name: /^ALL$/ }));
+    await screen.findByTestId('brokerage-chart');
+    // 4 snapshots total; 2 are pre-2025-01-01 and must be dropped.
+    // After cap: 2025-01-01 and 2026-01-01 → 2 points.
+    const points = Number(document.querySelector('.lc-wrap')!.getAttribute('data-points'));
+    expect(points).toBe(2);
+  });
+
+  it('falls back to the full uncapped series when the cap would empty it', async () => {
+    const user = userEvent.setup();
+    installFetchMock({
+      ...EMPTY_TXNS,
+      // Transaction date is far in the future — would empty the series.
+      'GET /api/transactions': () => ({
+        transactions: [
+          { id: 't1', accountId: 'brk-cap', externalId: 'x1',
+            date: '2099-01-01', processedDate: null,
+            amount: -100, currency: 'USD',
+            description: 'Future', memo: null,
+            kind: null, status: null,
+            category: 'Other', createdAt: '2099-01-01' },
+        ],
+      }),
+      'GET /api/brokerage': () => capBrokerage,
+      'GET /api/accounts': () => capAccounts,
+    });
+    renderView();
+    await user.click(await screen.findByRole('tab', { name: /brokerage/i }));
+    await user.click(await screen.findByRole('button', { name: /^ALL$/ }));
+    await screen.findByTestId('brokerage-chart');
+    // Cap would produce 0 points → fall back to uncapped (4 points).
+    const points = Number(document.querySelector('.lc-wrap')!.getAttribute('data-points'));
+    expect(points).toBe(4);
+  });
+});
+
 describe('InsightsView — per-range stat tiles', () => {
   // Shared fixture: one brokerage account (connectionId: 'conn1') with a
   // snapshot so it's in scopedBrkAccounts, and a performance entry carrying

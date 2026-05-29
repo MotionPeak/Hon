@@ -18,6 +18,7 @@ import {
   type HoldingSnapshot,
 } from './equitySeries';
 import { buildHoldingSeries } from './holdingSeries';
+import { earliestTxnDate } from './txnCap';
 
 function monthLetter(key: string): string {
   // "2026-05" → "M" (English month letter — matches the legacy app).
@@ -446,6 +447,7 @@ function InceptionBadge({ earliest }: InceptionBadgeProps) {
 function BrokerageSubTab() {
   const [data, setData] = useState<BrokerageResp | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [acctFilter, setAcctFilter] = useState<'all' | string>('all');
   const [range, setRange] = useState<Range>('1Y');
   const [displayCur, setDisplayCur] = useState<string | null>(null);
@@ -453,14 +455,18 @@ function BrokerageSubTab() {
 
   const refresh = useCallback(async () => {
     try {
-      const [b, a] = await Promise.all([
+      const [b, a, t] = await Promise.all([
         api<BrokerageResp>('/brokerage'),
         api<{ accounts: Account[] }>('/accounts').catch(
           () => ({ accounts: [] as Account[] }),
         ),
+        api<{ transactions: Transaction[] }>('/transactions').catch(
+          () => ({ transactions: [] as Transaction[] }),
+        ),
       ]);
       setData(b);
       setAccounts(a.accounts);
+      setTransactions(t.transactions);
     } catch {
       setData({
         holdings: [], snapshots: [], holdingSnapshots: [],
@@ -525,7 +531,7 @@ function BrokerageSubTab() {
   // instead of just the last few local snapshots.
   const convert = (value: number, currency: string): number =>
     convertAmount(value, currency, cur, rates);
-  const fullSeries = buildEquitySeries({
+  const fullSeriesUncapped = buildEquitySeries({
     performance: data.performance,
     snapshots: data.snapshots,
     holdingSnapshots: data.holdingSnapshots,
@@ -535,6 +541,21 @@ function BrokerageSubTab() {
     acctFilter,
     convert,
   });
+
+  // Cap ALL at the earliest known transaction so the chart doesn't paint
+  // pre-ownership Yahoo backfill for accounts that lack an explicit
+  // inceptionDate (manual entries, future non-SnapTrade scrapers).
+  const scopedAcctIdsForTxn = new Set(
+    acctFilter === 'all'
+      ? brkAccounts.map((a) => a.id)
+      : [acctFilter],
+  );
+  const txnCapDate = earliestTxnDate(transactions, scopedAcctIdsForTxn);
+  const fullSeriesCapped = txnCapDate
+    ? fullSeriesUncapped.filter((p) => p.date >= txnCapDate)
+    : fullSeriesUncapped;
+  const fullSeries = fullSeriesCapped.length ? fullSeriesCapped : fullSeriesUncapped;
+
   const series = sliceRange(fullSeries, range);
 
   const periodChange = (series.at(-1)?.value ?? 0) - (series[0]?.value ?? 0);
