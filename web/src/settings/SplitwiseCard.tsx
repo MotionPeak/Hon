@@ -6,6 +6,7 @@ import { useSplitwise } from '../splitwise/useSplitwise';
 export function SplitwiseCard() {
   const sw = useSplitwise();
   const [apiKey, setApiKey] = useState('');
+  const [showKey, setShowKey] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -56,12 +57,20 @@ export function SplitwiseCard() {
           </p>
           <div className="field">
             <label htmlFor="sw-api-key">API key</label>
-            <input
-              id="sw-api-key" type="password" value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              placeholder="paste your Splitwise API key"
-              disabled={busy}
-            />
+            <div className="sw-key-row">
+              <input
+                id="sw-api-key" type={showKey ? 'text' : 'password'} value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder="paste your Splitwise API key"
+                disabled={busy}
+              />
+              <button
+                type="button" className="sw-key-toggle"
+                aria-pressed={showKey}
+                aria-label={showKey ? 'Hide API key' : 'Show API key'}
+                onClick={() => setShowKey((v) => !v)}
+              >{showKey ? 'Hide' : 'Show'}</button>
+            </div>
           </div>
           <div className="form-actions">
             <button

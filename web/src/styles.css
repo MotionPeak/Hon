@@ -469,10 +469,22 @@ input[type="radio"], input[type="checkbox"] {
 /* --- Category editor form ------------------------------------------------ */
 .field { margin-bottom: 13px; }
 .field > span,
+.field > label,
 .field > legend {
   display: block; font-size: 13px; font-weight: 600; margin-bottom: 5px;
 }
 .field fieldset { border: 0; padding: 0; margin: 0; }
+
+/* API-key field with a Show/Hide reveal toggle (SplitwiseCard). */
+.sw-key-row { display: flex; gap: 8px; align-items: stretch; }
+.sw-key-row input { flex: 1; min-width: 0; }
+.sw-key-toggle {
+  flex: 0 0 auto; padding: 0 12px; border-radius: 8px;
+  border: 1px solid var(--hairline-2); background: var(--card-hi);
+  color: var(--muted); font-size: 13px; font-weight: 600; cursor: pointer;
+  transition: border-color .12s, color .12s;
+}
+.sw-key-toggle:hover { border-color: var(--indigo); color: var(--text); }
 .ce-emoji-grid {
   display: grid; grid-template-columns: repeat(11, 1fr);
   gap: 4px; margin-top: 4px;

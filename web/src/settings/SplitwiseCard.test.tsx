@@ -14,7 +14,7 @@ describe('SplitwiseCard', () => {
       'GET /api/splitwise/links': () => ({ links: [] }),
     });
     render(<SplitwiseCard />);
-    expect(await screen.findByLabelText(/api key/i)).toBeInTheDocument();
+    expect(await screen.findByLabelText('API key')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /connect/i })).toBeInTheDocument();
   });
 
@@ -33,10 +33,24 @@ describe('SplitwiseCard', () => {
       'POST /api/splitwise/refresh': () => ({ friends: [], links: [] }),
     });
     render(<SplitwiseCard />);
-    const input = await screen.findByLabelText(/api key/i);
+    const input = await screen.findByLabelText('API key');
     await userEvent.type(input, 'SECRET');
     await userEvent.click(screen.getByRole('button', { name: /connect/i }));
     await waitFor(() => expect(connect).toHaveBeenCalledWith({ apiKey: 'SECRET' }));
+  });
+
+  it('toggles the API-key field between hidden and visible', async () => {
+    installFetchMock({
+      'GET /api/splitwise/status': () => ({ connected: false, user: null }),
+      'GET /api/splitwise/links': () => ({ links: [] }),
+    });
+    render(<SplitwiseCard />);
+    const input = await screen.findByLabelText('API key');
+    expect(input).toHaveAttribute('type', 'password');
+    await userEvent.click(screen.getByRole('button', { name: /show api key/i }));
+    expect(input).toHaveAttribute('type', 'text');
+    await userEvent.click(screen.getByRole('button', { name: /hide api key/i }));
+    expect(input).toHaveAttribute('type', 'password');
   });
 
   it('shows connected state + disconnect when connected', async () => {
