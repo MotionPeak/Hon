@@ -3,8 +3,20 @@ import { render, screen, within } from '@testing-library/react';
 import { OverviewView } from './OverviewView';
 import { installFetchMock } from '../test/mockFetch';
 import { __resetSplitwiseCache } from '../splitwise/useSplitwise';
+import { SettingsProvider } from '../settings/useSettings';
 
-afterEach(() => { __resetSplitwiseCache(); });
+afterEach(() => { __resetSplitwiseCache(); localStorage.clear(); });
+
+// OverviewView reads settings (card-bill exclusion list) via useSettings, so it
+// must mount inside a SettingsProvider. Default settings have hideCardTotals on
+// and a cardProviders list that includes 'מקס' (Max).
+function renderOverview() {
+  return render(
+    <SettingsProvider>
+      <OverviewView />
+    </SettingsProvider>,
+  );
+}
 
 const FULL_SUMMARY = {
   byCurrency: [
@@ -114,16 +126,33 @@ function mocks(overrides: Record<string, unknown> = {}): Record<string, () => un
 }
 
 describe('OverviewView', () => {
+  it('passes card-provider exclusions to /budget when hideCardTotals is on', async () => {
+    const spy = installFetchMock(mocks());
+    renderOverview();
+    await screen.findByTestId('balance-card');
+    // The bank-side credit-card bill lump sum (e.g. "מקס איט פיננסים") is
+    // already itemised under the card account; counting it again on the bank
+    // side double-counts. /budget only drops it when the client passes the
+    // cardProvider exclusion list — same as Insights, Activity, legacy SPA.
+    const budgetCall = spy.mock.calls.find(
+      ([input]) => String(input).includes('/api/budget'),
+    );
+    expect(budgetCall, 'OverviewView should fetch /api/budget').toBeTruthy();
+    const url = decodeURIComponent(String(budgetCall![0]));
+    expect(url).toContain('cardProvider=');
+    expect(url).toContain('מקס');
+  });
+
   it('renders the net worth card with the ILS headline', async () => {
     installFetchMock(mocks());
-    render(<OverviewView />);
+    renderOverview();
     const card = (await screen.findByText(/total net worth/i)).closest('section')!;
     expect(within(card as HTMLElement).getByText(/92,?000/)).toBeInTheDocument();
   });
 
   it('renders per-currency chips when more than one currency is held', async () => {
     installFetchMock(mocks());
-    render(<OverviewView />);
+    renderOverview();
     const card = (await screen.findByText(/total net worth/i)).closest('section')!;
     expect(within(card as HTMLElement).getByText(/78,?000/)).toBeInTheDocument();
     expect(within(card as HTMLElement).getByText(/4,?300/)).toBeInTheDocument();
@@ -131,7 +160,7 @@ describe('OverviewView', () => {
 
   it('renders the "this month" balance headline (income - committed - spent)', async () => {
     installFetchMock(mocks());
-    render(<OverviewView />);
+    renderOverview();
     // 12000 - 7500 - 1200 = 3300
     const card = await screen.findByTestId('balance-card');
     const headline = card.querySelector('.balance-num') as HTMLElement;
@@ -145,7 +174,7 @@ describe('OverviewView', () => {
         variable: { ...FULL_BUDGET.variable, income: 5000, committed: 7500, spent: 1200 },
       }),
     }));
-    render(<OverviewView />);
+    renderOverview();
     // 5000 - 7500 - 1200 = -3700
     const card = await screen.findByTestId('balance-card');
     const headline = card.querySelector('.balance-num') as HTMLElement;
@@ -160,7 +189,7 @@ describe('OverviewView', () => {
       'GET /api/companies': () => ({ companies: [] }),
       'GET /api/accounts': () => ({ accounts: [] }),
     }));
-    render(<OverviewView />);
+    renderOverview();
     expect(await screen.findByText(/nothing here yet/i)).toBeInTheDocument();
   });
 
@@ -171,7 +200,7 @@ describe('OverviewView', () => {
         variable: { ...FULL_BUDGET.variable, piggyFunded: 500 },
       }),
     }));
-    render(<OverviewView />);
+    renderOverview();
     const card = await screen.findByTestId('bank-projection');
     // bankNow = 15000 + 1000 = 16000 (card account excluded)
     // change = 12000 − 7500 − 1200 − 500 = 2800
@@ -205,7 +234,7 @@ describe('OverviewView', () => {
         ],
       }),
     }));
-    render(<OverviewView />);
+    renderOverview();
     const card = await screen.findByTestId('bank-projection');
     // bankNow = 15,000 (only the first ILS bank account)
     expect(within(card).getByText(/15,?000/)).toBeInTheDocument();
@@ -219,14 +248,14 @@ describe('OverviewView', () => {
         accounts: [ACCOUNTS.accounts[2]], // only the card account — no banks
       }),
     }));
-    render(<OverviewView />);
+    renderOverview();
     await screen.findByTestId('balance-card');
     expect(screen.queryByTestId('bank-projection')).not.toBeInTheDocument();
   });
 
   it('renders an essentials card with one row per essential budget line', async () => {
     installFetchMock(mocks());
-    render(<OverviewView />);
+    renderOverview();
     const card = await screen.findByTestId('essentials-card');
     expect(within(card).getByText('Groceries')).toBeInTheDocument();
     expect(within(card).getByText('Transport')).toBeInTheDocument();
@@ -242,7 +271,7 @@ describe('OverviewView', () => {
         essentials: [{ category: 'Groceries', budget: 2000, spent: 2400 }],
       }),
     }));
-    render(<OverviewView />);
+    renderOverview();
     const card = await screen.findByTestId('essentials-card');
     const row = within(card).getByText('Groceries').closest('.ess-row');
     expect(row).not.toBeNull();
@@ -253,7 +282,7 @@ describe('OverviewView', () => {
     installFetchMock(mocks({
       'GET /api/budget': () => ({ ...FULL_BUDGET, essentials: [] }),
     }));
-    render(<OverviewView />);
+    renderOverview();
     await screen.findByTestId('balance-card');
     expect(screen.queryByTestId('essentials-card')).not.toBeInTheDocument();
   });
