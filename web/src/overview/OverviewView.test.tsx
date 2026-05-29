@@ -111,12 +111,38 @@ const EMPTY_BUDGET = {
   essentials: [],
 };
 
+// "YYYY-MM" for the cycle `n` calendar months before now (monthStartDay=1).
+function priorCycle(n: number): string {
+  const d = new Date();
+  d.setDate(1);
+  d.setMonth(d.getMonth() - n);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+// Default recurring fixture: one ₪5,400 monthly Housing bill seen in the two
+// prior cycles. expectedFixedThisCycle → 5,400 == FULL_BUDGET.fixedSpent, so
+// committedDisplay == the budget's committed (7,500) and the existing
+// projection/headline math tests keep their numbers.
+const RECURRING_DEFAULT = {
+  categories: [{ name: 'Housing', catGroup: 'fixed' }],
+  transactions: [
+    { id: 'h1', date: `${priorCycle(2)}-10`, amount: -5400, currency: 'ILS', description: 'RENT', category: 'Housing', refundForId: null },
+    { id: 'h2', date: `${priorCycle(1)}-10`, amount: -5400, currency: 'ILS', description: 'RENT', category: 'Housing', refundForId: null },
+  ],
+};
+
 function mocks(overrides: Record<string, unknown> = {}): Record<string, () => unknown> {
   return {
     'GET /api/summary': () => FULL_SUMMARY,
     'GET /api/budget': () => FULL_BUDGET,
     'GET /api/companies': () => COMPANIES,
     'GET /api/accounts': () => ACCOUNTS,
+    // Recurring endpoints feed the predicted-fixed headline (Task: predicted fixed).
+    'GET /api/transactions': () => ({ transactions: RECURRING_DEFAULT.transactions }),
+    'GET /api/categories': () => ({ categories: RECURRING_DEFAULT.categories }),
+    'GET /api/merchant-frequencies': () => ({ frequencies: {} }),
+    'GET /api/category-splits': () => ({ splits: {} }),
+    'GET /api/subscriptions/cancelled': () => ({ cancelled: {} }),
     // OwedToYouCard's useSplitwise hook fetches on mount; stub disconnected
     // so the card renders null and no /refresh call is made.
     'GET /api/splitwise/status': () => ({ connected: false, user: null }),
@@ -141,6 +167,40 @@ describe('OverviewView', () => {
     const url = decodeURIComponent(String(budgetCall![0]));
     expect(url).toContain('cardProvider=');
     expect(url).toContain('מקס');
+  });
+
+  it('uses predicted fixed (not posted) for "Expected fixed + essentials"', async () => {
+    // One detected ₪3,000 monthly Housing bill (two prior cycles) + ₪2,100
+    // essentialSpent → committedDisplay = 5,100, regardless of the budget's
+    // posted fixedSpent (5,400) / committed (7,500).
+    installFetchMock(mocks({
+      'GET /api/categories': () => ({ categories: [{ name: 'Housing', catGroup: 'fixed' }] }),
+      'GET /api/transactions': () => ({
+        transactions: [
+          { id: 't1', date: `${priorCycle(2)}-10`, amount: -3000, currency: 'ILS', description: 'RENT', category: 'Housing', refundForId: null },
+          { id: 't2', date: `${priorCycle(1)}-10`, amount: -3000, currency: 'ILS', description: 'RENT', category: 'Housing', refundForId: null },
+        ],
+      }),
+    }));
+    renderOverview();
+    const card = await screen.findByTestId('balance-card');
+    // net = income(12000) − committedDisplay(5100) − spent(1200) = 5700
+    expect((card.querySelector('.balance-num') as HTMLElement).textContent).toMatch(/5,?700/);
+    // committed line shows 5,100 (predicted 3,000 + essential 2,100), not 7,500.
+    // Scope to the headline breakdown — the projection line below also shows 5,100.
+    const line = card.querySelector('.balance-line') as HTMLElement;
+    expect(within(line).getByText(/5,?100/)).toBeInTheDocument();
+  });
+
+  it('falls back to posted committed when the recurring fetch fails', async () => {
+    installFetchMock(mocks({
+      'GET /api/transactions': () => new Response('boom', { status: 500 }),
+    }));
+    renderOverview();
+    const card = await screen.findByTestId('balance-card');
+    // recurring failed → committedDisplay = variable.committed (7500);
+    // net = 12000 − 7500 − 1200 = 3300
+    expect((card.querySelector('.balance-num') as HTMLElement).textContent).toMatch(/3,?300/);
   });
 
   it('renders the net worth card with the ILS headline', async () => {
