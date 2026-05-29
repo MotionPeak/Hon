@@ -8,6 +8,7 @@ import type { Category } from '../settings/CategoriesPanel';
 import type { Transaction } from '../activity/types';
 import type { Account } from '../accounts/types';
 import { cycleAnalytics, type MonthBucket } from './analytics';
+import { isExcludedFromCycle } from '../activity/excluded';
 import { LineChart } from './LineChart';
 import {
   buildEquitySeries,
@@ -44,9 +45,21 @@ export function InsightsView() {
     });
   }, []);
 
+  // Card-bill lump sums (and any manually-excluded txn) must NOT count as
+  // spending in Insights — they're already itemised under the card account,
+  // so counting the bank-side total too double-counts. Same rule the
+  // Activity tab + legacy SPA apply.
+  const isExcluded = useMemo(() => {
+    const opts = {
+      hideCardTotals: settings.hideCardTotals,
+      cardProviders: settings.cardProviders,
+    };
+    return (t: Transaction): boolean => isExcludedFromCycle(t, opts);
+  }, [settings.hideCardTotals, settings.cardProviders]);
+
   const months = useMemo(
-    () => transactions ? cycleAnalytics(transactions, settings.monthStartDay) : [],
-    [transactions, settings.monthStartDay],
+    () => transactions ? cycleAnalytics(transactions, settings.monthStartDay, isExcluded) : [],
+    [transactions, settings.monthStartDay, isExcluded],
   );
   const hasData = months.some((m) => m.spending > 0 || m.income > 0);
 
@@ -99,6 +112,7 @@ export function InsightsView() {
           transactions={transactions}
           categories={categories}
           monthStartDay={settings.monthStartDay}
+          isExcluded={isExcluded}
         />
       )}
       {subTab === 'spending' && <AiAnalysisCard />}
@@ -552,6 +566,14 @@ function BrokerageSubTab() {
   }
   const portfolioValue = haveBalance ? balanceTotal : holdingsValueTotal;
   const returnOnCost = costBasis > 0 ? (unrealized / costBasis) * 100 : 0;
+  // Uninvested cash = account balance minus the priced positions. Surfaced
+  // as its own holdings row so the positions visibly add up to the
+  // Portfolio total instead of silently falling short. Only when the
+  // balance is the source AND the gap is more than rounding noise.
+  const cashValue = haveBalance
+    ? Math.max(0, portfolioValue - holdingsValueTotal)
+    : 0;
+  const hasCashRow = cashValue >= 0.5;
 
   // Gain · 1Y: latest equity vs the equity point ~365d back — BOTH taken
   // from the same equity series so the figure stays internally consistent
@@ -675,7 +697,10 @@ function BrokerageSubTab() {
               .map((h, i) => {
                 const s = holdingStats(h);
                 const valCur = convertAmount(s.value ?? 0, h.currency, cur, rates);
-                const weight = holdingsValueTotal > 0 ? (valCur / holdingsValueTotal) * 100 : 0;
+                // Weight is relative to the Portfolio total (balance incl.
+                // cash) so the rows — including the Cash row below — sum to
+                // 100%.
+                const weight = portfolioValue > 0 ? (valCur / portfolioValue) * 100 : 0;
                 const pnlCur = convertAmount(s.gain ?? 0, h.currency, cur, rates);
                 const pnlPct = s.gainPct ?? 0;
                 const palette = ['#5C9EF5', '#5CC773', '#A880ED', '#F59942', '#E96B6B'];
@@ -712,6 +737,30 @@ function BrokerageSubTab() {
                   </li>
                 );
               })}
+            {hasCashRow && (
+              <li className="bh-row brk-row" data-testid="brokerage-cash-row">
+                <span className="bh-dot" style={{ background: '#7E8AA0' }} />
+                <div className="bh-main">
+                  <div className="bh-symbol">Cash</div>
+                  <div className="bh-desc">Uninvested balance</div>
+                </div>
+                <div className="bh-weight">
+                  <span
+                    className="bh-weight-fill"
+                    style={{
+                      width: `${Math.max(2, portfolioValue > 0 ? (cashValue / portfolioValue) * 100 : 0)}%`,
+                      background: '#7E8AA0',
+                    }}
+                  />
+                </div>
+                <div className="bh-value">
+                  {money(cashValue, cur)}
+                  <div className="bh-weight-pct">
+                    {(portfolioValue > 0 ? (cashValue / portfolioValue) * 100 : 0).toFixed(1)}%
+                  </div>
+                </div>
+              </li>
+            )}
           </ul>
         </section>
       )}
@@ -774,10 +823,13 @@ interface MonthDetailProps {
   transactions: Transaction[];
   categories: Category[];
   monthStartDay: number;
+  /** Card-bill / manually-excluded predicate — drops those rows from the
+   *  breakdown, deltas and biggest-expense so they don't double-count. */
+  isExcluded: (t: Transaction) => boolean;
 }
 
 function MonthDetail(
-  { monthKey, months, transactions, categories, monthStartDay }: MonthDetailProps,
+  { monthKey, months, transactions, categories, monthStartDay, isExcluded }: MonthDetailProps,
 ) {
   const idx = months.findIndex((m) => m.month === monthKey);
   const prev = idx > 0 ? months[idx - 1] : null;
@@ -793,6 +845,7 @@ function MonthDetail(
   const byCatCycle = new Map<string, number[]>();
   for (const t of transactions) {
     if (t.currency !== 'ILS' || t.refundForId) continue;
+    if (isExcluded(t)) continue;
     if (t.amount >= 0) continue;
     const ci = cycleIdx.get(cycleKey(t.date, monthStartDay));
     if (ci === undefined) continue;
@@ -813,6 +866,7 @@ function MonthDetail(
   const inMonth = transactions.filter((t) =>
     !t.refundForId
     && t.currency === 'ILS'
+    && !isExcluded(t)
     && cycleKey(t.date, monthStartDay) === monthKey,
   );
   const byCat = new Map<string, number>();

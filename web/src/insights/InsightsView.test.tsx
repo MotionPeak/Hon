@@ -211,6 +211,32 @@ describe('InsightsView — Spending sub-tab', () => {
     expect(within(big).getByText(/3,?750/)).toBeInTheDocument();
   });
 
+  it('excludes card-bill totals from Spent + biggest expense (default cardProviders)', async () => {
+    // Default settings.cardProviders includes 'מקס'; the bank-side
+    // "מקס איט פיננסים" lump sum is a card-bill total already itemised
+    // under the card account — it must NOT count as spending.
+    installFetchMock({
+      'GET /api/transactions': () => ({
+        transactions: [
+          tx({ id: 'g1', amount: -250, category: 'Groceries', description: 'Aroma', date: `${month(0)}-05` }),
+          tx({ id: 'card', amount: -9000, category: 'Other', description: 'מקס איט פיננסים', date: `${month(0)}-10` }),
+        ],
+      }),
+      'GET /api/categories': () => CATEGORIES,
+    });
+    renderView();
+    const detail = await screen.findByTestId('month-detail');
+    const tiles = within(detail).getAllByTestId('md-tile');
+    // Spent = 250 only (the ₪9,000 card-bill total is excluded).
+    expect(within(tiles[0]!).getByText(/Spent/i)).toBeInTheDocument();
+    expect(within(tiles[0]!).getByText(/^[^0-9]*250/)).toBeInTheDocument();
+    expect(within(detail).queryByText(/9,?000/)).not.toBeInTheDocument();
+    // Biggest expense is the ₪250 charge, not the card bill.
+    const big = within(detail).getByTestId('biggest-expense');
+    expect(within(big).getByText('Aroma')).toBeInTheDocument();
+    expect(within(big).queryByText('מקס איט פיננסים')).not.toBeInTheDocument();
+  });
+
   it('shows Overspent when commitments outrun income', async () => {
     installFetchMock({
       'GET /api/transactions': () => ({
@@ -776,6 +802,29 @@ describe('InsightsView — brokerage account pills', () => {
     const list = screen.getByTestId('brokerage-holdings');
     expect(within(list).getByText('AAPL')).toBeInTheDocument();
     expect(within(list).queryByText('VOO')).not.toBeInTheDocument();
+  });
+
+  it('shows a Cash row for the uninvested balance so positions add up to the total', async () => {
+    installFetchMock(baseMocks);
+    const user = userEvent.setup();
+    await openBrokerage(user);
+    // Focus IBKR: balance $4,302.44, only holding AAPL $2,000 →
+    // uninvested cash $2,302.44 surfaced as its own row.
+    const group = await screen.findByRole('group', { name: /accounts/i });
+    await user.click(within(group).getByRole('button', { name: /IBKR USD/ }));
+    const cash = screen.getByTestId('brokerage-cash-row');
+    expect(within(cash).getByText('Cash')).toBeInTheDocument();
+    expect(within(cash).getByText(/\$2,?302/)).toBeInTheDocument();
+  });
+
+  it('shows NO cash row when no in-scope account exposes a balance', async () => {
+    // /accounts empty → portfolio falls back to the holdings sum, which
+    // already equals the rows, so there's nothing uninvested to surface.
+    installFetchMock({ ...baseMocks, 'GET /api/accounts': () => ({ accounts: [] }) });
+    const user = userEvent.setup();
+    await openBrokerage(user);
+    await screen.findByTestId('brokerage-holdings');
+    expect(screen.queryByTestId('brokerage-cash-row')).not.toBeInTheDocument();
   });
 
   it('values a null-value holding from units × price (not ₪0)', async () => {

@@ -77,14 +77,16 @@
   card. Matches the legacy SPA's category-tile picker design 1:1
   (Banks / Credit cards / Brokerages / Car / Pension & savings /
   Loan / Other asset — Car + Pension disabled until React flows ship).
-- **Tests:** `cd web && npm test` → **415** passing. `cd sidecar &&
-  npm test` → **60** passing. Both typechecks clean (verified on the
+- **Tests:** `cd web && npm test` → **419** passing. `cd sidecar &&
+  npm test` → **70** passing. Both typechecks clean (verified on the
   merged tree).
-- **Most recent work:** Brokerage Insights full chart port + 5
-  metric-correctness fixes merged into `main` 2026-05-29 — see
-  § "Brokerage Insights" + its "⚠️ More work still needed" list.
-  Prior: pension React port, sync-window/history-months, autosync-on-add,
-  SnapTrade re-link smoke fix (parallel sessions, all merged).
+- **Most recent work:** Insights follow-up fixes merged into `main`
+  2026-05-29 — Spending no longer double-counts card-bill totals
+  (SPENT ₪24,094 → ₪13,748), brokerage holdings show a Cash row so
+  positions sum to the portfolio total, FX hits Frankfurter's new
+  `.dev` endpoint. See § "Insights follow-ups shipped 2026-05-29".
+  Prior: brokerage chart full port + 5 metric fixes, pension React
+  port, sync-window/history-months, Activity 2-month cap fix.
 - **SnapTrade portal flow smoke-verified end-to-end (2026-05-27,
   session/snaptrade-smoke-2026-05-27).** The smoke surfaced a design
   gap: re-linking an already-linked broker (IBKR refreshed via
@@ -332,35 +334,53 @@ Tests: worktree web suite **389 passing**, typecheck clean.
 `InsightsView` integration tests lock the scoping + performance +
 per-unit + balance behaviours.
 
-### ⚠️ More work still needed on the Brokerage Insights page
+### Insights follow-ups shipped 2026-05-29 (branch `session/insights-followups-2026-05-29`)
 
-This pass fixed what was clearly broken, but the page is **not
-"done"** — open items for the next session:
+A second pass that fixed the remaining correctness bugs. Each verified
+live (worktree vite :5175 against the real engine).
 
-1. **Engine USD/ILS rate looks wrong.** `/brokerage` `ilsRates.USD`
-   came back **~2.84** (real USD/ILS is ~3.7). All USD↔ILS figures
-   are faithful to that rate, so if it's stale/inverted every USD
-   value across the app is off. Investigate `getIlsRates()` /
-   Frankfurter in `sidecar` — this is engine-side, not the UI.
-2. **SnapTrade holding data is internally inconsistent.** For IBKR,
+- **Spending double-counted card-bill totals** (`1a94568`). The
+  Insights Spending sub-tab counted bank-side credit-card lump sums
+  (`מקס איט פיננסים` ₪9,461) ON TOP of the itemised card charges, so
+  SPENT read ₪24,094 vs the real ₪13,748 and "Other" was inflated.
+  Threaded the same `isExcludedFromCycle` predicate the Activity tab
+  uses (cardProviders + hideCardTotals + per-txn manual override)
+  through `cycleAnalytics`, the 12-month per-category history, and the
+  active-month breakdown. Activity ↔ Insights now agree.
+- **Uninvested cash surfaced as a Cash row** (`eb39c00`). Portfolio
+  value/total = the account balance (incl. cash), but the holdings
+  list only showed priced positions, so they fell ~₪518/$182.60 short
+  of the headline. A synthetic "Cash · Uninvested balance" row now
+  fills the gap; weights divide by the portfolio total so all rows
+  (incl. Cash) sum to 100%. Holdings count still = real positions.
+- **FX endpoint hardened** (`08a43fd`). The "USD rate ~2.84 looks
+  wrong" worry was a **false alarm** — Frankfurter genuinely returns
+  ₪2.8368/USD for 2026 (the earlier "~3.7" was a 2024 assumption).
+  But Frankfurter migrated `api.frankfurter.app → api.frankfurter.dev/v1`
+  (old host 301-redirects); `getIlsRates()` now hits the canonical
+  `.dev` endpoint directly so FX won't silently die on the redirect.
+
+### ⚠️ Still open on the Brokerage Insights page
+
+1. **SnapTrade holding data is internally inconsistent.** For IBKR,
    `units×price` (~$4,168), `costBasis`+`openPnl`, and the account
    balance ($4,302) don't fully reconcile, and `value` is null. The
-   UI now copes (legacy formulas), but the underlying SnapTrade
-   mapping in `sidecar/src/snaptrade.ts` deserves a look — the
-   per-unit vs total semantics and the null `value` are fragile.
-3. **Pills only list accounts that have value-snapshots** (the
+   UI now copes (legacy formulas + the Cash row), but the underlying
+   SnapTrade mapping in `sidecar/src/snaptrade.ts` deserves a look —
+   the per-unit vs total semantics and the null `value` are fragile.
+2. **Pills only list accounts that have value-snapshots** (the
    `brkAccounts = accounts ∩ snapshot.accountId` intersection). An
    account with `performance` but no local snapshot yet wouldn't get
    a pill. Legacy keys off company type; consider matching.
-4. **No transaction-based "ALL" cap.** Legacy anchors the ALL range
+3. **No transaction-based "ALL" cap.** Legacy anchors the ALL range
    to the user's earliest transaction so it doesn't paint years of
    pretend pre-ownership history; React only has the per-account
    inception clip. The brokerage tab doesn't fetch `/transactions`.
-5. **Holdings drill-down / sparkline** (legacy `holdingRow` expand)
+4. **Holdings drill-down / sparkline** (legacy `holdingRow` expand)
    and per-range stats (rate of return, dividends, contributions
    from `performance.byRange`) are not ported.
-6. **Re-verify once the engine rate is fixed** — the ILS figures
-   shift if #1 changes.
+5. **Server-side AI `/insights`** may also count card-bill totals when
+   it summarises spending — separate (engine + LLM), not yet checked.
 
 ## Restart workflow (you'll need this)
 
