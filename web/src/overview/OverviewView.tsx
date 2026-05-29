@@ -4,6 +4,13 @@ import { money } from '../format';
 import type { Account, Company } from '../accounts/types';
 import { DelayedLoader } from '../ui/DelayedLoader';
 import { useSettings } from '../settings/useSettings';
+import type { Transaction } from '../activity/types';
+import type { Category } from '../settings/CategoriesPanel';
+import {
+  detectMerchants, expectedFixedThisCycle,
+  type FreqOrIgnore, type RecurringData,
+} from '../recurring/helpers';
+import { useSplitwise } from '../splitwise/useSplitwise';
 import { OwedToYouCard } from './OwedToYouCard';
 
 /**
@@ -61,6 +68,7 @@ export function OverviewView() {
   const [budget, setBudget] = useState<BudgetResponse | null>(null);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [recurring, setRecurring] = useState<RecurringData | null>(null);
 
   // A plain string, stable by VALUE across renders (same providers → same
   // path), so the effect refetches only when the exclusion list actually
@@ -84,6 +92,25 @@ export function OverviewView() {
       setSummary({ byCurrency: [], accountCount: 0, connectionCount: 0, netWorthILS: 0 });
       setBudget(null);
     });
+
+    // Recurring detection feeds the predicted-fixed headline (same source the
+    // Fixed bills tab uses). Independent of the budget fetch — if any of these
+    // fail, predictedFixed falls back to null and the headline reverts to the
+    // posted figure (variable.committed). Never blocks the dashboard.
+    Promise.all([
+      api<{ transactions: Transaction[] }>('/transactions'),
+      api<{ categories: Category[] }>('/categories'),
+      api<{ frequencies: Record<string, FreqOrIgnore> }>('/merchant-frequencies'),
+      api<{ splits: Record<string, number> }>('/category-splits'),
+      api<{ cancelled: Record<string, boolean> }>('/subscriptions/cancelled')
+        .catch(() => ({ cancelled: {} as Record<string, boolean> })),
+    ]).then(([t, c, f, s, sub]) => {
+      setRecurring({
+        transactions: t.transactions, categories: c.categories,
+        frequencies: f.frequencies ?? {}, splits: s.splits ?? {},
+        cancelled: sub.cancelled ?? {},
+      });
+    }).catch(() => setRecurring(null));
   }, [budgetPath]);
 
   if (summary === null) return <DelayedLoader />;
@@ -110,6 +137,16 @@ export function OverviewView() {
     (l) => (l.budget ?? 0) > 0 || l.spent > 0,
   );
 
+  // Predicted fixed-this-cycle (same source as the Fixed bills tab) + posted
+  // essentials. Falls back to the budget's posted committed total when the
+  // recurring fetch failed or there is no detected fixed history yet.
+  const predictedFixed = recurring
+    ? expectedFixedThisCycle(detectMerchants(recurring).rows, settings.monthStartDay)
+    : null;
+  const committedDisplay = (v && predictedFixed !== null)
+    ? predictedFixed + (v.essentialSpent ?? 0)
+    : (v?.committed ?? 0);
+
   return (
     <div className="overview-view">
       <h1>Overview</h1>
@@ -117,6 +154,7 @@ export function OverviewView() {
         {v && (
           <BalanceCard
             variable={v}
+            committedDisplay={committedDisplay}
             currency={budget!.currency}
             companies={companies}
             accounts={accounts}
@@ -133,16 +171,17 @@ export function OverviewView() {
 }
 
 function BalanceCard({
-  variable, currency, companies, accounts,
+  variable, committedDisplay, currency, companies, accounts,
 }: {
   variable: BudgetVariable;
+  committedDisplay: number;
   currency: string;
   companies: Company[];
   accounts: Account[];
 }) {
-  const { income, committed, spent } = variable;
-  if (income <= 0 && committed <= 0 && spent <= 0) return null;
-  const net = income - committed - spent;
+  const { income, spent } = variable;
+  if (income <= 0 && committedDisplay <= 0 && spent <= 0) return null;
+  const net = income - committedDisplay - spent;
   const positive = net >= 0;
   const cls = positive ? 'good' : 'bad';
   const sign = positive ? '+' : '−';
@@ -159,7 +198,7 @@ function BalanceCard({
       <div className="balance-line">
         <span>Income</span> <b>{money(income, currency)}</b>
         <span className="balance-sep">−</span>
-        <span>Expected fixed + essentials</span> <b>{money(committed, currency)}</b>
+        <span>Expected fixed + essentials</span> <b>{money(committedDisplay, currency)}</b>
         {spent > 0 && (
           <>
             <span className="balance-sep">−</span>
@@ -169,6 +208,7 @@ function BalanceCard({
       </div>
       <BankProjection
         variable={variable}
+        committedDisplay={committedDisplay}
         currency={currency}
         companies={companies}
         accounts={accounts}
@@ -178,13 +218,17 @@ function BalanceCard({
 }
 
 function BankProjection({
-  variable, currency, companies, accounts,
+  variable, committedDisplay, currency, companies, accounts,
 }: {
   variable: BudgetVariable;
+  committedDisplay: number;
   currency: string;
   companies: Company[];
   accounts: Account[];
 }) {
+  // Hook must run before the early return below — money friends owe the user
+  // (same-currency, positive) is incoming, so it lifts the end-of-cycle balance.
+  const sw = useSplitwise();
   const bankCompanyIds = new Set(
     companies.filter((c) => c.type === 'bank').map((c) => c.id),
   );
@@ -193,12 +237,18 @@ function BankProjection({
   );
   if (bankAccounts.length === 0) return null;
 
+  const owed = sw.connected
+    ? sw.friends
+        .flatMap((f) => f.balances)
+        .filter((b) => b.currency === currency && b.amount > 0)
+        .reduce((s, b) => s + b.amount, 0)
+    : 0;
   const bankNow = bankAccounts.reduce((s, a) => s + (a.balance ?? 0), 0);
   const expectedIncome = variable.income;
-  const fixedEss = variable.committed; // fixedSpent + essentialSpent so far
+  const fixedEss = committedDisplay; // predicted fixed-this-cycle + posted essentials
   const cycleVariable = variable.spent;
   const cyclePiggy = Math.max(0, variable.piggyFunded ?? 0);
-  const change = expectedIncome - fixedEss - cycleVariable - cyclePiggy;
+  const change = expectedIncome - fixedEss - cycleVariable - cyclePiggy + owed;
   const endBalance = bankNow + change;
   const up = change >= 0;
   const sign = up ? '+' : '−';
@@ -236,6 +286,9 @@ function BankProjection({
           </span>
         </div>
         <Detail label="Income expected this cycle" amount={expectedIncome} tone="good" />
+        {owed > 0 && (
+          <Detail label="Owed to you (Splitwise)" amount={owed} tone="good" />
+        )}
         <Detail label="Fixed + essentials this cycle" amount={fixedEss} tone="bad" />
         <Detail label="Variable spent so far" amount={cycleVariable} tone="bad" />
         <Detail label="Set asides (piggies)" amount={cyclePiggy} tone="bad" />
