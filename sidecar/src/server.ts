@@ -565,7 +565,9 @@ app.patch('/accounts/:id/excluded', async (req, reply) => {
 app.get('/transactions', async (req, reply) => {
   if (!repo) return reply.code(503).send({ error: 'database unavailable' });
   const q = req.query as { accountId?: string; limit?: string };
-  const limit = q.limit ? Math.max(1, Math.min(1000, Number(q.limit) || 200)) : 200;
+  // No limit → full history (the month-by-month UIs window client-side and
+  // need every cycle). An explicit limit still paginates.
+  const limit = q.limit ? Math.max(1, Number(q.limit) || 200) : undefined;
   return { transactions: repo.listTransactions({ accountId: q.accountId, limit }) };
 });
 
