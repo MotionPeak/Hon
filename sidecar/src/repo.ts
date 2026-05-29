@@ -543,7 +543,10 @@ export class Repo {
          ORDER BY date DESC, created_at DESC
          LIMIT @limit`,
       )
-      .all({ accountId: opts.accountId ?? null, limit: opts.limit ?? 200 }) as TxnRow[];
+      // SQLite treats a negative LIMIT as unbounded. The month-by-month UIs
+      // (Activity/Insights/Recurring/Subscriptions) need every cycle, so an
+      // omitted limit returns the full history rather than a recent page.
+      .all({ accountId: opts.accountId ?? null, limit: opts.limit ?? -1 }) as TxnRow[];
   }
 
   /** Sets one account's balance by hand (scrapers do not report card balances). */

@@ -29,6 +29,35 @@ describe('Connection.historyMonths', () => {
   });
 });
 
+describe('listTransactions limit', () => {
+  function seed(repo: Repo, count: number) {
+    const conn = repo.createConnection('max', 'Max');
+    const transactions = Array.from({ length: count }, (_, i) => ({
+      externalId: `tx-${i}`,
+      // Spread across days so date DESC ordering is well-defined.
+      date: new Date(2024, 0, 1 + i).toISOString().slice(0, 10),
+      amount: -10 - i,
+      currency: 'ILS',
+      description: `merchant ${i}`,
+    }));
+    repo.saveScrapeResult(conn.id, [
+      { accountNumber: '1234', currency: 'ILS', balance: 0, transactions },
+    ]);
+  }
+
+  it('returns ALL rows when no limit is given (full history for month pickers)', () => {
+    const { repo } = makeRepo();
+    seed(repo, 250);
+    expect(repo.listTransactions({})).toHaveLength(250);
+  });
+
+  it('still paginates when an explicit limit is passed', () => {
+    const { repo } = makeRepo();
+    seed(repo, 250);
+    expect(repo.listTransactions({ limit: 50 })).toHaveLength(50);
+  });
+});
+
 describe('setConnectionHistoryMonths', () => {
   it('persists the new value', () => {
     const { repo } = makeRepo();
