@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Snaptrade } from 'snaptrade-typescript-sdk';
+import type { Position } from 'snaptrade-typescript-sdk';
 import type {
   BrokeragePerformanceData,
   BrokerageRangeStats,
@@ -591,6 +592,54 @@ async function fetchEarliestActivityDate(
   }
 }
 
+/**
+ * Map a single SnapTrade Position to a NormalizedHolding.
+ *
+ * Returns null when the position is a cash-equivalent sweep fund
+ * (`cash_equivalent === true`) — those are already counted in the account's
+ * cash balance, so mapping them as holdings would double-count vs the
+ * balance-derived Cash row in the UI.
+ *
+ * Also returns null when the position lacks a usable ticker or unit count
+ * (i.e. it is genuinely unparseable).
+ */
+export function normalizePosition(p: Position): NormalizedHolding | null {
+  // SnapTrade flags money-market sweep funds with cash_equivalent=true.
+  // The account balance already counts them, so mapping them as separate
+  // holdings would double-count vs the balance-derived Cash row in the UI.
+  if (p.cash_equivalent === true) return null;
+
+  // SnapTrade nests the security info in `symbol.symbol` (a
+  // UniversalSymbol). Some brokerages return the universal symbol
+  // directly under `symbol`, so try both.
+  const inner = p.symbol?.symbol ?? p.symbol;
+  const ticker =
+    inner?.symbol || inner?.raw_symbol || p.symbol?.description;
+  const units = typeof p.units === 'number'
+    ? p.units
+    : typeof p.fractional_units === 'number'
+      ? p.fractional_units
+      : null;
+  if (!ticker || units == null) return null;
+  return {
+    symbol: String(ticker),
+    description: inner?.description ?? p.symbol?.description ?? undefined,
+    units,
+    price: typeof p.price === 'number' ? p.price : undefined,
+    currency: p.currency?.code ?? inner?.currency?.code ?? 'USD',
+    costBasis:
+      typeof p.average_purchase_price === 'number'
+        ? p.average_purchase_price
+        : undefined,
+    // open_pnl is a position TOTAL, not per-unit. Per the SnapTrade SDK's own
+    // JSDoc the field is unreliable — they recommend computing P&L from
+    // average_purchase_price and current market price instead. Hon uses it
+    // only as a last-resort fallback in holdingStats() (InsightsView.tsx),
+    // which is safe because the preferred path is the per-unit calculation.
+    openPnl: typeof p.open_pnl === 'number' ? p.open_pnl : undefined,
+  };
+}
+
 async function fetchHoldings(
   snaptrade: Snaptrade,
   userId: string,
@@ -605,33 +654,17 @@ async function fetchHoldings(
     });
     const positions = Array.isArray(res.data) ? res.data : [];
     const normalized = positions
-      .map((p): NormalizedHolding | null => {
-        // SnapTrade nests the security info in `symbol.symbol` (a
-        // UniversalSymbol). Some brokerages return the universal symbol
-        // directly under `symbol`, so try both.
-        const inner = p.symbol?.symbol ?? p.symbol;
-        const ticker =
-          inner?.symbol || inner?.raw_symbol || p.symbol?.description;
-        const units = typeof p.units === 'number'
-          ? p.units
-          : typeof p.fractional_units === 'number'
-            ? p.fractional_units
-            : null;
-        if (!ticker || units == null) return null;
-        return {
-          symbol: String(ticker),
-          description: inner?.description ?? p.symbol?.description ?? undefined,
-          units,
-          price: typeof p.price === 'number' ? p.price : undefined,
-          currency: p.currency?.code ?? inner?.currency?.code ?? 'USD',
-          costBasis:
-            typeof p.average_purchase_price === 'number'
-              ? p.average_purchase_price
-              : undefined,
-          openPnl: typeof p.open_pnl === 'number' ? p.open_pnl : undefined,
-        };
-      })
+      .map(normalizePosition)
       .filter((h): h is NormalizedHolding => h !== null);
+
+    const cashEquivCount = positions.filter((p) => p.cash_equivalent === true).length;
+    if (cashEquivCount > 0) {
+      process.stdout.write(
+        `snaptrade holdings: skipped ${cashEquivCount} cash-equivalent position(s) for ${accountId} ` +
+          `(balance already accounts for these)\n`,
+      );
+    }
+
     if (positions.length > 0 && normalized.length === 0) {
       // Brokerage returned positions but every one was unparseable — log a
       // sample so we can tell whether the shape changed.
