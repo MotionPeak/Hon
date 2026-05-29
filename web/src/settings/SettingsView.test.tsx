@@ -11,12 +11,12 @@ describe('SettingsView', () => {
     expect(screen.getByText(/changes save as you make them/i)).toBeInTheDocument();
   });
 
-  it('renders all six settings cards', () => {
+  it('renders all seven settings cards', () => {
     installFetchMock({ 'GET /api/categories': () => ({ categories: [] }) });
     render(<SettingsView />);
     const titles = screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent);
     expect(titles).toEqual([
-      'AI engine', 'Billing cycle', 'Spending projection',
+      'AI engine', 'Billing cycle', 'Spending projection', 'Category averages',
       'Credit-card bills', 'Splitwise', 'Categories',
     ]);
   });

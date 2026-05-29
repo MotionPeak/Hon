@@ -1,6 +1,7 @@
 import { AiEngineCard } from './AiEngineCard';
 import { BillingCycleCard } from './BillingCycleCard';
 import { CategoriesPanel } from './CategoriesPanel';
+import { CategoryAveragesCard } from './CategoryAveragesCard';
 import { CreditCardBillsCard } from './CreditCardBillsCard';
 import { SettingsProvider } from './useSettings';
 import { SpendingProjectionCard } from './SpendingProjectionCard';
@@ -18,6 +19,7 @@ export function SettingsView() {
           <AiEngineCard />
           <BillingCycleCard />
           <SpendingProjectionCard />
+          <CategoryAveragesCard />
           <CreditCardBillsCard />
           <SplitwiseCard />
           <section className="set-card">
