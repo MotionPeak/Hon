@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { CategoryAveragesCard } from './CategoryAveragesCard';
 import { SettingsProvider } from './useSettings';
@@ -10,6 +10,8 @@ function renderCard() {
 }
 
 describe('CategoryAveragesCard', () => {
+  beforeEach(() => localStorage.clear());
+
   it('renders the preset buttons with the active one pressed', () => {
     localStorage.setItem('honSettings', JSON.stringify({ spendingAvgMonths: 12 }));
     renderCard();
@@ -59,6 +61,14 @@ describe('CategoryAveragesCard', () => {
     await user.clear(input);
     await user.type(input, '18');
     expect(loadSettings().spendingAvgMonths).toBe(18);
+  });
+
+  it('ignores a custom number above the 120-month cap', () => {
+    localStorage.setItem('honSettings', JSON.stringify({ spendingAvgMonths: 9 }));
+    renderCard();
+    const input = screen.getByRole('spinbutton', { name: /custom months/i });
+    fireEvent.change(input, { target: { value: '999' } });
+    expect(loadSettings().spendingAvgMonths).toBe(9);
   });
 
   it('ignores a cleared/zero input and keeps the last valid value', async () => {

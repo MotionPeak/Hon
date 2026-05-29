@@ -54,6 +54,7 @@ export function CategoryAveragesCard() {
           <input
             type="number"
             min={1}
+            max={120}
             className="set-num"
             aria-label="Custom months"
             value={inputStr}
@@ -61,7 +62,7 @@ export function CategoryAveragesCard() {
               const raw = e.target.value;
               setInputStr(raw);
               const n = Math.floor(Number(raw));
-              if (Number.isFinite(n) && n >= 1) update({ spendingAvgMonths: n });
+              if (Number.isFinite(n) && n >= 1 && n <= 120) update({ spendingAvgMonths: n });
             }}
           />
         )}
