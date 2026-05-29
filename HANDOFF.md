@@ -31,7 +31,24 @@
    feature → invoke `superpowers:brainstorming` → `writing-plans` →
    `executing-plans`.
 
-## TL;DR — state of the world (2026-05-29)
+## TL;DR — state of the world (2026-05-30)
+
+- **Assets History picker — scoped + restyled (2026-05-30).** The per-connection
+  **History** sync-window control now renders **only on Banks + Credit-cards** cards;
+  Pension and Investments (SnapTrade/IBKR) cards no longer show it. The mechanism is
+  untouched — those connections still sync on their `historyMonths` default (12) via
+  `PATCH /connections/:id/history-months`; only the visible control was gated out
+  (`showHistory = key === 'bank' || key === 'card'`, threaded from `renderSectionItems`
+  into `ConnectionCard`). The native `<select>` was replaced by a custom Radix dropdown
+  `web/src/accounts/HistoryMonthsSelect.tsx` (trigger `12 mo ▾` reusing the `button.mini`
+  look of Sync/Remove; dark `.menu-content` popup; active option in
+  `--accent-soft`/`--accent` with a ✓; chevron rotate + `prefers-reduced-motion`
+  respected). Dead `.conn-history-select.mini` CSS removed. Spec/plan:
+  `docs/superpowers/{specs,plans}/2026-05-30-assets-history-picker*`. Verified live in
+  chrome-devtools against the real engine (banks/cards show the styled trigger + the
+  open dark menu with the amber active option; pension/IBKR omit it; selecting →
+  `PATCH 200`, no console errors). Web suite 479 pass, both typechecks clean. Merged to
+  `main` (`session/assets-history-picker-2026-05-30`, merge `db248cb`).
 
 - **Category average window shipped (2026-05-29).** Settings now has a
   **Category averages** card (📐) letting the user pick the timeframe that
