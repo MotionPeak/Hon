@@ -3,6 +3,7 @@ import { api } from '../api';
 import { money } from '../format';
 import type { Account, Company } from '../accounts/types';
 import { DelayedLoader } from '../ui/DelayedLoader';
+import { OwedToYouCard } from './OwedToYouCard';
 
 interface CurrencyTotal { currency: string; total: number; accountCount: number }
 
@@ -100,6 +101,7 @@ export function OverviewView() {
           <EssentialsCard essentials={essentials} currency={budget!.currency} />
         )}
         <NetWorthCard summary={summary} />
+        <OwedToYouCard />
       </div>
     </div>
   );
