@@ -640,9 +640,25 @@ button.mini { padding: 5px 11px; font-size: 12px; }
   gap: 4px;
   font-size: 0.8rem;
 }
-.conn-history-select.mini {
-  padding: 2px 4px;
-  font: inherit;
+.conn-history-text { color: var(--muted); }
+.history-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.history-trigger .hist-chev {
+  font-size: 9px;
+  color: var(--muted);
+  transition: transform 0.15s ease;
+}
+.history-trigger[data-state="open"] .hist-chev { transform: rotate(180deg); }
+.menu-item .hist-check { display: inline-block; width: 0.9em; }
+.menu-item[data-active="true"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .history-trigger .hist-chev { transition: none; }
 }
 
 /* --- Subscriptions view ----------------------------------------------- */
