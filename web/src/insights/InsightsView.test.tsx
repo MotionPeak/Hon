@@ -705,6 +705,32 @@ describe('InsightsView — Brokerage sub-tab', () => {
     await user.click(await screen.findByTestId('holding-row-VT'));
     expect(screen.getByTestId('holding-spark-VT')).toBeInTheDocument();
   });
+
+  it('expanded holding shows the empty fallback when holdingSnapshots is empty', async () => {
+    const user = userEvent.setup();
+    // No holdingSnapshots for VT → series will have 0 points → hd-empty fallback.
+    installFetchMock({
+      ...EMPTY_TXNS,
+      'GET /api/brokerage': () => ({
+        holdings: [
+          {
+            accountId: 'acc1', symbol: 'VT', description: 'Vanguard Total World',
+            units: 10, price: 100, currency: 'USD',
+            costBasis: 800, openPnl: 200, value: 1000,
+            updatedAt: today.toISOString().slice(0, 10),
+          },
+        ],
+        snapshots: [],
+        holdingSnapshots: [],
+        performance: [],
+        ilsRates: { USD: 3.7 },
+      }),
+    });
+    renderView();
+    await user.click(await screen.findByRole('tab', { name: /brokerage/i }));
+    await user.click(await screen.findByTestId('holding-row-VT'));
+    expect(screen.getByTestId('holding-spark-empty-VT')).toBeInTheDocument();
+  });
 });
 
 describe('InsightsView — brokerage account pills', () => {

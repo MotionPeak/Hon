@@ -598,6 +598,9 @@ function BrokerageSubTab() {
       dividendIncome: p.data.dividendIncome ?? null,
       contributions: null,
     };
+    // rateOfReturn is a simple unweighted mean across in-scope connections — accurate
+    // for one broker, slightly skewed for users with multiple connections of very
+    // different sizes. AUM-weighting is future work.
     if (typeof w.rateOfReturn === 'number') { rateSum += w.rateOfReturn; rateCount += 1; }
     if (typeof w.dividendIncome === 'number') {
       const v = convertAmount(w.dividendIncome, p.data.currency ?? cur, cur, rates);
