@@ -518,6 +518,45 @@ currency fallback chain.
 warning, `NormalizedHolding.value` JSDoc clarification, `holdingStats` unit
 tests. See `/tmp/snaptrade-audit-2026-05-30.md` for the full audit.
 
+## ⚠️ Known SnapTrade upstream issues (observed 2026-05-30)
+
+Shahar compared Hon's IBKR Brokerage Insights against the live IBKR web
+portal. Two findings — **both upstream in SnapTrade, NOT Hon bugs.** Hon
+faithfully renders SnapTrade's data; SnapTrade is the stale/limited link
+(IBKR → SnapTrade's cache → Hon). Confirmed against Hon's stored `/brokerage`
+data + sidecar.log.
+
+1. **SnapTrade's position feed lags IBKR.** The 23:28:59 sync succeeded
+   (`scrape.end result=success`) and stored what SnapTrade returned:
+   **VT = 22 units @ $96.30 avg cost**, while IBKR's live portal showed
+   **23 shares @ $99.00**. VBR matched IBKR to the cent (3 sh, cost $478.94),
+   so it's isolated to VT — SnapTrade is one VT lot behind (recent buy or
+   dividend-reinvested share IBKR reflects but SnapTrade hasn't propagated).
+   - **Symptom:** the React "Cash · Uninvested balance" row read **$165.75**
+     vs the real **$22.50**. That row is `balance − sum(priced holdings)`, so
+     the ~one missing VT share's market value falls into the cash plug. It
+     self-corrects once SnapTrade catches up to 23 units.
+   - **What moves it:** SnapTrade refreshes IBKR on its own cadence (free
+     tier ≈ daily) — a later sync pulls 23. Hitting ↻ Sync *now* just re-pulls
+     the same stale SnapTrade cache. **Possible Hon enhancement (deferred):**
+     call the SDK's `connections.refreshBrokerageAuthorization` BEFORE the
+     read so SnapTrade re-polls IBKR first (free tier may rate-limit it).
+     Hon does not call this today.
+
+2. **SnapTrade revoked the `getActivities` endpoint for this plan.**
+   sidecar.log shows `snaptrade activities <acctId>: This endpoint is no
+   longer available for your account.` `fetchEarliestActivityDate` (in
+   `sidecar/src/snaptrade.ts`) uses it to auto-detect each account's
+   "investment start"/inception date for the ALL-range clip. It now silently
+   fails → `inceptionDate` stays undefined → the UI shows the user's MANUAL
+   "Investment start" date instead of an auto-detected one. Not breaking, but
+   auto-inception is effectively dead for SnapTrade accounts until the plan
+   regains the endpoint (or we find another source for first-activity date).
+
+Neither needs a code change to be *correct* — Hon's numbers are right
+relative to its data source. Both are SnapTrade-side. Logged here so the
+next session doesn't re-diagnose from scratch.
+
 ## Restart workflow (you'll need this)
 
 ```bash
