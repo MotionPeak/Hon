@@ -1,8 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { App } from './App';
 import { installFetchMock } from './test/mockFetch';
+import { __resetSplitwiseCache } from './splitwise/useSplitwise';
+
+afterEach(() => { __resetSplitwiseCache(); });
 
 const HEALTH = {
   ok: true, name: 'hon-sidecar', version: '0.3.0',
@@ -30,6 +33,10 @@ const EMPTY = {
   'GET /api/merchant-frequencies': () => ({ frequencies: {} }),
   'GET /api/category-splits': () => ({ splits: {} }),
   'GET /api/subscriptions/cancelled': () => ({ cancelled: {} }),
+  // Overview/Activity/Settings tabs mount Splitwise-aware components whose
+  // useSplitwise hook fetches on mount; stub disconnected.
+  'GET /api/splitwise/status': () => ({ connected: false, user: null }),
+  'GET /api/splitwise/links': () => ({ links: [] }),
 };
 
 function withToken(): void {
