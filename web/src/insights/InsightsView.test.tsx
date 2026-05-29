@@ -629,6 +629,41 @@ describe('InsightsView — Brokerage sub-tab', () => {
     expect(within(list).getByText(/2,?000/)).toBeInTheDocument();
     expect(within(list).getByText(/2,?400/)).toBeInTheDocument();
   });
+
+  it('clicking a holding row reveals its stats grid; clicking again hides it', async () => {
+    const user = userEvent.setup();
+    installFetchMock({
+      ...EMPTY_TXNS,
+      'GET /api/brokerage': () => ({
+        holdings: [
+          {
+            accountId: 'b1', symbol: 'VT', description: 'Vanguard Total World',
+            units: 10, price: 100, currency: 'USD',
+            costBasis: 80, openPnl: 20, value: 1000,
+            updatedAt: '2026-05-25',
+          },
+          {
+            accountId: 'b1', symbol: 'VBR', description: 'Vanguard Small-Cap',
+            units: 5, price: 50, currency: 'USD',
+            costBasis: 40, openPnl: 10, value: 250,
+            updatedAt: '2026-05-25',
+          },
+        ],
+        snapshots: [],
+        holdingSnapshots: [],
+        performance: [],
+        ilsRates: { USD: 3.7 },
+      }),
+    });
+    renderView();
+    await user.click(await screen.findByRole('tab', { name: /brokerage/i }));
+    const row = await screen.findByTestId('holding-row-VT');
+    expect(screen.queryByTestId('holding-detail-VT')).toBeNull();
+    await user.click(row);
+    expect(screen.getByTestId('holding-detail-VT')).toBeInTheDocument();
+    await user.click(row);
+    await waitFor(() => expect(screen.queryByTestId('holding-detail-VT')).toBeNull());
+  });
 });
 
 describe('InsightsView — brokerage account pills', () => {

@@ -273,6 +273,19 @@ interface BrokerageResp {
 type Range = '1M' | '3M' | 'YTD' | '1Y' | 'ALL';
 const RANGES: Range[] = ['1M', '3M', 'YTD', '1Y', 'ALL'];
 
+interface ConsolidatedHolding {
+  symbol: string;
+  description: string | null;
+  units: number;
+  price: number | null;
+  currency: string;
+  value: number | null;
+  cost: number | null;
+  gain: number | null;
+  gainPct: number | null;
+  accountIds: string[];
+}
+
 interface HoldingStats {
   value: number | null;
   cost: number | null;
@@ -443,6 +456,7 @@ function BrokerageSubTab() {
   const [acctFilter, setAcctFilter] = useState<'all' | string>('all');
   const [range, setRange] = useState<Range>('1Y');
   const [displayCur, setDisplayCur] = useState<string | null>(null);
+  const [openHolding, setOpenHolding] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -597,6 +611,37 @@ function BrokerageSubTab() {
     'ILS', ...data.holdings.map((h) => h.currency),
   ]));
 
+  // Consolidate by symbol across in-scope accounts — matches the legacy SPA's
+  // holdings panel and lets a symbol's sparkline sum across its accounts.
+  const consolidatedMap = new Map<string, ConsolidatedHolding>();
+  for (const h of scopedHoldings) {
+    const s = holdingStats(h);
+    let e = consolidatedMap.get(h.symbol);
+    if (!e) {
+      e = {
+        symbol: h.symbol, description: h.description, units: 0, price: h.price,
+        currency: h.currency, value: null, cost: null, gain: null,
+        gainPct: null, accountIds: [],
+      };
+      consolidatedMap.set(h.symbol, e);
+    }
+    e.units += h.units;
+    if (s.value != null) e.value = (e.value ?? 0) + s.value;
+    if (s.cost != null) e.cost = (e.cost ?? 0) + s.cost;
+    if (s.gain != null) e.gain = (e.gain ?? 0) + s.gain;
+    e.accountIds.push(h.accountId);
+  }
+  const consolidated = [...consolidatedMap.values()]
+    .map((e) => ({
+      ...e,
+      gainPct: e.gain != null && e.cost ? (e.gain / Math.abs(e.cost)) * 100 : null,
+    }))
+    .sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
+
+  // Per-account inception map for the sparkline clip (used in B3).
+  const inceptionByAccount: Record<string, string> = {};
+  for (const a of accounts) if (a.inceptionDate) inceptionByAccount[a.id] = a.inceptionDate;
+
   return (
     <div className="brokerage-pane">
       <div className="brk-stats" data-testid="brokerage-stats">
@@ -683,8 +728,8 @@ function BrokerageSubTab() {
         <section className="ins-card">
           <header className="ins-card-head">
             <div className="ins-sub">
-              Holdings · {scopedHoldings.length}
-              {' '}position{scopedHoldings.length === 1 ? '' : 's'}
+              Holdings · {consolidated.length}
+              {' '}position{consolidated.length === 1 ? '' : 's'}
             </div>
             <span className="spacer" />
             <div className="ins-totals">
@@ -693,52 +738,22 @@ function BrokerageSubTab() {
             </div>
           </header>
           <ul className="brokerage-holdings" data-testid="brokerage-holdings">
-            {scopedHoldings
-              .slice()
-              .sort((a, b) => (holdingStats(b).value ?? 0) - (holdingStats(a).value ?? 0))
-              .map((h, i) => {
-                const s = holdingStats(h);
-                const valCur = convertAmount(s.value ?? 0, h.currency, cur, rates);
-                // Weight is relative to the Portfolio total (balance incl.
-                // cash) so the rows — including the Cash row below — sum to
-                // 100%.
-                const weight = portfolioValue > 0 ? (valCur / portfolioValue) * 100 : 0;
-                const pnlCur = convertAmount(s.gain ?? 0, h.currency, cur, rates);
-                const pnlPct = s.gainPct ?? 0;
-                const palette = ['#5C9EF5', '#5CC773', '#A880ED', '#F59942', '#E96B6B'];
-                const dot = palette[i % palette.length];
-                return (
-                  <li key={`${h.accountId}-${h.symbol}`} className="bh-row brk-row">
-                    <span className="bh-dot" style={{ background: dot }} />
-                    <div className="bh-main">
-                      <div className="bh-symbol">{h.symbol}</div>
-                      {h.description && (
-                        <div className="bh-desc">{h.description}</div>
-                      )}
-                    </div>
-                    <div className="bh-weight">
-                      <span
-                        className="bh-weight-fill"
-                        style={{
-                          width: `${Math.max(2, weight)}%`,
-                          background: dot,
-                        }}
-                      />
-                    </div>
-                    <div className="bh-value">
-                      {money(valCur, cur)}
-                      <div className="bh-weight-pct">{weight.toFixed(1)}%</div>
-                    </div>
-                    {s.gain != null && (
-                      <span className={`brk-pnl ${pnlCur >= 0 ? 'good' : 'bad'}`}>
-                        {pnlCur >= 0 ? '▲' : '▼'} {Math.abs(pnlPct).toFixed(2)}%
-                        {' '}
-                        {pnlCur >= 0 ? '+' : '−'}{money(Math.abs(pnlCur), cur)}
-                      </span>
-                    )}
-                  </li>
-                );
-              })}
+            {consolidated.map((r, i) => (
+              <HoldingRow
+                key={r.symbol}
+                row={r}
+                index={i}
+                portfolioValue={portfolioValue}
+                displayCur={cur}
+                rates={rates}
+                open={openHolding === r.symbol}
+                onToggle={() =>
+                  setOpenHolding((prev) => (prev === r.symbol ? null : r.symbol))}
+                range={range}
+                holdingSnapshots={data.holdingSnapshots}
+                inceptionByAccount={inceptionByAccount}
+              />
+            ))}
             {hasCashRow && (
               <li className="bh-row brk-row" data-testid="brokerage-cash-row">
                 <span className="bh-dot" style={{ background: '#7E8AA0' }} />
@@ -780,6 +795,98 @@ function StatBox({
       <div className={`brk-stat-val${tone ? ' ' + tone : ''}`}>{value}</div>
       {sub && <div className={`brk-stat-sub${tone ? ' ' + tone : ''}`}>{sub}</div>}
       <div className="brk-stat-cap">{label}</div>
+    </div>
+  );
+}
+
+const HOLDING_PALETTE = ['#5C9EF5', '#5CC773', '#A880ED', '#F59942', '#E96B6B',
+  '#74d0c2', '#ffb74d', '#c2b3ff', '#ff8a76', '#a0a6ff'];
+
+function HoldingRow({
+  row, index, portfolioValue, displayCur, rates, open, onToggle,
+  range, holdingSnapshots, inceptionByAccount,
+}: {
+  row: ConsolidatedHolding; index: number; portfolioValue: number;
+  displayCur: string; rates: Record<string, number> | null; open: boolean;
+  onToggle: () => void; range: Range; holdingSnapshots: HoldingSnapshot[];
+  inceptionByAccount: Record<string, string>;
+}) {
+  const dot = HOLDING_PALETTE[index % HOLDING_PALETTE.length];
+  const valCur = convertAmount(row.value ?? 0, row.currency, displayCur, rates);
+  const weight = portfolioValue > 0 ? (valCur / portfolioValue) * 100 : 0;
+  const pnlCur = convertAmount(row.gain ?? 0, row.currency, displayCur, rates);
+  const pnlPct = row.gainPct ?? 0;
+  return (
+    <li className={`bh-item${open ? ' open' : ''}`}>
+      <button
+        type="button"
+        className={`bh-row brk-row${open ? ' open' : ''}`}
+        aria-expanded={open}
+        onClick={onToggle}
+        data-testid={`holding-row-${row.symbol}`}
+      >
+        <span className="bh-dot" style={{ background: dot }} />
+        <div className="bh-main">
+          <div className="bh-symbol">{row.symbol}</div>
+          {row.description && <div className="bh-desc">{row.description}</div>}
+        </div>
+        <div className="bh-weight">
+          <span className="bh-weight-fill"
+            style={{ width: `${Math.max(2, weight)}%`, background: dot }} />
+        </div>
+        <div className="bh-value">
+          {money(valCur, displayCur)}
+          <div className="bh-weight-pct">{weight.toFixed(1)}%</div>
+        </div>
+        {row.gain != null && (
+          <span className={`brk-pnl ${pnlCur >= 0 ? 'good' : 'bad'}`}>
+            {pnlCur >= 0 ? '▲' : '▼'} {Math.abs(pnlPct).toFixed(2)}%{' '}
+            {pnlCur >= 0 ? '+' : '−'}{money(Math.abs(pnlCur), displayCur)}
+          </span>
+        )}
+        <span className="bh-chev">{open ? '▾' : '▸'}</span>
+      </button>
+      {open && (
+        <HoldingDetail
+          row={row} displayCur={displayCur} rates={rates} range={range}
+          holdingSnapshots={holdingSnapshots} inceptionByAccount={inceptionByAccount}
+        />
+      )}
+    </li>
+  );
+}
+
+function HoldingDetail({
+  row, displayCur, rates,
+}: {
+  row: ConsolidatedHolding; displayCur: string;
+  rates: Record<string, number> | null; range: Range;
+  holdingSnapshots: HoldingSnapshot[]; inceptionByAccount: Record<string, string>;
+}) {
+  const conv = (v: number, c: string) => convertAmount(v, c, displayCur, rates);
+  const avgPrice = row.cost != null && row.units ? row.cost / row.units : null;
+  const stat = (label: string, value: string, tone: 'good' | 'bad' | '' = '') => (
+    <div className="hd-stat" key={label}>
+      <div className="hd-stat-cap">{label}</div>
+      <div className={`hd-stat-val${tone ? ' ' + tone : ''}`}>{value}</div>
+    </div>
+  );
+  const gainTone: 'good' | 'bad' | '' = row.gain == null ? '' : row.gain >= 0 ? 'good' : 'bad';
+  const m = (v: number | null) => v == null ? '—' : money(conv(v, row.currency), displayCur);
+  return (
+    <div className="hp-detail" data-testid={`holding-detail-${row.symbol}`}>
+      <div className="hd-stats">
+        {stat('Units', row.units.toLocaleString(undefined, { maximumFractionDigits: 4 }))}
+        {stat('Last price', m(row.price))}
+        {stat('Avg cost', m(avgPrice))}
+        {stat('Market value', m(row.value))}
+        {stat('Total cost', m(row.cost))}
+        {stat('Unrealized · ALL',
+          row.gain == null ? '—'
+            : `${row.gain >= 0 ? '+' : '−'}${money(Math.abs(conv(row.gain, row.currency)), displayCur)}`,
+          gainTone)}
+      </div>
+      {/* sparkline added in Task B3 */}
     </div>
   );
 }
