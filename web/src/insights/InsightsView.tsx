@@ -542,9 +542,12 @@ function BrokerageSubTab() {
     convert,
   });
 
-  // Cap ALL at the earliest known transaction so the chart doesn't paint
-  // pre-ownership Yahoo backfill for accounts that lack an explicit
-  // inceptionDate (manual entries, future non-SnapTrade scrapers).
+  // Cap the equity series at the earliest known transaction so the chart
+  // doesn't paint pre-ownership Yahoo backfill for accounts that lack an
+  // explicit inceptionDate (manual entries, future non-SnapTrade scrapers).
+  // Applied upstream of sliceRange — so every range pill (1Y/3M/etc.), not
+  // just ALL, sees the clipped series. That's intentional and matches the
+  // legacy SPA: data integrity beats "fill the whole 1Y window with fakes".
   const scopedAcctIdsForTxn = new Set(
     acctFilter === 'all'
       ? brkAccounts.map((a) => a.id)
