@@ -361,6 +361,63 @@ describe('InsightsView — AI analysis card', () => {
       await within(card).findByText(/set up an AI model first/i),
     ).toBeInTheDocument();
   });
+
+  it('Generate POST carries cardProviders when hideCardTotals is on', async () => {
+    // Inject settings via localStorage so SettingsProvider picks them up.
+    localStorage.setItem('honSettings', JSON.stringify({
+      hideCardTotals: true,
+      cardProviders: ['מקס איט'],
+    }));
+    const user = userEvent.setup();
+    let capturedBody: unknown;
+    installFetchMock({
+      'GET /api/transactions': () => ({
+        transactions: [tx({ id: 't1', amount: -250 })],
+      }),
+      'GET /api/categories': () => CATEGORIES,
+      'GET /api/insights': () => ({
+        state: 'idle', text: '', generatedAt: null, message: '',
+      }),
+      'POST /api/insights': (body) => {
+        capturedBody = body;
+        return { ok: true };
+      },
+    });
+    render(<SettingsProvider><InsightsView /></SettingsProvider>);
+    const card = await screen.findByTestId('ai-analysis');
+    await user.click(within(card).getByRole('button', { name: /^Generate$/i }));
+    await waitFor(() => expect(capturedBody).toBeDefined());
+    expect(capturedBody).toEqual({ cardProviders: ['מקס איט'] });
+    localStorage.removeItem('honSettings');
+  });
+
+  it('Generate POST sends empty cardProviders when hideCardTotals is off', async () => {
+    localStorage.setItem('honSettings', JSON.stringify({
+      hideCardTotals: false,
+      cardProviders: ['מקס איט'],
+    }));
+    const user = userEvent.setup();
+    let capturedBody: unknown;
+    installFetchMock({
+      'GET /api/transactions': () => ({
+        transactions: [tx({ id: 't1', amount: -250 })],
+      }),
+      'GET /api/categories': () => CATEGORIES,
+      'GET /api/insights': () => ({
+        state: 'idle', text: '', generatedAt: null, message: '',
+      }),
+      'POST /api/insights': (body) => {
+        capturedBody = body;
+        return { ok: true };
+      },
+    });
+    render(<SettingsProvider><InsightsView /></SettingsProvider>);
+    const card = await screen.findByTestId('ai-analysis');
+    await user.click(within(card).getByRole('button', { name: /^Generate$/i }));
+    await waitFor(() => expect(capturedBody).toBeDefined());
+    expect(capturedBody).toEqual({ cardProviders: [] });
+    localStorage.removeItem('honSettings');
+  });
 });
 
 describe('InsightsView — Brokerage sub-tab', () => {

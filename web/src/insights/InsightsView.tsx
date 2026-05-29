@@ -157,6 +157,7 @@ function parseInsights(text: string): { kind: InsightKind; text: string }[] {
 }
 
 function AiAnalysisCard() {
+  const [settings] = useSettings();
   const [status, setStatus] = useState<InsightsStatus | null>(null);
 
   const fetchStatus = useCallback(async () => {
@@ -180,7 +181,8 @@ function AiAnalysisCard() {
 
   const generate = async (): Promise<void> => {
     try {
-      await api('/insights', 'POST');
+      const cardProviders = settings.hideCardTotals ? settings.cardProviders : [];
+      await api('/insights', 'POST', { cardProviders });
       // Optimistically flip to generating so the shimmer renders
       // immediately; the first poll will pick up the real state.
       setStatus((s) => ({
