@@ -36,7 +36,11 @@ export function loadSettings(): Settings {
   if (!Array.isArray(base.cardProviders)) {
     base.cardProviders = [...DEFAULT_SETTINGS.cardProviders];
   }
-  if (typeof base.spendingAvgMonths !== 'number' || base.spendingAvgMonths < 1) {
+  if (
+    typeof base.spendingAvgMonths !== 'number'
+    || base.spendingAvgMonths < 1
+    || base.spendingAvgMonths > 120
+  ) {
     base.spendingAvgMonths = DEFAULT_SETTINGS.spendingAvgMonths;
   }
   return base;

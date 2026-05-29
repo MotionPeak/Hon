@@ -35,10 +35,12 @@ describe('loadSettings', () => {
     expect(loadSettings().spendingAvgMonths).toBe(12);
   });
 
-  it('falls back to 12 when spendingAvgMonths is missing or non-positive', () => {
+  it('falls back to 12 when spendingAvgMonths is out of the 1–120 range', () => {
     localStorage.setItem('honSettings', JSON.stringify({ spendingAvgMonths: 0 }));
     expect(loadSettings().spendingAvgMonths).toBe(12);
     localStorage.setItem('honSettings', JSON.stringify({ spendingAvgMonths: -4 }));
+    expect(loadSettings().spendingAvgMonths).toBe(12);
+    localStorage.setItem('honSettings', JSON.stringify({ spendingAvgMonths: 9999 }));
     expect(loadSettings().spendingAvgMonths).toBe(12);
     localStorage.setItem('honSettings', JSON.stringify({ spendingAvgMonths: 9 }));
     expect(loadSettings().spendingAvgMonths).toBe(9);
