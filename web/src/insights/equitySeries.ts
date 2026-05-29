@@ -21,11 +21,20 @@ export interface EquityAccount {
   inceptionDate: string | null;
 }
 
+export interface BrokerageRangeStats {
+  rateOfReturn: number | null;
+  dividendIncome: number | null;
+  contributions: number | null;
+}
+
 export interface PerformanceEntry {
   connectionId: string;
   data: {
     totalEquity: { date: string; value: number; currency?: string }[];
     currency?: string;
+    rateOfReturn?: number | null;
+    dividendIncome?: number | null;
+    byRange?: Record<string, BrokerageRangeStats>;
   };
 }
 

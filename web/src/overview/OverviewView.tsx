@@ -3,7 +3,24 @@ import { api } from '../api';
 import { money } from '../format';
 import type { Account, Company } from '../accounts/types';
 import { DelayedLoader } from '../ui/DelayedLoader';
+import { useSettings } from '../settings/useSettings';
 import { OwedToYouCard } from './OwedToYouCard';
+
+/**
+ * Builds the `/budget` path with the card-bill exclusion list as repeated
+ * `?cardProvider=` params. Bank-side credit-card bill lump sums (e.g. the
+ * monthly "מקס איט פיננסים" debit) are already itemised under the card
+ * account, so counting them again on the bank side double-counts spending.
+ * The engine drops them only when these params are present — the same
+ * contract Insights, Activity, and the legacy SPA already use.
+ */
+function budgetPathFor(cardProviders: string[]): string {
+  if (cardProviders.length === 0) return '/budget';
+  const qs = cardProviders
+    .map((p) => `cardProvider=${encodeURIComponent(p)}`)
+    .join('&');
+  return `/budget?${qs}`;
+}
 
 interface CurrencyTotal { currency: string; total: number; accountCount: number }
 
@@ -39,15 +56,23 @@ interface BudgetResponse {
 }
 
 export function OverviewView() {
+  const [settings] = useSettings();
   const [summary, setSummary] = useState<Summary | null>(null);
   const [budget, setBudget] = useState<BudgetResponse | null>(null);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
 
+  // A plain string, stable by VALUE across renders (same providers → same
+  // path), so the effect refetches only when the exclusion list actually
+  // changes — not on every re-render an array dependency would trigger.
+  const budgetPath = budgetPathFor(
+    settings.hideCardTotals ? settings.cardProviders : [],
+  );
+
   useEffect(() => {
     Promise.all([
       api<Summary>('/summary'),
-      api<BudgetResponse>('/budget'),
+      api<BudgetResponse>(budgetPath),
       api<{ companies: Company[] }>('/companies').catch(() => ({ companies: [] })),
       api<{ accounts: Account[] }>('/accounts').catch(() => ({ accounts: [] })),
     ]).then(([s, b, c, a]) => {
@@ -59,7 +84,7 @@ export function OverviewView() {
       setSummary({ byCurrency: [], accountCount: 0, connectionCount: 0, netWorthILS: 0 });
       setBudget(null);
     });
-  }, []);
+  }, [budgetPath]);
 
   if (summary === null) return <DelayedLoader />;
 

@@ -1693,41 +1693,58 @@ export class Repo {
   // --- Analytics ------------------------------------------------------------
 
   /** Total ILS spending & income per calendar month, from @start onward. */
-  monthlyTotals(start: string): { month: string; spending: number; income: number }[] {
+  monthlyTotals(
+    start: string,
+    excludeDescPatterns: string[] = [],
+  ): { month: string; spending: number; income: number }[] {
+    const params: Record<string, unknown> = { start };
+    const exclude = this.buildExcludeClause(excludeDescPatterns, params);
     return this.db
       .prepare(
         `SELECT substr(date, 1, 7) AS month,
                 SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END) AS spending,
                 SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) AS income
          FROM txn_effective
-         WHERE currency = 'ILS' AND date >= @start
+         WHERE currency = 'ILS' AND date >= @start ${exclude}
          GROUP BY substr(date, 1, 7)
          ORDER BY month`,
       )
-      .all({ start }) as { month: string; spending: number; income: number }[];
+      .all(params) as { month: string; spending: number; income: number }[];
   }
 
   /** ILS expense totals per category in [start, end); uncategorized included. */
-  categorySpending(start: string, end: string): { category: string; total: number }[] {
+  categorySpending(
+    start: string,
+    end: string,
+    excludeDescPatterns: string[] = [],
+  ): { category: string; total: number }[] {
+    const params: Record<string, unknown> = { start, end };
+    const exclude = this.buildExcludeClause(excludeDescPatterns, params);
     return this.db
       .prepare(
         `SELECT COALESCE(category, 'Uncategorized') AS category, SUM(-amount) AS total
          FROM txn_effective
-         WHERE amount < 0 AND currency = 'ILS' AND date >= @start AND date < @end
+         WHERE amount < 0 AND currency = 'ILS' AND date >= @start AND date < @end ${exclude}
          GROUP BY COALESCE(category, 'Uncategorized')`,
       )
-      .all({ start, end }) as { category: string; total: number }[];
+      .all(params) as { category: string; total: number }[];
   }
 
   /** Count and mean of ILS expense transactions in [start, end). */
-  expenseStats(start: string, end: string): { count: number; avg: number } {
+  expenseStats(
+    start: string,
+    end: string,
+    excludeDescPatterns: string[] = [],
+  ): { count: number; avg: number } {
+    const params: Record<string, unknown> = { start, end };
+    const exclude = this.buildExcludeClause(excludeDescPatterns, params);
     return this.db
       .prepare(
         `SELECT COUNT(*) AS count, COALESCE(AVG(-amount), 0) AS avg
          FROM txn_effective
-         WHERE amount < 0 AND currency = 'ILS' AND date >= @start AND date < @end`,
+         WHERE amount < 0 AND currency = 'ILS' AND date >= @start AND date < @end ${exclude}`,
       )
-      .get({ start, end }) as { count: number; avg: number };
+      .get(params) as { count: number; avg: number };
   }
 
   // --- Meta & credential vault ---------------------------------------------

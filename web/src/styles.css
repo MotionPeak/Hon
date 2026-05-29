@@ -1246,6 +1246,124 @@ button.mini { padding: 5px 11px; font-size: 12px; }
   .bh-value { grid-area: val; }
   .brk-pnl { grid-area: pnl; justify-self: end; }
 }
+
+/* ── Holdings drill-down: item wrapper, button-row reset, chevron, detail ── */
+
+/* <li> that stacks the row button + detail panel vertically. */
+.bh-item {
+  display: flex; flex-direction: column;
+}
+/* Open state: subtle tinted background to frame the expanded panel. */
+.bh-item.open {
+  background: var(--card-hi); border-radius: 12px;
+}
+/* Round the row corners when open so the tint matches the border-radius. */
+.bh-item.open > .bh-row {
+  border-radius: 12px 12px 0 0;
+}
+
+/* Reset global button chrome so the row looks exactly like it did as a
+   plain element. The global rule adds card background, border, padding,
+   border-radius, and white-space:nowrap — all of which break the grid row. */
+button.bh-row {
+  width: 100%;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 11px 0;
+  text-align: left;
+  white-space: normal;     /* overrides global button{white-space:nowrap} */
+  cursor: pointer;
+  /* Restore the grid layout (matches the non-button .bh-row above). */
+  display: grid;
+  grid-template-columns: auto 1fr 1fr auto auto;
+  align-items: center; gap: 14px;
+  border-top: 1px solid var(--hairline);
+  transition: none; /* suppress global button scale transition on this layout */
+}
+button.bh-row:hover { border-color: inherit; }  /* suppress global accent hover */
+button.bh-row:active { transform: none; }        /* suppress global scale(.97) */
+.bh-item:first-child > button.bh-row { border-top: 0; }
+
+/* Chevron indicator at the trailing edge of each row. */
+.bh-chev {
+  color: var(--faint);
+  font-size: 12px;
+  transition: transform .2s ease;
+  flex: none;
+  line-height: 1;
+}
+.bh-item.open .bh-chev {
+  transform: rotate(90deg);
+  color: var(--text);
+}
+@media (prefers-reduced-motion: reduce) {
+  .bh-chev { transition: none; }
+}
+
+/* Expanded detail panel — appears below the row button. */
+.hp-detail {
+  padding: 6px 16px 18px;
+  animation: fade-up .3s ease both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .hp-detail { animation: none; }
+}
+
+/* Stats grid: responsive tiles, minimum ~100px wide. */
+.hd-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+/* Individual stat tile. */
+.hd-stat {
+  background: var(--card); border-radius: 10px; padding: 10px 12px;
+}
+
+/* Stat label — small muted uppercase caption. */
+.hd-stat-cap {
+  font-size: 10px; color: var(--faint);
+  text-transform: uppercase; letter-spacing: .5px;
+}
+
+/* Stat value — prominent number. */
+.hd-stat-val {
+  font: 700 14px/1.1 ui-rounded, "SF Pro Rounded", system-ui;
+  margin-top: 5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+/* Reuse the same tone vars as .brk-stat-val.good/.bad and .brk-pnl.good/.bad */
+.hd-stat-val.good { color: var(--green); }
+.hd-stat-val.bad  { color: var(--red); }
+
+/* Sparkline wrapper: fixed height so the Recharts LineChart renders
+   as a compact sparkline rather than stretching to fill available space. */
+.hd-chart-wrap {
+  background: var(--card); border-radius: 12px;
+  padding: 14px 14px 10px;
+  height: 160px;
+}
+
+/* Fallback text when no sparkline data is available. */
+.hd-empty {
+  padding: 16px 4px;
+  color: var(--faint); font-size: 12.5px;
+  text-align: center;
+}
+
+@media (max-width: 760px) {
+  button.bh-row {
+    grid-template-columns: auto 1fr auto;
+    grid-template-areas: "dot main val" "dot weight weight" ". pnl pnl";
+  }
+  .hp-detail { padding: 6px 10px 14px; }
+  .hd-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
 .ins-card {
   background: var(--card); border: 1px solid var(--hairline);
   border-radius: 16px; padding: 18px 20px; margin-bottom: 18px;
