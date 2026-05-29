@@ -33,7 +33,7 @@ const monthKey = (d: Date): string => `${d.getFullYear()}-${pad(d.getMonth() + 1
  * per-category breakdown of the current month. ILS only — every transaction
  * Hon stores is ILS (brokerage syncs carry balances, not transactions).
  */
-export function buildAnalytics(repo: Repo): Analytics {
+export function buildAnalytics(repo: Repo, cardProviders: string[] = []): Analytics {
   const now = new Date();
   const month = (offset: number) => new Date(now.getFullYear(), now.getMonth() + offset, 1);
   const thisStart = firstOfMonth(month(0));
@@ -42,7 +42,7 @@ export function buildAnalytics(repo: Repo): Analytics {
   const windowStart = firstOfMonth(month(-11));
 
   // Trailing 12 months, zero-filled so the chart never has gaps.
-  const rows = new Map(repo.monthlyTotals(windowStart).map((r) => [r.month, r]));
+  const rows = new Map(repo.monthlyTotals(windowStart, cardProviders).map((r) => [r.month, r]));
   const months: MonthPoint[] = [];
   for (let i = 11; i >= 0; i--) {
     const key = monthKey(month(-i));
@@ -57,10 +57,10 @@ export function buildAnalytics(repo: Repo): Analytics {
   const lastMonth = months[10];
 
   const lastCats = new Map(
-    repo.categorySpending(lastStart, thisStart).map((c) => [c.category, c.total]),
+    repo.categorySpending(lastStart, thisStart, cardProviders).map((c) => [c.category, c.total]),
   );
   const byCategory: CategorySlice[] = repo
-    .categorySpending(thisStart, nextStart)
+    .categorySpending(thisStart, nextStart, cardProviders)
     .map((c) => {
       const prev = lastCats.get(c.category);
       return {
@@ -71,7 +71,7 @@ export function buildAnalytics(repo: Repo): Analytics {
     })
     .sort((a, b) => b.amount - a.amount);
 
-  const stats = repo.expenseStats(windowStart, nextStart);
+  const stats = repo.expenseStats(windowStart, nextStart, cardProviders);
 
   return {
     currency: 'ILS',

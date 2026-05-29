@@ -93,3 +93,41 @@ describe('setConnectionHistoryMonths', () => {
       .toThrow(/not found/i);
   });
 });
+
+describe('analytics exclude patterns', () => {
+  function seedSpending(repo: Repo) {
+    const conn = repo.createConnection('beinleumi', 'Beinleumi');
+    repo.saveScrapeResult(conn.id, [{
+      accountNumber: '1', currency: 'ILS', balance: 0,
+      transactions: [
+        { externalId: 'a', date: '2026-05-02', amount: -100, currency: 'ILS', description: 'Cafe' },
+        { externalId: 'b', date: '2026-05-03', amount: -9461, currency: 'ILS', description: 'מקס איט פיננסים' },
+        { externalId: 'c', date: '2026-05-04', amount: 5000, currency: 'ILS', description: 'Salary' },
+      ],
+    }]);
+  }
+
+  it('monthlyTotals excludes matching descriptions', () => {
+    const { repo } = makeRepo();
+    seedSpending(repo);
+    const base = repo.monthlyTotals('2026-05-01').find((m) => m.month === '2026-05');
+    const excl = repo.monthlyTotals('2026-05-01', ['מקס איט']).find((m) => m.month === '2026-05');
+    expect(base?.spending).toBe(9561);
+    expect(excl?.spending).toBe(100);
+  });
+
+  it('categorySpending excludes matching descriptions', () => {
+    const { repo } = makeRepo();
+    seedSpending(repo);
+    const total = (rows: { total: number }[]) => rows.reduce((s, r) => s + r.total, 0);
+    expect(total(repo.categorySpending('2026-05-01', '2026-06-01'))).toBe(9561);
+    expect(total(repo.categorySpending('2026-05-01', '2026-06-01', ['מקס איט']))).toBe(100);
+  });
+
+  it('expenseStats excludes matching descriptions', () => {
+    const { repo } = makeRepo();
+    seedSpending(repo);
+    expect(repo.expenseStats('2026-05-01', '2026-06-01').count).toBe(2);
+    expect(repo.expenseStats('2026-05-01', '2026-06-01', ['מקס איט']).count).toBe(1);
+  });
+});

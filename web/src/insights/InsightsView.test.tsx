@@ -361,6 +361,63 @@ describe('InsightsView — AI analysis card', () => {
       await within(card).findByText(/set up an AI model first/i),
     ).toBeInTheDocument();
   });
+
+  it('Generate POST carries cardProviders when hideCardTotals is on', async () => {
+    // Inject settings via localStorage so SettingsProvider picks them up.
+    localStorage.setItem('honSettings', JSON.stringify({
+      hideCardTotals: true,
+      cardProviders: ['מקס איט'],
+    }));
+    const user = userEvent.setup();
+    let capturedBody: unknown;
+    installFetchMock({
+      'GET /api/transactions': () => ({
+        transactions: [tx({ id: 't1', amount: -250 })],
+      }),
+      'GET /api/categories': () => CATEGORIES,
+      'GET /api/insights': () => ({
+        state: 'idle', text: '', generatedAt: null, message: '',
+      }),
+      'POST /api/insights': (body) => {
+        capturedBody = body;
+        return { ok: true };
+      },
+    });
+    render(<SettingsProvider><InsightsView /></SettingsProvider>);
+    const card = await screen.findByTestId('ai-analysis');
+    await user.click(within(card).getByRole('button', { name: /^Generate$/i }));
+    await waitFor(() => expect(capturedBody).toBeDefined());
+    expect(capturedBody).toEqual({ cardProviders: ['מקס איט'] });
+    localStorage.removeItem('honSettings');
+  });
+
+  it('Generate POST sends empty cardProviders when hideCardTotals is off', async () => {
+    localStorage.setItem('honSettings', JSON.stringify({
+      hideCardTotals: false,
+      cardProviders: ['מקס איט'],
+    }));
+    const user = userEvent.setup();
+    let capturedBody: unknown;
+    installFetchMock({
+      'GET /api/transactions': () => ({
+        transactions: [tx({ id: 't1', amount: -250 })],
+      }),
+      'GET /api/categories': () => CATEGORIES,
+      'GET /api/insights': () => ({
+        state: 'idle', text: '', generatedAt: null, message: '',
+      }),
+      'POST /api/insights': (body) => {
+        capturedBody = body;
+        return { ok: true };
+      },
+    });
+    render(<SettingsProvider><InsightsView /></SettingsProvider>);
+    const card = await screen.findByTestId('ai-analysis');
+    await user.click(within(card).getByRole('button', { name: /^Generate$/i }));
+    await waitFor(() => expect(capturedBody).toBeDefined());
+    expect(capturedBody).toEqual({ cardProviders: [] });
+    localStorage.removeItem('honSettings');
+  });
 });
 
 describe('InsightsView — Brokerage sub-tab', () => {
@@ -571,6 +628,82 @@ describe('InsightsView — Brokerage sub-tab', () => {
     // Each holding shows its market value.
     expect(within(list).getByText(/2,?000/)).toBeInTheDocument();
     expect(within(list).getByText(/2,?400/)).toBeInTheDocument();
+  });
+
+  it('clicking a holding row reveals its stats grid; clicking again hides it', async () => {
+    const user = userEvent.setup();
+    installFetchMock({
+      ...EMPTY_TXNS,
+      'GET /api/brokerage': () => ({
+        holdings: [
+          {
+            accountId: 'b1', symbol: 'VT', description: 'Vanguard Total World',
+            units: 10, price: 100, currency: 'USD',
+            costBasis: 80, openPnl: 20, value: 1000,
+            updatedAt: '2026-05-25',
+          },
+          {
+            accountId: 'b1', symbol: 'VBR', description: 'Vanguard Small-Cap',
+            units: 5, price: 50, currency: 'USD',
+            costBasis: 40, openPnl: 10, value: 250,
+            updatedAt: '2026-05-25',
+          },
+        ],
+        snapshots: [],
+        holdingSnapshots: [],
+        performance: [],
+        ilsRates: { USD: 3.7 },
+      }),
+    });
+    renderView();
+    await user.click(await screen.findByRole('tab', { name: /brokerage/i }));
+    const row = await screen.findByTestId('holding-row-VT');
+    expect(screen.queryByTestId('holding-detail-VT')).toBeNull();
+    await user.click(row);
+    const detail = screen.getByTestId('holding-detail-VT');
+    expect(detail).toBeInTheDocument();
+    // The stats grid shows real computed values from the VT fixture:
+    // units 10, market value = $1,000 (units 10 × price 100, USD display).
+    expect(within(detail).getByText(/^Units$/i)).toBeInTheDocument();
+    expect(within(detail).getByText(/^10$/)).toBeInTheDocument();
+    expect(within(detail).getByText(/^Market value$/i)).toBeInTheDocument();
+    expect(within(detail).getByText(/\$1,?000/)).toBeInTheDocument();
+    await user.click(row);
+    await waitFor(() => expect(screen.queryByTestId('holding-detail-VT')).toBeNull());
+  });
+
+  it('expanded holding shows a sparkline when it has ≥2 snapshots', async () => {
+    const user = userEvent.setup();
+    // Two holdingSnapshots for VT, within the last 12 months so the 1Y slice includes both.
+    const now = new Date();
+    const d1 = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000); // 60 days ago
+    const d2 = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000); // 30 days ago
+    const snap1 = d1.toISOString().slice(0, 10);
+    const snap2 = d2.toISOString().slice(0, 10);
+    installFetchMock({
+      ...EMPTY_TXNS,
+      'GET /api/brokerage': () => ({
+        holdings: [
+          {
+            accountId: 'acc1', symbol: 'VT', description: 'Vanguard Total World',
+            units: 10, price: 100, currency: 'USD',
+            costBasis: 800, openPnl: 200, value: 1000,
+            updatedAt: today.toISOString().slice(0, 10),
+          },
+        ],
+        snapshots: [],
+        holdingSnapshots: [
+          { accountId: 'acc1', symbol: 'VT', date: snap1, value: 100, currency: 'USD' },
+          { accountId: 'acc1', symbol: 'VT', date: snap2, value: 120, currency: 'USD' },
+        ],
+        performance: [],
+        ilsRates: { USD: 3.7 },
+      }),
+    });
+    renderView();
+    await user.click(await screen.findByRole('tab', { name: /brokerage/i }));
+    await user.click(await screen.findByTestId('holding-row-VT'));
+    expect(screen.getByTestId('holding-spark-VT')).toBeInTheDocument();
   });
 });
 
@@ -875,5 +1008,101 @@ describe('InsightsView — brokerage account pills', () => {
     const points = Number(document.querySelector('.lc-wrap')!.getAttribute('data-points'));
     // 4 performance points (snapshots would have given 2) → performance wins.
     expect(points).toBe(4);
+  });
+});
+
+describe('InsightsView — per-range stat tiles', () => {
+  // Shared fixture: one brokerage account (connectionId: 'conn1') with a
+  // snapshot so it's in scopedBrkAccounts, and a performance entry carrying
+  // byRange data for '1Y'.
+  const rangeAccountsResp = {
+    accounts: [
+      {
+        id: 'a-range', connectionId: 'conn1', companyId: 'snaptrade',
+        connectionName: 'IBKR', accountNumber: '111', label: 'Range Test',
+        balance: 5000, currency: 'USD', updatedAt: today.toISOString().slice(0, 10),
+        excluded: false, inceptionDate: null,
+      },
+    ],
+  };
+
+  const rangeHoldings = [
+    {
+      accountId: 'a-range', symbol: 'VT', description: 'Vanguard Total World',
+      units: 10, price: 100, currency: 'USD',
+      costBasis: 80, openPnl: 20, value: 1000,
+      updatedAt: today.toISOString().slice(0, 10),
+    },
+  ];
+
+  const rangeSnapshots = [
+    { accountId: 'a-range', date: today.toISOString().slice(0, 10), value: 5000, currency: 'USD' },
+  ];
+
+  it('shows rate-of-return and dividend tiles for the active range', async () => {
+    const user = userEvent.setup();
+    installFetchMock({
+      ...EMPTY_TXNS,
+      'GET /api/accounts': () => rangeAccountsResp,
+      'GET /api/brokerage': () => ({
+        holdings: rangeHoldings,
+        snapshots: rangeSnapshots,
+        holdingSnapshots: [],
+        performance: [
+          {
+            connectionId: 'conn1',
+            data: {
+              currency: 'USD',
+              totalEquity: [
+                { date: today.toISOString().slice(0, 10), value: 5000, currency: 'USD' },
+              ],
+              byRange: {
+                '1Y': { rateOfReturn: 0.085, dividendIncome: 42, contributions: 0 },
+              },
+            },
+          },
+        ],
+        ilsRates: { USD: 3.7 },
+      }),
+    });
+    renderView();
+    await user.click(await screen.findByRole('tab', { name: /brokerage/i }));
+    await screen.findByTestId('brokerage-stats');
+    expect(screen.getByText('Rate of return · 1Y')).toBeInTheDocument();
+    expect(screen.getByText('+8.5%')).toBeInTheDocument();
+    expect(screen.getByText('Dividends · 1Y')).toBeInTheDocument();
+  });
+
+  it('hides the rate/dividend tiles when byRange has no numbers', async () => {
+    const user = userEvent.setup();
+    installFetchMock({
+      ...EMPTY_TXNS,
+      'GET /api/accounts': () => rangeAccountsResp,
+      'GET /api/brokerage': () => ({
+        holdings: rangeHoldings,
+        snapshots: rangeSnapshots,
+        holdingSnapshots: [],
+        performance: [
+          {
+            connectionId: 'conn1',
+            data: {
+              currency: 'USD',
+              totalEquity: [
+                { date: today.toISOString().slice(0, 10), value: 5000, currency: 'USD' },
+              ],
+              byRange: {
+                '1Y': { rateOfReturn: null, dividendIncome: null, contributions: null },
+              },
+            },
+          },
+        ],
+        ilsRates: { USD: 3.7 },
+      }),
+    });
+    renderView();
+    await user.click(await screen.findByRole('tab', { name: /brokerage/i }));
+    await screen.findByTestId('brokerage-stats');
+    expect(screen.queryByText(/Rate of return/)).toBeNull();
+    expect(screen.queryByText(/Dividends ·/)).toBeNull();
   });
 });

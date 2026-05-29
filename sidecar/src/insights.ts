@@ -36,6 +36,7 @@ export class InsightsGenerator {
     generatedAt: null,
     message: 'No insights generated yet.',
   };
+  private cardProviders: string[] = [];
 
   constructor(
     private readonly repo: Repo,
@@ -46,8 +47,9 @@ export class InsightsGenerator {
     return this.status;
   }
 
-  start(): void {
+  start(cardProviders: string[] = []): void {
     if (this.status.state === 'generating') return;
+    this.cardProviders = cardProviders;
     this.status = { ...this.status, state: 'generating', message: 'Generating insights…' };
     void this.run();
   }
@@ -59,12 +61,12 @@ export class InsightsGenerator {
         return;
       }
 
-      const report = buildBudgetReport(this.repo);
+      const report = buildBudgetReport(this.repo, undefined, { cardProviders: this.cardProviders });
       if (report.totalSpent <= 0) {
         this.fail('No spending this month yet — sync and categorize transactions first.');
         return;
       }
-      const analytics = buildAnalytics(this.repo);
+      const analytics = buildAnalytics(this.repo, this.cardProviders);
 
       const session = await this.llm.openSession({
         system: SYSTEM_PROMPT,

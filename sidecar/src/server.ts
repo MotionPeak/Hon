@@ -2303,9 +2303,13 @@ app.delete('/piggy/:id', async (req, reply) => {
   return { ok: true };
 });
 
-app.post('/insights', async (_req, reply) => {
+app.post('/insights', async (req, reply) => {
   if (!insights) return reply.code(503).send({ error: 'database unavailable' });
-  insights.start();
+  const body = (req.body ?? {}) as { cardProviders?: unknown };
+  const cardProviders = Array.isArray(body.cardProviders)
+    ? body.cardProviders.filter((p): p is string => typeof p === 'string')
+    : [];
+  insights.start(cardProviders);
   return { ok: true };
 });
 
