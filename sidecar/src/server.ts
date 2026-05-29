@@ -991,6 +991,14 @@ app.delete('/splitwise/expense/:transactionId', async (req, reply) => {
   const { transactionId } = req.params as { transactionId: string };
   const link = repo.getSplitwiseLink(transactionId);
   const acct = loadSplitwiseAccount();
+  // A locked vault means we cannot reach Splitwise to delete the remote
+  // expense. Deleting only the local link would silently orphan the bill
+  // for everyone it is shared with, so refuse — keep the link, surface 409.
+  if (link && !acct) {
+    return reply
+      .code(409)
+      .send({ error: 'unlock the credential vault to delete the linked Splitwise expense' });
+  }
   if (link && acct) {
     try {
       await deleteExpense(acct.apiKey, link.expenseId);
