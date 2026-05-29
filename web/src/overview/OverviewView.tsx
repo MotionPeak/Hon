@@ -10,6 +10,7 @@ import {
   detectMerchants, expectedFixedThisCycle,
   type FreqOrIgnore, type RecurringData,
 } from '../recurring/helpers';
+import { useSplitwise } from '../splitwise/useSplitwise';
 import { OwedToYouCard } from './OwedToYouCard';
 
 /**
@@ -225,6 +226,9 @@ function BankProjection({
   companies: Company[];
   accounts: Account[];
 }) {
+  // Hook must run before the early return below — money friends owe the user
+  // (same-currency, positive) is incoming, so it lifts the end-of-cycle balance.
+  const sw = useSplitwise();
   const bankCompanyIds = new Set(
     companies.filter((c) => c.type === 'bank').map((c) => c.id),
   );
@@ -233,12 +237,18 @@ function BankProjection({
   );
   if (bankAccounts.length === 0) return null;
 
+  const owed = sw.connected
+    ? sw.friends
+        .flatMap((f) => f.balances)
+        .filter((b) => b.currency === currency && b.amount > 0)
+        .reduce((s, b) => s + b.amount, 0)
+    : 0;
   const bankNow = bankAccounts.reduce((s, a) => s + (a.balance ?? 0), 0);
   const expectedIncome = variable.income;
   const fixedEss = committedDisplay; // predicted fixed-this-cycle + posted essentials
   const cycleVariable = variable.spent;
   const cyclePiggy = Math.max(0, variable.piggyFunded ?? 0);
-  const change = expectedIncome - fixedEss - cycleVariable - cyclePiggy;
+  const change = expectedIncome - fixedEss - cycleVariable - cyclePiggy + owed;
   const endBalance = bankNow + change;
   const up = change >= 0;
   const sign = up ? '+' : '−';
@@ -276,6 +286,9 @@ function BankProjection({
           </span>
         </div>
         <Detail label="Income expected this cycle" amount={expectedIncome} tone="good" />
+        {owed > 0 && (
+          <Detail label="Owed to you (Splitwise)" amount={owed} tone="good" />
+        )}
         <Detail label="Fixed + essentials this cycle" amount={fixedEss} tone="bad" />
         <Detail label="Variable spent so far" amount={cycleVariable} tone="bad" />
         <Detail label="Set asides (piggies)" amount={cyclePiggy} tone="bad" />

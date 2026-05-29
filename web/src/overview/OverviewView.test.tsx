@@ -203,6 +203,37 @@ describe('OverviewView', () => {
     expect((card.querySelector('.balance-num') as HTMLElement).textContent).toMatch(/3,?300/);
   });
 
+  it('adds an "Owed to you (Splitwise)" line to the projection and end balance', async () => {
+    installFetchMock(mocks({
+      'GET /api/splitwise/status': () => ({ connected: true, user: { id: 1 } }),
+      'POST /api/splitwise/refresh': () => ({
+        friends: [{ name: 'Noga', balances: [{ amount: 800, currency: 'ILS' }] }],
+        links: [],
+      }),
+    }));
+    renderOverview();
+    const card = await screen.findByTestId('bank-projection');
+    // owed (ILS, >0) = 800 → its own projection line, folded into end balance.
+    expect(await within(card).findByText(/Owed to you \(Splitwise\)/i)).toBeInTheDocument();
+    expect(within(card).getByText(/800/)).toBeInTheDocument();
+  });
+
+  it('omits the owed line when Splitwise has no ILS balance owed', async () => {
+    installFetchMock(mocks({
+      'GET /api/splitwise/status': () => ({ connected: true, user: { id: 1 } }),
+      'POST /api/splitwise/refresh': () => ({
+        friends: [{ name: 'Noga', balances: [{ amount: 50, currency: 'USD' }] }],
+        links: [],
+      }),
+    }));
+    renderOverview();
+    // Wait for Splitwise to finish loading (the OwedToYouCard shows the friend),
+    // then assert the projection has no owed line — USD is filtered out.
+    await screen.findByText('Noga');
+    const card = await screen.findByTestId('bank-projection');
+    expect(within(card).queryByText(/Owed to you \(Splitwise\)/i)).not.toBeInTheDocument();
+  });
+
   it('renders the net worth card with the ILS headline', async () => {
     installFetchMock(mocks());
     renderOverview();
