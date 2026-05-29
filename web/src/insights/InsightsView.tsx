@@ -8,6 +8,7 @@ import type { Category } from '../settings/CategoriesPanel';
 import type { Transaction } from '../activity/types';
 import type { Account } from '../accounts/types';
 import { cycleAnalytics, type MonthBucket } from './analytics';
+import { categoryAverages } from './categoryAverages';
 import { isExcludedFromCycle } from '../activity/excluded';
 import { LineChart } from './LineChart';
 import {
@@ -112,6 +113,7 @@ export function InsightsView() {
           transactions={transactions}
           categories={categories}
           monthStartDay={settings.monthStartDay}
+          spendingAvgMonths={settings.spendingAvgMonths}
           isExcluded={isExcluded}
         />
       )}
@@ -823,21 +825,23 @@ interface MonthDetailProps {
   transactions: Transaction[];
   categories: Category[];
   monthStartDay: number;
+  /** How many trailing completed cycles feed the "vs avg" comparisons. */
+  spendingAvgMonths: number;
   /** Card-bill / manually-excluded predicate — drops those rows from the
    *  breakdown, deltas and biggest-expense so they don't double-count. */
   isExcluded: (t: Transaction) => boolean;
 }
 
 function MonthDetail(
-  { monthKey, months, transactions, categories, monthStartDay, isExcluded }: MonthDetailProps,
+  { monthKey, months, transactions, categories, monthStartDay, spendingAvgMonths, isExcluded }: MonthDetailProps,
 ) {
   const idx = months.findIndex((m) => m.month === monthKey);
   const prev = idx > 0 ? months[idx - 1] : null;
-  // Trailing-average over completed months (every month but the current).
-  const completed = months.slice(0, -1).filter((m) => m.spending > 0);
-  const avgSpending = completed.length > 0
-    ? completed.reduce((s, m) => s + m.spending, 0) / completed.length
-    : null;
+  // Trailing per-category averages over the user-chosen window (Settings →
+  // Category averages), anchored to the cycles before the displayed month.
+  const { avgSpending, avgByCat } = categoryAverages(
+    transactions, monthStartDay, isExcluded, spendingAvgMonths, monthKey,
+  );
   // Per-category history across the 12-month window so we can show
   // vs-last and vs-avg delta chips on each row.
   const cycleIdx = new Map<string, number>();
@@ -853,15 +857,6 @@ function MonthDetail(
     let arr = byCatCycle.get(cat);
     if (!arr) { arr = new Array(months.length).fill(0); byCatCycle.set(cat, arr); }
     arr[ci] += -t.amount;
-  }
-  const avgByCat = new Map<string, number>();
-  const compIdx = months.slice(0, -1)
-    .map((m, i) => (m.spending > 0 ? i : -1))
-    .filter((i) => i >= 0);
-  for (const [cat, arr] of byCatCycle) {
-    if (compIdx.length === 0) continue;
-    const sum = compIdx.reduce((s, i) => s + (arr[i] || 0), 0);
-    avgByCat.set(cat, sum / compIdx.length);
   }
   const inMonth = transactions.filter((t) =>
     !t.refundForId
