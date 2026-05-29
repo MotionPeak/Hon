@@ -660,7 +660,14 @@ describe('InsightsView — Brokerage sub-tab', () => {
     const row = await screen.findByTestId('holding-row-VT');
     expect(screen.queryByTestId('holding-detail-VT')).toBeNull();
     await user.click(row);
-    expect(screen.getByTestId('holding-detail-VT')).toBeInTheDocument();
+    const detail = screen.getByTestId('holding-detail-VT');
+    expect(detail).toBeInTheDocument();
+    // The stats grid shows real computed values from the VT fixture:
+    // units 10, market value = $1,000 (units 10 × price 100, USD display).
+    expect(within(detail).getByText(/^Units$/i)).toBeInTheDocument();
+    expect(within(detail).getByText(/^10$/)).toBeInTheDocument();
+    expect(within(detail).getByText(/^Market value$/i)).toBeInTheDocument();
+    expect(within(detail).getByText(/\$1,?000/)).toBeInTheDocument();
     await user.click(row);
     await waitFor(() => expect(screen.queryByTestId('holding-detail-VT')).toBeNull());
   });

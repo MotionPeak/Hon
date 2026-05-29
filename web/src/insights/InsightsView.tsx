@@ -866,7 +866,7 @@ function HoldingDetail({
   const conv = (v: number, c: string) => convertAmount(v, c, displayCur, rates);
   const avgPrice = row.cost != null && row.units ? row.cost / row.units : null;
   const stat = (label: string, value: string, tone: 'good' | 'bad' | '' = '') => (
-    <div className="hd-stat" key={label}>
+    <div className="hd-stat">
       <div className="hd-stat-cap">{label}</div>
       <div className={`hd-stat-val${tone ? ' ' + tone : ''}`}>{value}</div>
     </div>
