@@ -18,6 +18,7 @@ import {
   type HoldingSnapshot,
 } from './equitySeries';
 import { buildHoldingSeries } from './holdingSeries';
+import { earliestTxnDate } from './txnCap';
 
 function monthLetter(key: string): string {
   // "2026-05" → "M" (English month letter — matches the legacy app).
@@ -446,6 +447,7 @@ function InceptionBadge({ earliest }: InceptionBadgeProps) {
 function BrokerageSubTab() {
   const [data, setData] = useState<BrokerageResp | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [acctFilter, setAcctFilter] = useState<'all' | string>('all');
   const [range, setRange] = useState<Range>('1Y');
   const [displayCur, setDisplayCur] = useState<string | null>(null);
@@ -453,14 +455,18 @@ function BrokerageSubTab() {
 
   const refresh = useCallback(async () => {
     try {
-      const [b, a] = await Promise.all([
+      const [b, a, t] = await Promise.all([
         api<BrokerageResp>('/brokerage'),
         api<{ accounts: Account[] }>('/accounts').catch(
           () => ({ accounts: [] as Account[] }),
         ),
+        api<{ transactions: Transaction[] }>('/transactions').catch(
+          () => ({ transactions: [] as Transaction[] }),
+        ),
       ]);
       setData(b);
       setAccounts(a.accounts);
+      setTransactions(t.transactions);
     } catch {
       setData({
         holdings: [], snapshots: [], holdingSnapshots: [],
@@ -483,12 +489,18 @@ function BrokerageSubTab() {
   const rates = data.ilsRates;
   const cur = displayCur ?? pickDisplayCurrency(data.holdings);
 
-  // Brokerage accounts in scope of the pills: any account with at
-  // least one snapshot in /brokerage. The engine only writes snapshots
-  // for brokerage accounts, so the intersection is the right filter
-  // without a separate company.type check.
-  const brkAcctIds = new Set(data.snapshots.map((s) => s.accountId));
-  const brkAccounts = accounts.filter((a) => brkAcctIds.has(a.id));
+  // Account is "brokerage-in-scope" if it appears in ANY of the three brokerage
+  // data sources: local value-snapshots, current holdings, or connection-level
+  // performance history. Earlier this was snapshots-only, which silently dropped
+  // pills for accounts that had performance but no local snapshot yet.
+  const brkSnapAcctIds = new Set(data.snapshots.map((s) => s.accountId));
+  const brkHoldingAcctIds = new Set(data.holdings.map((h) => h.accountId));
+  const brkPerfConnIds = new Set(data.performance.map((p) => p.connectionId));
+  const brkAccounts = accounts.filter((a) =>
+    brkSnapAcctIds.has(a.id)
+    || brkHoldingAcctIds.has(a.id)
+    || brkPerfConnIds.has(a.connectionId),
+  );
 
   // For the All-accounts view we show a read-only earliest-inception
   // badge instead of an editable input. The "earliest" is
@@ -519,7 +531,7 @@ function BrokerageSubTab() {
   // instead of just the last few local snapshots.
   const convert = (value: number, currency: string): number =>
     convertAmount(value, currency, cur, rates);
-  const fullSeries = buildEquitySeries({
+  const fullSeriesUncapped = buildEquitySeries({
     performance: data.performance,
     snapshots: data.snapshots,
     holdingSnapshots: data.holdingSnapshots,
@@ -529,6 +541,24 @@ function BrokerageSubTab() {
     acctFilter,
     convert,
   });
+
+  // Cap the equity series at the earliest known transaction so the chart
+  // doesn't paint pre-ownership Yahoo backfill for accounts that lack an
+  // explicit inceptionDate (manual entries, future non-SnapTrade scrapers).
+  // Applied upstream of sliceRange — so every range pill (1Y/3M/etc.), not
+  // just ALL, sees the clipped series. That's intentional and matches the
+  // legacy SPA: data integrity beats "fill the whole 1Y window with fakes".
+  const scopedAcctIdsForTxn = new Set(
+    acctFilter === 'all'
+      ? brkAccounts.map((a) => a.id)
+      : [acctFilter],
+  );
+  const txnCapDate = earliestTxnDate(transactions, scopedAcctIdsForTxn);
+  const fullSeriesCapped = txnCapDate
+    ? fullSeriesUncapped.filter((p) => p.date >= txnCapDate)
+    : fullSeriesUncapped;
+  const fullSeries = fullSeriesCapped.length ? fullSeriesCapped : fullSeriesUncapped;
+
   const series = sliceRange(fullSeries, range);
 
   const periodChange = (series.at(-1)?.value ?? 0) - (series[0]?.value ?? 0);
@@ -598,6 +628,9 @@ function BrokerageSubTab() {
       dividendIncome: p.data.dividendIncome ?? null,
       contributions: null,
     };
+    // rateOfReturn is a simple unweighted mean across in-scope connections — accurate
+    // for one broker, slightly skewed for users with multiple connections of very
+    // different sizes. AUM-weighting is future work.
     if (typeof w.rateOfReturn === 'number') { rateSum += w.rateOfReturn; rateCount += 1; }
     if (typeof w.dividendIncome === 'number') {
       const v = convertAmount(w.dividendIncome, p.data.currency ?? cur, cur, rates);

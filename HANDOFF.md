@@ -401,20 +401,26 @@ live (worktree vite :5175 against the real engine).
 
 ### ⚠️ Still open on the Brokerage Insights page
 
-1. **SnapTrade holding data is internally inconsistent.** For IBKR,
-   `units×price` (~$4,168), `costBasis`+`openPnl`, and the account
-   balance ($4,302) don't fully reconcile, and `value` is null. The
-   UI now copes (legacy formulas + the Cash row), but the underlying
-   SnapTrade mapping in `sidecar/src/snaptrade.ts` deserves a look —
-   the per-unit vs total semantics and the null `value` are fragile.
-2. **Pills only list accounts that have value-snapshots** (the
-   `brkAccounts = accounts ∩ snapshot.accountId` intersection). An
-   account with `performance` but no local snapshot yet wouldn't get
-   a pill. Legacy keys off company type; consider matching.
-3. **No transaction-based "ALL" cap.** Legacy anchors the ALL range
-   to the user's earliest transaction so it doesn't paint years of
-   pretend pre-ownership history; React only has the per-account
-   inception clip. The brokerage tab doesn't fetch `/transactions`.
+(none — all 5 known items shipped.)
+
+1. ~~**SnapTrade holding data is internally inconsistent.**~~ —
+   **AUDITED + PARTIAL FIX SHIPPED 2026-05-30** (branch
+   `session/insights-followups-2026-05-30`). The audit
+   (`/tmp/snaptrade-audit-2026-05-30.md`) confirmed the React per-unit
+   assumption is correct, null `value` is unavoidable (SnapTrade has no
+   position-level market value field), and the $134 IBKR gap is uninvested
+   cash (already surfaced as the Cash row). The one real fix: filter
+   `cash_equivalent` positions to stop money-market sweep funds from being
+   double-counted vs the balance-derived Cash row.
+2. ~~**Pills only list accounts with value-snapshots**~~ —
+   **SHIPPED 2026-05-30** (same branch). `brkAccounts` now includes
+   accounts referenced by snapshots, holdings, OR performance-by-connection
+   — verified live: the Meitav pension now gets its own pill.
+3. ~~**No transaction-based "ALL" cap**~~ — **SHIPPED 2026-05-30**
+   (same branch). New `web/src/insights/txnCap.ts` helper; BrokerageSubTab
+   fetches /transactions and clips the equity series at the earliest
+   scoped-brokerage transaction date, falling back to uncapped if the cap
+   would empty the series.
 4. ~~**Holdings drill-down / sparkline** + per-range stats~~ —
    **SHIPPED 2026-05-29** (branch `session/insights-drilldown-aifix-2026-05-29`).
    See § "Insights drill-down + AI card-bill fix (2026-05-29)".
@@ -461,9 +467,56 @@ window). Dividend tile is hidden when no dividend data; rate tile hidden when
 no numbers. CSS for `.bh-item/.bh-chev/.hp-detail/.hd-stats/.hd-stat*/.hd-chart-wrap/.hd-empty`
 in `web/src/styles.css` (reuses existing tone vars; button-reset on `.bh-row`).
 
-**Still open on Brokerage Insights:** items 1 (SnapTrade per-unit/null-`value`
-mapping), 2 (pill coverage for accounts without snapshots), 3 (txn-based ALL
-cap) — see the list above.
+**Still open on Brokerage Insights:** none. Items 1 (SnapTrade mapping),
+2 (pill coverage), 3 (txn-based ALL cap) all shipped 2026-05-30 — see
+§ "Insights follow-ups (2026-05-30)" below.
+
+## Insights follow-ups (2026-05-30)
+
+Branch `session/insights-followups-2026-05-30` (6 commits). Visually verified
+in chrome-devtools against the real engine — the new Meitav pension pill
+shows up, ALL-range tiles update on flip. Tests: sidecar **89**, web **473**;
+both typechecks clean.
+
+**Polish / review nits (`b95ca18`).** Empty-sparkline branch now has a test;
+two clarifying comments — one in `holdingSeries.ts` on the Convert/`?? 1`
+null-drop being mostly exercised by tests with custom converters, one in
+`InsightsView.tsx` noting Rate of return is a simple unweighted mean across
+in-scope connections (AUM-weighting is future work). The reviewer's
+suggestion to add a route test for `POST /insights` was deliberately skipped
+to honour the project's "route handlers tested manually" convention.
+
+**Item 2 — Pill coverage broadened (`b3ef56a`).** `brkAccounts` is now the
+union of accounts referenced by snapshots, holdings, OR performance-by-connection
+— so an account with only connection-level performance (e.g. the Meitav
+pension, which appeared in holdings but not snapshots) now gets its own pill.
+Old `brkAcctIds` variable was dead code and removed in the same commit.
+
+**Item 3 — Txn-based ALL cap (`d67dc01` + comment-clarity `0563a93`).**
+New pure helper `web/src/insights/txnCap.ts` exporting
+`earliestTxnDate(transactions, scopedAcctIds)`. `BrokerageSubTab` now
+fetches `/transactions` alongside `/brokerage` + `/accounts` (parallel
+Promise.all, graceful `.catch(() => ({transactions: []}))`), computes the
+cap from scoped brokerage accounts, and applies `fullSeriesUncapped →
+fullSeriesCapped → uncapped-fallback-if-empty` upstream of `sliceRange`.
+That means every range pill (1Y/3M/etc.), not just ALL, sees the clipped
+series — intentional and matches the legacy SPA: data integrity beats
+"fill the whole 1Y window with fakes".
+
+**Item 1 — `cash_equivalent` filter (`9437cf1`).** Engine fix. Extracted a
+pure `normalizePosition(p: Position): NormalizedHolding | null` helper in
+`sidecar/src/snaptrade.ts`; it returns null when `p.cash_equivalent === true`,
+preventing money-market sweep funds from being double-counted (the broker
+already counts them in the balance, which the React Cash row picks up).
+Also a 4-line comment on the `openPnl` mapping noting the SDK's own warning
+that `open_pnl` is unreliable and Hon's use as a last-resort fallback in
+`holdingStats()` is safe. 14 unit tests for `normalizePosition` cover plain
+stocks, cash-equivalent true/false/null/undefined, missing fields, the
+currency fallback chain.
+
+**Not done (low-value polish from the audit):** currency-fallback log
+warning, `NormalizedHolding.value` JSDoc clarification, `holdingStats` unit
+tests. See `/tmp/snaptrade-audit-2026-05-30.md` for the full audit.
 
 ## Restart workflow (you'll need this)
 

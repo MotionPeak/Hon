@@ -20,6 +20,10 @@ export function buildHoldingSeries(
     const cap = inceptionByAccount[s.accountId];
     if (cap && s.date < cap) continue;
     const v = convert(s.value, s.currency || fallbackCurrency);
+    // Production convertAmount never returns null (it falls back to ?? 1 for unknown
+    // FX rates), so this branch is exercised primarily by tests with custom converters.
+    // If convertAmount's fallback is ever changed to return null for unknown rates,
+    // this guard will handle it automatically.
     if (v == null) continue;
     byDate.set(s.date, (byDate.get(s.date) ?? 0) + v);
   }

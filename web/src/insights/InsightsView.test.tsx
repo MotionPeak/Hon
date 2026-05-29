@@ -705,6 +705,32 @@ describe('InsightsView — Brokerage sub-tab', () => {
     await user.click(await screen.findByTestId('holding-row-VT'));
     expect(screen.getByTestId('holding-spark-VT')).toBeInTheDocument();
   });
+
+  it('expanded holding shows the empty fallback when holdingSnapshots is empty', async () => {
+    const user = userEvent.setup();
+    // No holdingSnapshots for VT → series will have 0 points → hd-empty fallback.
+    installFetchMock({
+      ...EMPTY_TXNS,
+      'GET /api/brokerage': () => ({
+        holdings: [
+          {
+            accountId: 'acc1', symbol: 'VT', description: 'Vanguard Total World',
+            units: 10, price: 100, currency: 'USD',
+            costBasis: 800, openPnl: 200, value: 1000,
+            updatedAt: today.toISOString().slice(0, 10),
+          },
+        ],
+        snapshots: [],
+        holdingSnapshots: [],
+        performance: [],
+        ilsRates: { USD: 3.7 },
+      }),
+    });
+    renderView();
+    await user.click(await screen.findByRole('tab', { name: /brokerage/i }));
+    await user.click(await screen.findByTestId('holding-row-VT'));
+    expect(screen.getByTestId('holding-spark-empty-VT')).toBeInTheDocument();
+  });
 });
 
 describe('InsightsView — brokerage account pills', () => {
@@ -1007,6 +1033,158 @@ describe('InsightsView — brokerage account pills', () => {
     await screen.findByTestId('brokerage-chart');
     const points = Number(document.querySelector('.lc-wrap')!.getAttribute('data-points'));
     // 4 performance points (snapshots would have given 2) → performance wins.
+    expect(points).toBe(4);
+  });
+
+  it('renders a pill for an account that has performance but no local snapshots or holdings (regression fix)', async () => {
+    // a-perf-only: connectionId 'c-perf', has a performance entry but no
+    // snapshots and no holdings — previously it would be silently excluded.
+    const perfOnlyAccounts = {
+      accounts: [
+        ...accountsResp.accounts,
+        {
+          id: 'a-perf-only', connectionId: 'c-perf', companyId: 'snaptrade',
+          connectionName: 'Fidelity', accountNumber: '999', label: 'Fidelity IRA',
+          balance: 7500, currency: 'USD', updatedAt: '2026-05-25',
+          excluded: false, inceptionDate: null,
+        },
+      ],
+    };
+    const perfOnlyBrokerage = {
+      ...brokerageResp,
+      // NO snapshots or holdings for a-perf-only — only a performance entry.
+      performance: [
+        { connectionId: 'c-perf', data: { currency: 'USD', totalEquity: [
+          { date: '2026-01-01', value: 7000, currency: 'USD' },
+          { date: '2026-05-01', value: 7500, currency: 'USD' },
+        ] } },
+      ],
+    };
+    installFetchMock({
+      ...EMPTY_TXNS,
+      'GET /api/brokerage': () => perfOnlyBrokerage,
+      'GET /api/accounts': () => perfOnlyAccounts,
+    });
+    const user = userEvent.setup();
+    await openBrokerage(user);
+    const group = await screen.findByRole('group', { name: /accounts/i });
+    // The performance-only account MUST get a pill.
+    expect(within(group).getByRole('button', { name: /Fidelity IRA/ })).toBeInTheDocument();
+  });
+
+  it('does NOT render a pill for an account with no snapshots, no holdings, and no matching performance connectionId', async () => {
+    // a-ghost: has no data in any of the three brokerage data sources.
+    const ghostAccounts = {
+      accounts: [
+        ...accountsResp.accounts,
+        {
+          id: 'a-ghost', connectionId: 'c-ghost', companyId: 'snaptrade',
+          connectionName: 'Ghost Bank', accountNumber: '000', label: 'Ghost Account',
+          balance: 0, currency: 'USD', updatedAt: '2026-05-25',
+          excluded: false, inceptionDate: null,
+        },
+      ],
+    };
+    installFetchMock({
+      ...EMPTY_TXNS,
+      'GET /api/brokerage': () => brokerageResp, // no data for c-ghost
+      'GET /api/accounts': () => ghostAccounts,
+    });
+    const user = userEvent.setup();
+    await openBrokerage(user);
+    const group = await screen.findByRole('group', { name: /accounts/i });
+    // The ghost account must NOT appear as a pill.
+    expect(within(group).queryByRole('button', { name: /Ghost Account/ })).not.toBeInTheDocument();
+  });
+});
+
+describe('InsightsView — brokerage ALL-range transaction cap', () => {
+  // A single brokerage account with snapshots spanning 2023–2026.
+  // The earliest transaction is 2025-01-01 — ALL should show only
+  // points from that date onward, discarding the 2023/2024 backfill.
+  const capAccounts = {
+    accounts: [
+      { id: 'brk-cap', connectionId: 'c-cap', companyId: 'snaptrade',
+        connectionName: 'IBKR', accountNumber: '111', label: 'Cap Account',
+        balance: 5000, currency: 'USD', updatedAt: '2026-05-01',
+        excluded: false, inceptionDate: null },
+    ],
+  };
+  const capBrokerage = {
+    holdings: [
+      { accountId: 'brk-cap', symbol: 'VT', description: 'Total World',
+        units: 10, price: 100, currency: 'USD',
+        costBasis: 80, openPnl: 20, value: 1000, updatedAt: '2026-05-01' },
+    ],
+    snapshots: [
+      { accountId: 'brk-cap', date: '2023-01-01', value: 3000, currency: 'USD' },
+      { accountId: 'brk-cap', date: '2024-01-01', value: 3500, currency: 'USD' },
+      { accountId: 'brk-cap', date: '2025-01-01', value: 4000, currency: 'USD' },
+      { accountId: 'brk-cap', date: '2026-01-01', value: 5000, currency: 'USD' },
+    ],
+    holdingSnapshots: [],
+    performance: [],
+    ilsRates: { USD: 3.7 },
+  };
+
+  it('caps ALL at the earliest transaction date, dropping pre-ownership backfill', async () => {
+    const user = userEvent.setup();
+    installFetchMock({
+      ...EMPTY_TXNS,
+      // Override transactions: earliest is 2025-01-01 on brk-cap
+      'GET /api/transactions': () => ({
+        transactions: [
+          { id: 't1', accountId: 'brk-cap', externalId: 'x1',
+            date: '2025-03-15', processedDate: null,
+            amount: -200, currency: 'USD',
+            description: 'Buy VT', memo: null,
+            kind: null, status: null,
+            category: 'Other', createdAt: '2025-03-15' },
+          { id: 't2', accountId: 'brk-cap', externalId: 'x2',
+            date: '2025-01-01', processedDate: null,
+            amount: -500, currency: 'USD',
+            description: 'Initial buy', memo: null,
+            kind: null, status: null,
+            category: 'Other', createdAt: '2025-01-01' },
+        ],
+      }),
+      'GET /api/brokerage': () => capBrokerage,
+      'GET /api/accounts': () => capAccounts,
+    });
+    renderView();
+    await user.click(await screen.findByRole('tab', { name: /brokerage/i }));
+    await user.click(await screen.findByRole('button', { name: /^ALL$/ }));
+    await screen.findByTestId('brokerage-chart');
+    // 4 snapshots total; 2 are pre-2025-01-01 and must be dropped.
+    // After cap: 2025-01-01 and 2026-01-01 → 2 points.
+    const points = Number(document.querySelector('.lc-wrap')!.getAttribute('data-points'));
+    expect(points).toBe(2);
+  });
+
+  it('falls back to the full uncapped series when the cap would empty it', async () => {
+    const user = userEvent.setup();
+    installFetchMock({
+      ...EMPTY_TXNS,
+      // Transaction date is far in the future — would empty the series.
+      'GET /api/transactions': () => ({
+        transactions: [
+          { id: 't1', accountId: 'brk-cap', externalId: 'x1',
+            date: '2099-01-01', processedDate: null,
+            amount: -100, currency: 'USD',
+            description: 'Future', memo: null,
+            kind: null, status: null,
+            category: 'Other', createdAt: '2099-01-01' },
+        ],
+      }),
+      'GET /api/brokerage': () => capBrokerage,
+      'GET /api/accounts': () => capAccounts,
+    });
+    renderView();
+    await user.click(await screen.findByRole('tab', { name: /brokerage/i }));
+    await user.click(await screen.findByRole('button', { name: /^ALL$/ }));
+    await screen.findByTestId('brokerage-chart');
+    // Cap would produce 0 points → fall back to uncapped (4 points).
+    const points = Number(document.querySelector('.lc-wrap')!.getAttribute('data-points'));
     expect(points).toBe(4);
   });
 });
