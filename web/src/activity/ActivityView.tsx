@@ -11,6 +11,7 @@ import type { Category } from '../settings/CategoriesPanel';
 import type { Transaction } from './types';
 import { merchantKey, recurrenceChoices, type Frequency } from '../recurring/helpers';
 import { isExcludedFromCycle, ruleMatches } from './excluded';
+import { SplitwiseSection } from './SplitwiseSection';
 
 /** Stored merchant-frequency value. 'income'/'ignore' are tags the editor
  *  here doesn't expose, but we keep them in the type to round-trip safely. */
@@ -934,13 +935,7 @@ function CategoryPickerSidebar(
               onUnlink={onUnlinkLoan}
             />
 
-            <div className="txn-sidebar-section">
-              <div className="label">Splitwise</div>
-              <button type="button" className="txn-sidebar-action" disabled>
-                + Split on Splitwise
-              </button>
-              <p className="txn-sidebar-hint">Coming soon.</p>
-            </div>
+            <SplitwiseSection transaction={transaction} />
 
             <div className="txn-sidebar-section">
               <div className="label">Cycle calculations</div>

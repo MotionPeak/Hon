@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { ActivityView } from './ActivityView';
 import { SettingsProvider } from '../settings/useSettings';
 import { installFetchMock } from '../test/mockFetch';
+import { __resetSplitwiseCache } from '../splitwise/useSplitwise';
 
 const CATEGORIES = {
   categories: [
@@ -59,12 +60,22 @@ const TXNS = {
   ],
 };
 
+// The txn sidebar mounts SplitwiseSection, whose useSplitwise hook fetches on
+// mount. Stub disconnected so the section renders null (no /refresh call).
+const SPLITWISE_OFF = {
+  'GET /api/splitwise/status': () => ({ connected: false, user: null }),
+  'GET /api/splitwise/links': () => ({ links: [] as unknown[] }),
+};
+
 const FULL = {
   'GET /api/transactions': () => TXNS,
   'GET /api/accounts': () => ACCOUNTS,
   'GET /api/categories': () => CATEGORIES,
   'GET /api/merchant-frequencies': () => ({ frequencies: {} as Record<string, string> }),
+  ...SPLITWISE_OFF,
 };
+
+beforeEach(() => { __resetSplitwiseCache(); });
 
 function renderView() {
   return render(<SettingsProvider><ActivityView /></SettingsProvider>);
