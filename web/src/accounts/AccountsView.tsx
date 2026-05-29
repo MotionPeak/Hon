@@ -9,6 +9,7 @@ import { DelayedLoader } from '../ui/DelayedLoader';
 import { SnapTradeBrokeragePicker } from './SnapTradeBrokeragePicker';
 import { PensionPickerStep } from './PensionPickerStep';
 import { CompanyLogo } from './CompanyLogo';
+import { HistoryMonthsSelect } from './HistoryMonthsSelect';
 
 const SnapTradeLinkFlow = lazy(() =>
   import('./SnapTradeLinkFlow').then((m) => ({ default: m.SnapTradeLinkFlow })),
@@ -712,6 +713,7 @@ function renderSectionItems(key: AssetSectionKey, data: AccountsData, cb: RowCal
         company={data.companies.find((x) => x.id === c.companyId)}
         accounts={data.accounts.filter((a) => a.connectionId === c.id)}
         callbacks={cb}
+        showHistory={key === 'bank' || key === 'card'}
       />
     ));
 }
@@ -721,9 +723,10 @@ interface ConnectionCardProps {
   company?: Company;
   accounts: Account[];
   callbacks: RowCallbacks;
+  showHistory: boolean;
 }
 
-function ConnectionCard({ connection, company, accounts, callbacks }: ConnectionCardProps) {
+function ConnectionCard({ connection, company, accounts, callbacks, showHistory }: ConnectionCardProps) {
   const meta = company?.name ?? connection.companyId;
   const total = accounts.reduce(
     (sum, a) => a.excluded || a.balance == null ? sum : sum + a.balance,
@@ -769,22 +772,14 @@ function ConnectionCard({ connection, company, accounts, callbacks }: Connection
                 {syncing ? 'Syncing…' : 'Sync'}
               </button>
             )}
-            {connection.hasCredentials && (
-              <label className="conn-history-label">
+            {connection.hasCredentials && showHistory && (
+              <span className="conn-history-label">
                 <span className="conn-history-text">History</span>
-                <select
-                  className="conn-history-select mini"
-                  aria-label="History months"
+                <HistoryMonthsSelect
                   value={connection.historyMonths}
-                  onChange={(e) => callbacks.onSetHistoryMonths(connection, Number(e.target.value))}
-                >
-                  <option value={3}>3 mo</option>
-                  <option value={6}>6 mo</option>
-                  <option value={12}>12 mo</option>
-                  <option value={18}>18 mo</option>
-                  <option value={24}>24 mo</option>
-                </select>
-              </label>
+                  onChange={(m) => callbacks.onSetHistoryMonths(connection, m)}
+                />
+              </span>
             )}
             <button
               type="button"
