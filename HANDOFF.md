@@ -33,6 +33,23 @@
 
 ## TL;DR — state of the world (2026-05-29)
 
+- **Category average window shipped (2026-05-29).** Settings now has a
+  **Category averages** card (📐) letting the user pick the timeframe that
+  feeds the Insights "vs avg" comparisons — presets 3/6/12/24 or a custom
+  month count (capped 1–120). New `Settings.spendingAvgMonths` (default 12,
+  localStorage, load-guarded to 1–120) + pure helper
+  `web/src/insights/categoryAverages.ts` (trailing N completed cycles BEFORE
+  the displayed month, spending>0 qualifying filter, per-cat mean over the
+  qualifying-cycle count). `MonthDetail` consumes it; the 12-month bar chart
+  and per-row "vs last" chips are untouched. **Also fixed a latent quirk:**
+  `SettingsView` carried its own nested `SettingsProvider` that shadowed the
+  app-level one (App.tsx:105), so settings changes only reached other tabs
+  after a reload — removed it, so all settings now propagate live cross-tab.
+  Verified live in chrome-devtools (window 12→3→6 moved the vs-avg base while
+  vs-last + chart held, and the change now propagates without reload). Web
+  suite 452 pass, typechecks clean. Branch merged to `main`
+  (`session/category-avg-window-2026-05-29`).
+
 - **Splitwise React port shipped (2026-05-29).** The legacy-SPA Splitwise
   feature now has full React parity in `web/`. New: `web/src/splitwise/`
   (`useSplitwise` data hook — shared module cache synced across tabs via a
