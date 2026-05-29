@@ -16,6 +16,7 @@ import {
   type PerformanceEntry,
   type HoldingSnapshot,
 } from './equitySeries';
+import { buildHoldingSeries } from './holdingSeries';
 
 function monthLetter(key: string): string {
   // "2026-05" → "M" (English month letter — matches the legacy app).
@@ -857,7 +858,7 @@ function HoldingRow({
 }
 
 function HoldingDetail({
-  row, displayCur, rates,
+  row, displayCur, rates, range, holdingSnapshots, inceptionByAccount,
 }: {
   row: ConsolidatedHolding; displayCur: string;
   rates: Record<string, number> | null; range: Range;
@@ -886,7 +887,40 @@ function HoldingDetail({
             : `${row.gain >= 0 ? '+' : '−'}${money(Math.abs(conv(row.gain, row.currency)), displayCur)}`,
           gainTone)}
       </div>
-      {/* sparkline added in Task B3 */}
+      <HoldingSparkline
+        row={row} displayCur={displayCur} rates={rates} range={range}
+        holdingSnapshots={holdingSnapshots} inceptionByAccount={inceptionByAccount}
+      />
+    </div>
+  );
+}
+
+function HoldingSparkline({
+  row, displayCur, rates, range, holdingSnapshots, inceptionByAccount,
+}: {
+  row: ConsolidatedHolding; displayCur: string;
+  rates: Record<string, number> | null; range: Range;
+  holdingSnapshots: HoldingSnapshot[]; inceptionByAccount: Record<string, string>;
+}) {
+  const convert = (v: number, c: string) => convertAmount(v, c, displayCur, rates);
+  const fullSeries = buildHoldingSeries(
+    holdingSnapshots, row.symbol, row.accountIds, convert, row.currency, inceptionByAccount,
+  );
+  const series = sliceRange(fullSeries, range);
+  if (series.length < 2) {
+    return (
+      <div className="hd-empty" data-testid={`holding-spark-empty-${row.symbol}`}>
+        {fullSeries.length >= 1
+          ? 'No data in this window — try ALL.'
+          : 'Per-position history starts collecting on each sync — the sparkline appears after a couple of syncs.'}
+      </div>
+    );
+  }
+  const tone: 'good' | 'bad' =
+    series[series.length - 1].value - series[0].value >= 0 ? 'good' : 'bad';
+  return (
+    <div className="hd-chart-wrap" data-testid={`holding-spark-${row.symbol}`}>
+      <LineChart series={series} currency={displayCur} tone={tone} showAxis={false} />
     </div>
   );
 }

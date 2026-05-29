@@ -671,6 +671,40 @@ describe('InsightsView — Brokerage sub-tab', () => {
     await user.click(row);
     await waitFor(() => expect(screen.queryByTestId('holding-detail-VT')).toBeNull());
   });
+
+  it('expanded holding shows a sparkline when it has ≥2 snapshots', async () => {
+    const user = userEvent.setup();
+    // Two holdingSnapshots for VT, within the last 12 months so the 1Y slice includes both.
+    const now = new Date();
+    const d1 = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000); // 60 days ago
+    const d2 = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000); // 30 days ago
+    const snap1 = d1.toISOString().slice(0, 10);
+    const snap2 = d2.toISOString().slice(0, 10);
+    installFetchMock({
+      ...EMPTY_TXNS,
+      'GET /api/brokerage': () => ({
+        holdings: [
+          {
+            accountId: 'acc1', symbol: 'VT', description: 'Vanguard Total World',
+            units: 10, price: 100, currency: 'USD',
+            costBasis: 800, openPnl: 200, value: 1000,
+            updatedAt: today.toISOString().slice(0, 10),
+          },
+        ],
+        snapshots: [],
+        holdingSnapshots: [
+          { accountId: 'acc1', symbol: 'VT', date: snap1, value: 100, currency: 'USD' },
+          { accountId: 'acc1', symbol: 'VT', date: snap2, value: 120, currency: 'USD' },
+        ],
+        performance: [],
+        ilsRates: { USD: 3.7 },
+      }),
+    });
+    renderView();
+    await user.click(await screen.findByRole('tab', { name: /brokerage/i }));
+    await user.click(await screen.findByTestId('holding-row-VT'));
+    expect(screen.getByTestId('holding-spark-VT')).toBeInTheDocument();
+  });
 });
 
 describe('InsightsView — brokerage account pills', () => {
