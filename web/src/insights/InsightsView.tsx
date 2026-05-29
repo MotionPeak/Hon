@@ -483,12 +483,18 @@ function BrokerageSubTab() {
   const rates = data.ilsRates;
   const cur = displayCur ?? pickDisplayCurrency(data.holdings);
 
-  // Brokerage accounts in scope of the pills: any account with at
-  // least one snapshot in /brokerage. The engine only writes snapshots
-  // for brokerage accounts, so the intersection is the right filter
-  // without a separate company.type check.
-  const brkAcctIds = new Set(data.snapshots.map((s) => s.accountId));
-  const brkAccounts = accounts.filter((a) => brkAcctIds.has(a.id));
+  // Account is "brokerage-in-scope" if it appears in ANY of the three brokerage
+  // data sources: local value-snapshots, current holdings, or connection-level
+  // performance history. Earlier this was snapshots-only, which silently dropped
+  // pills for accounts that had performance but no local snapshot yet.
+  const brkSnapAcctIds = new Set(data.snapshots.map((s) => s.accountId));
+  const brkHoldingAcctIds = new Set(data.holdings.map((h) => h.accountId));
+  const brkPerfConnIds = new Set(data.performance.map((p) => p.connectionId));
+  const brkAccounts = accounts.filter((a) =>
+    brkSnapAcctIds.has(a.id)
+    || brkHoldingAcctIds.has(a.id)
+    || brkPerfConnIds.has(a.connectionId),
+  );
 
   // For the All-accounts view we show a read-only earliest-inception
   // badge instead of an editable input. The "earliest" is

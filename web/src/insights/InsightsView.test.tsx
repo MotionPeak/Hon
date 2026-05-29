@@ -1035,6 +1035,67 @@ describe('InsightsView — brokerage account pills', () => {
     // 4 performance points (snapshots would have given 2) → performance wins.
     expect(points).toBe(4);
   });
+
+  it('renders a pill for an account that has performance but no local snapshots or holdings (regression fix)', async () => {
+    // a-perf-only: connectionId 'c-perf', has a performance entry but no
+    // snapshots and no holdings — previously it would be silently excluded.
+    const perfOnlyAccounts = {
+      accounts: [
+        ...accountsResp.accounts,
+        {
+          id: 'a-perf-only', connectionId: 'c-perf', companyId: 'snaptrade',
+          connectionName: 'Fidelity', accountNumber: '999', label: 'Fidelity IRA',
+          balance: 7500, currency: 'USD', updatedAt: '2026-05-25',
+          excluded: false, inceptionDate: null,
+        },
+      ],
+    };
+    const perfOnlyBrokerage = {
+      ...brokerageResp,
+      // NO snapshots or holdings for a-perf-only — only a performance entry.
+      performance: [
+        { connectionId: 'c-perf', data: { currency: 'USD', totalEquity: [
+          { date: '2026-01-01', value: 7000, currency: 'USD' },
+          { date: '2026-05-01', value: 7500, currency: 'USD' },
+        ] } },
+      ],
+    };
+    installFetchMock({
+      ...EMPTY_TXNS,
+      'GET /api/brokerage': () => perfOnlyBrokerage,
+      'GET /api/accounts': () => perfOnlyAccounts,
+    });
+    const user = userEvent.setup();
+    await openBrokerage(user);
+    const group = await screen.findByRole('group', { name: /accounts/i });
+    // The performance-only account MUST get a pill.
+    expect(within(group).getByRole('button', { name: /Fidelity IRA/ })).toBeInTheDocument();
+  });
+
+  it('does NOT render a pill for an account with no snapshots, no holdings, and no matching performance connectionId', async () => {
+    // a-ghost: has no data in any of the three brokerage data sources.
+    const ghostAccounts = {
+      accounts: [
+        ...accountsResp.accounts,
+        {
+          id: 'a-ghost', connectionId: 'c-ghost', companyId: 'snaptrade',
+          connectionName: 'Ghost Bank', accountNumber: '000', label: 'Ghost Account',
+          balance: 0, currency: 'USD', updatedAt: '2026-05-25',
+          excluded: false, inceptionDate: null,
+        },
+      ],
+    };
+    installFetchMock({
+      ...EMPTY_TXNS,
+      'GET /api/brokerage': () => brokerageResp, // no data for c-ghost
+      'GET /api/accounts': () => ghostAccounts,
+    });
+    const user = userEvent.setup();
+    await openBrokerage(user);
+    const group = await screen.findByRole('group', { name: /accounts/i });
+    // The ghost account must NOT appear as a pill.
+    expect(within(group).queryByRole('button', { name: /Ghost Account/ })).not.toBeInTheDocument();
+  });
 });
 
 describe('InsightsView — per-range stat tiles', () => {
