@@ -6,6 +6,7 @@ export interface Settings {
   incomeAvgMonths: IncomeAvgMonths;
   hideCardTotals: boolean;
   cardProviders: string[];
+  spendingAvgMonths: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -18,6 +19,7 @@ export const DEFAULT_SETTINGS: Settings = {
     'לאומי קארד', 'דיינרס', 'max', 'isracard', 'cal', 'american express',
     'leumi card', 'diners',
   ],
+  spendingAvgMonths: 12,
 };
 
 export function loadSettings(): Settings {
@@ -33,6 +35,13 @@ export function loadSettings(): Settings {
   }
   if (!Array.isArray(base.cardProviders)) {
     base.cardProviders = [...DEFAULT_SETTINGS.cardProviders];
+  }
+  if (
+    typeof base.spendingAvgMonths !== 'number'
+    || base.spendingAvgMonths < 1
+    || base.spendingAvgMonths > 120
+  ) {
+    base.spendingAvgMonths = DEFAULT_SETTINGS.spendingAvgMonths;
   }
   return base;
 }

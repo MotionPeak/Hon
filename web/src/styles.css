@@ -299,6 +299,18 @@ input[type="radio"], input[type="checkbox"] {
   color: #fff; box-shadow: 0 4px 14px var(--accent-soft);
 }
 
+/* Custom-months input on the Category averages card — matches the .dd-trigger
+   field idiom (same surface, hairline border, accent focus). */
+.set-num {
+  align-self: flex-start; width: 96px; margin-top: 8px;
+  padding: 8px 12px; border-radius: 10px;
+  background: var(--card-hi); border: 1px solid var(--hairline-2);
+  color: var(--text); font-size: 13px; font-weight: 600;
+  transition: border-color .14s, background-color .14s;
+}
+.set-num:hover { border-color: var(--accent); }
+.set-num:focus { outline: none; border-color: var(--accent); background: var(--card); }
+
 /* --- Custom dropdown --------------------------------------------------- */
 .dd { position: relative; display: inline-block; min-width: 220px; flex: 0 0 auto; }
 .dd.open { z-index: 90; }
