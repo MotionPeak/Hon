@@ -47,6 +47,18 @@ describe('cycleAnalytics', () => {
     expect(current?.spending).toBe(200);
   });
 
+  it('skips transactions the isExcluded predicate rejects (card-bill totals)', () => {
+    const today = new Date();
+    const thisMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+    const out = cycleAnalytics([
+      txn({ id: 't1', amount: -200, date: `${thisMonth}-10`, description: 'Shop' }),
+      txn({ id: 'card', amount: -9000, date: `${thisMonth}-12`, description: 'מקס איט פיננסים' }),
+    ], 1, (t) => t.description === 'מקס איט פיננסים');
+    const current = out.find((m) => m.month === thisMonth);
+    // The ₪9,000 card-bill lump sum is excluded; only the ₪200 shop counts.
+    expect(current?.spending).toBe(200);
+  });
+
   it('honours custom monthStartDay for cycle boundaries', () => {
     const today = new Date();
     // Pick a date that's in this calendar month but BEFORE day 20.

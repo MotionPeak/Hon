@@ -211,6 +211,32 @@ describe('InsightsView — Spending sub-tab', () => {
     expect(within(big).getByText(/3,?750/)).toBeInTheDocument();
   });
 
+  it('excludes card-bill totals from Spent + biggest expense (default cardProviders)', async () => {
+    // Default settings.cardProviders includes 'מקס'; the bank-side
+    // "מקס איט פיננסים" lump sum is a card-bill total already itemised
+    // under the card account — it must NOT count as spending.
+    installFetchMock({
+      'GET /api/transactions': () => ({
+        transactions: [
+          tx({ id: 'g1', amount: -250, category: 'Groceries', description: 'Aroma', date: `${month(0)}-05` }),
+          tx({ id: 'card', amount: -9000, category: 'Other', description: 'מקס איט פיננסים', date: `${month(0)}-10` }),
+        ],
+      }),
+      'GET /api/categories': () => CATEGORIES,
+    });
+    renderView();
+    const detail = await screen.findByTestId('month-detail');
+    const tiles = within(detail).getAllByTestId('md-tile');
+    // Spent = 250 only (the ₪9,000 card-bill total is excluded).
+    expect(within(tiles[0]!).getByText(/Spent/i)).toBeInTheDocument();
+    expect(within(tiles[0]!).getByText(/^[^0-9]*250/)).toBeInTheDocument();
+    expect(within(detail).queryByText(/9,?000/)).not.toBeInTheDocument();
+    // Biggest expense is the ₪250 charge, not the card bill.
+    const big = within(detail).getByTestId('biggest-expense');
+    expect(within(big).getByText('Aroma')).toBeInTheDocument();
+    expect(within(big).queryByText('מקס איט פיננסים')).not.toBeInTheDocument();
+  });
+
   it('shows Overspent when commitments outrun income', async () => {
     installFetchMock({
       'GET /api/transactions': () => ({

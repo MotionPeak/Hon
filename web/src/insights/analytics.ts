@@ -9,11 +9,16 @@ export interface MonthBucket {
 
 /** 12-month rolling cycle analytics — sums spending and income per cycle.
  *  Returns oldest → newest so the chart can render left-to-right with the
- *  current month on the far right. Card-bill totals and refund-fold rows
- *  are intentionally NOT filtered here — the caller decides, since each
- *  view can apply its own visibility rules. Today only refund-fold and
- *  non-ILS are excluded — same scope the legacy app uses for cycleAnalytics. */
-export function cycleAnalytics(transactions: Transaction[], monthStartDay: number): MonthBucket[] {
+ *  current month on the far right. Non-ILS and refund-fold rows are always
+ *  skipped; `isExcluded` lets the caller drop card-bill lump sums (and any
+ *  manually-excluded txn) so Insights doesn't double-count the credit-card
+ *  total on top of its itemised charges — the same filter the legacy app's
+ *  cycleAnalytics applies via isCardTotal. */
+export function cycleAnalytics(
+  transactions: Transaction[],
+  monthStartDay: number,
+  isExcluded: (t: Transaction) => boolean = () => false,
+): MonthBucket[] {
   const keys: string[] = [];
   let k = currentCycleKey(monthStartDay);
   for (let i = 0; i < 12; i++) {
@@ -25,6 +30,7 @@ export function cycleAnalytics(transactions: Transaction[], monthStartDay: numbe
   for (const t of transactions) {
     if (t.currency !== 'ILS') continue;
     if (t.refundForId) continue;
+    if (isExcluded(t)) continue;
     const key = cycleKey(t.date, monthStartDay);
     const bucket = agg.get(key);
     if (!bucket) continue;

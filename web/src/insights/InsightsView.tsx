@@ -8,6 +8,7 @@ import type { Category } from '../settings/CategoriesPanel';
 import type { Transaction } from '../activity/types';
 import type { Account } from '../accounts/types';
 import { cycleAnalytics, type MonthBucket } from './analytics';
+import { isExcludedFromCycle } from '../activity/excluded';
 import { LineChart } from './LineChart';
 import {
   buildEquitySeries,
@@ -44,9 +45,21 @@ export function InsightsView() {
     });
   }, []);
 
+  // Card-bill lump sums (and any manually-excluded txn) must NOT count as
+  // spending in Insights — they're already itemised under the card account,
+  // so counting the bank-side total too double-counts. Same rule the
+  // Activity tab + legacy SPA apply.
+  const isExcluded = useMemo(() => {
+    const opts = {
+      hideCardTotals: settings.hideCardTotals,
+      cardProviders: settings.cardProviders,
+    };
+    return (t: Transaction): boolean => isExcludedFromCycle(t, opts);
+  }, [settings.hideCardTotals, settings.cardProviders]);
+
   const months = useMemo(
-    () => transactions ? cycleAnalytics(transactions, settings.monthStartDay) : [],
-    [transactions, settings.monthStartDay],
+    () => transactions ? cycleAnalytics(transactions, settings.monthStartDay, isExcluded) : [],
+    [transactions, settings.monthStartDay, isExcluded],
   );
   const hasData = months.some((m) => m.spending > 0 || m.income > 0);
 
@@ -99,6 +112,7 @@ export function InsightsView() {
           transactions={transactions}
           categories={categories}
           monthStartDay={settings.monthStartDay}
+          isExcluded={isExcluded}
         />
       )}
       {subTab === 'spending' && <AiAnalysisCard />}
@@ -774,10 +788,13 @@ interface MonthDetailProps {
   transactions: Transaction[];
   categories: Category[];
   monthStartDay: number;
+  /** Card-bill / manually-excluded predicate — drops those rows from the
+   *  breakdown, deltas and biggest-expense so they don't double-count. */
+  isExcluded: (t: Transaction) => boolean;
 }
 
 function MonthDetail(
-  { monthKey, months, transactions, categories, monthStartDay }: MonthDetailProps,
+  { monthKey, months, transactions, categories, monthStartDay, isExcluded }: MonthDetailProps,
 ) {
   const idx = months.findIndex((m) => m.month === monthKey);
   const prev = idx > 0 ? months[idx - 1] : null;
@@ -793,6 +810,7 @@ function MonthDetail(
   const byCatCycle = new Map<string, number[]>();
   for (const t of transactions) {
     if (t.currency !== 'ILS' || t.refundForId) continue;
+    if (isExcluded(t)) continue;
     if (t.amount >= 0) continue;
     const ci = cycleIdx.get(cycleKey(t.date, monthStartDay));
     if (ci === undefined) continue;
@@ -813,6 +831,7 @@ function MonthDetail(
   const inMonth = transactions.filter((t) =>
     !t.refundForId
     && t.currency === 'ILS'
+    && !isExcluded(t)
     && cycleKey(t.date, monthStartDay) === monthKey,
   );
   const byCat = new Map<string, number>();
