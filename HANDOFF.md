@@ -33,6 +33,22 @@
 
 ## TL;DR — state of the world (2026-05-29)
 
+- **Splitwise React port shipped (2026-05-29).** The legacy-SPA Splitwise
+  feature now has full React parity in `web/`. New: `web/src/splitwise/`
+  (`useSplitwise` data hook — shared module cache synced across tabs via a
+  `hon.splitwise-changed` window event; `SplitwiseSheet` friend/group split
+  modal; `types.ts`), a real Settings `SplitwiseCard` (inline API-key connect
+  + disconnect, replaces the stub), an Activity sidebar `SplitwiseSection`
+  (split / linked-state / unlink), an "owed to you" note on split activity
+  rows, and an Overview `OwedToYouCard`. Backend was already complete; only
+  fix on that side was **H-3** (`DELETE /splitwise/expense` now returns 409
+  when the vault is locked instead of silently orphaning the remote expense).
+  Spec/plan: `docs/superpowers/{specs,plans}/2026-05-29-splitwise-react-port*`.
+  Verified live via chrome-devtools against the connected dev DB: Overview
+  card, Settings connected card, sidebar linked section + Delete, and the row
+  note all render (split *sheet* covered by unit tests — the headless click
+  harness wouldn't reliably reopen the sidebar to drive it). Branch:
+  `session/splitwise-react-2026-05-29` (not yet merged).
 - **Activity 2-month cap fixed (2026-05-29).** `GET /transactions` defaulted
   to `limit=200` (hard-capped 1000), so the four bare-fetch React tabs
   (Activity, Insights, Recurring, Subscriptions) only received the newest
@@ -605,15 +621,13 @@ All 10 tabs render with rich, near-legacy parity. Highlights:
 
 - Per-account filter pills + inception-date input on Brokerage chart.
 - Smooth bezier curve in `ValueChart` (polyline today).
-- Splitwise card body in Settings + Activity sidebar Splitwise
-  section (`/splitwise/*`).
 - `expectedFixedThisCycle` for the Overview projection (lift
   `detectMerchants` out of `RecurringView.tsx` and feed `/budget`).
 
 ## Tests + Superpowers usage
 
-- `cd web && npm test` → 355.
-- `cd sidecar && npm test` → 55.
+- `cd web && npm test` → 433.
+- `cd sidecar && npm test` → 70.
 - `cd web && npm run typecheck` → clean.
 - **Use `/test-driven-development`** for each new component:
   RED → verify failure → minimal GREEN → verify pass → commit.

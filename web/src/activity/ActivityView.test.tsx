@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { ActivityView } from './ActivityView';
 import { SettingsProvider } from '../settings/useSettings';
 import { installFetchMock } from '../test/mockFetch';
+import { __resetSplitwiseCache } from '../splitwise/useSplitwise';
 
 const CATEGORIES = {
   categories: [
@@ -59,12 +60,22 @@ const TXNS = {
   ],
 };
 
+// The txn sidebar mounts SplitwiseSection, whose useSplitwise hook fetches on
+// mount. Stub disconnected so the section renders null (no /refresh call).
+const SPLITWISE_OFF = {
+  'GET /api/splitwise/status': () => ({ connected: false, user: null }),
+  'GET /api/splitwise/links': () => ({ links: [] as unknown[] }),
+};
+
 const FULL = {
   'GET /api/transactions': () => TXNS,
   'GET /api/accounts': () => ACCOUNTS,
   'GET /api/categories': () => CATEGORIES,
   'GET /api/merchant-frequencies': () => ({ frequencies: {} as Record<string, string> }),
+  ...SPLITWISE_OFF,
 };
+
+beforeEach(() => { __resetSplitwiseCache(); });
 
 function renderView() {
   return render(<SettingsProvider><ActivityView /></SettingsProvider>);
@@ -758,5 +769,23 @@ describe('ActivityView — exclude from cycle', () => {
     renderView();
     expect(await screen.findByText('מקס איט פיננסים')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /excluded from cycle/i })).not.toBeInTheDocument();
+  });
+});
+
+describe('ActivityView — Splitwise note', () => {
+  it('shows "owed to you" on a split transaction row', async () => {
+    const link = {
+      transactionId: 't-1', expenseId: 'e1', groupId: null, currency: 'ILS',
+      owedToMe: 22.75, counterparties: [{ id: 2, name: 'Roomie', owed: 22.75 }],
+      paidAmount: 0, paidState: 'open', createdAt: '2026-05-05', syncedAt: null,
+    };
+    installFetchMock({
+      ...FULL,
+      'GET /api/splitwise/status': () => ({ connected: true, user: { id: 1, name: 'Me' } }),
+      'GET /api/splitwise/links': () => ({ links: [link] }),
+      'POST /api/splitwise/refresh': () => ({ friends: [], links: [link] }),
+    });
+    renderView();
+    expect(await screen.findByText(/owed to you/i)).toBeInTheDocument();
   });
 });

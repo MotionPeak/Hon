@@ -1,7 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import { OverviewView } from './OverviewView';
 import { installFetchMock } from '../test/mockFetch';
+import { __resetSplitwiseCache } from '../splitwise/useSplitwise';
+
+afterEach(() => { __resetSplitwiseCache(); });
 
 const FULL_SUMMARY = {
   byCurrency: [
@@ -102,6 +105,10 @@ function mocks(overrides: Record<string, unknown> = {}): Record<string, () => un
     'GET /api/budget': () => FULL_BUDGET,
     'GET /api/companies': () => COMPANIES,
     'GET /api/accounts': () => ACCOUNTS,
+    // OwedToYouCard's useSplitwise hook fetches on mount; stub disconnected
+    // so the card renders null and no /refresh call is made.
+    'GET /api/splitwise/status': () => ({ connected: false, user: null }),
+    'GET /api/splitwise/links': () => ({ links: [] }),
     ...overrides,
   };
 }

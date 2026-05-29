@@ -11,6 +11,8 @@ import type { Category } from '../settings/CategoriesPanel';
 import type { Transaction } from './types';
 import { merchantKey, recurrenceChoices, type Frequency } from '../recurring/helpers';
 import { isExcludedFromCycle, ruleMatches } from './excluded';
+import { SplitwiseSection } from './SplitwiseSection';
+import { useSplitwise } from '../splitwise/useSplitwise';
 
 /** Stored merchant-frequency value. 'income'/'ignore' are tags the editor
  *  here doesn't expose, but we keep them in the type to round-trip safely. */
@@ -24,6 +26,20 @@ function fmtDate(dateStr: string): string {
   const d = new Date(dateStr);
   if (Number.isNaN(d.getTime())) return dateStr;
   return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+}
+
+/** "· ₪X owed to you" / "· paid back" suffix on a transaction's sub-line when
+ *  it has been split onto Splitwise. Reads the shared useSplitwise cache, so it
+ *  costs nothing when Splitwise is disconnected (linkByTxnId is empty). */
+function SplitwiseNote({ txnId }: { txnId: string }) {
+  const sw = useSplitwise();
+  const link = sw.linkByTxnId.get(txnId);
+  if (!link) return null;
+  if (link.paidState === 'paid') {
+    return <span className="txn-sw paid"> · paid back</span>;
+  }
+  const remaining = Math.max(0, link.owedToMe - (link.paidAmount || 0));
+  return <span className="txn-sw"> · {money(remaining, link.currency)} owed to you</span>;
 }
 
 /** Match a transaction against a lowercase search query. Mirrors the legacy
@@ -330,6 +346,7 @@ export function ActivityView() {
                             {t.category}
                           </>
                         )}
+                        <SplitwiseNote txnId={t.id} />
                       </div>
                     </div>
                     <div className={`txn-amt${pos ? ' pos' : ''}`}>
@@ -606,6 +623,7 @@ function ExcludedSection({
                           {acct.label || acct.connectionName}
                         </>
                       )}
+                      <SplitwiseNote txnId={t.id} />
                     </div>
                   </div>
                   <div className={`txn-amt${pos ? ' pos' : ''}`}>
@@ -690,6 +708,7 @@ function CatCard({
                       {acct.label || acct.connectionName}
                     </>
                   )}
+                  <SplitwiseNote txnId={t.id} />
                 </div>
               </div>
               <div className={`txn-amt${pos ? ' pos' : ''}`}>
@@ -934,13 +953,7 @@ function CategoryPickerSidebar(
               onUnlink={onUnlinkLoan}
             />
 
-            <div className="txn-sidebar-section">
-              <div className="label">Splitwise</div>
-              <button type="button" className="txn-sidebar-action" disabled>
-                + Split on Splitwise
-              </button>
-              <p className="txn-sidebar-hint">Coming soon.</p>
-            </div>
+            <SplitwiseSection transaction={transaction} />
 
             <div className="txn-sidebar-section">
               <div className="label">Cycle calculations</div>
