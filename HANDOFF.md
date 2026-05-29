@@ -42,8 +42,14 @@
   still paginates, 1000 ceiling removed. `sidecar/src/{server,repo}.ts` +
   2 regression tests in `tests/repo.test.ts`. Verified live (worktree engine
   :4100 + vite :5180): picker now steps Mar 2026 → May 2024 (24 months).
-  Merged to `main` (`72664a1`), **not pushed**. The running :4000 engine needs
-  a restart to pick it up. Sidecar tests 70 pass; both typechecks clean.
+  Merged to `main` and **pushed** (in `60158eb`). Sidecar tests 70 pass;
+  both typechecks clean.
+
+- **⚠️ Engine restart pending.** The long-running `:4000` engine predates two
+  merged engine-side changes — the Activity 2-month cap fix above and the FX
+  endpoint move (`08a43fd`, Frankfurter `.app → .dev/v1`). Both are harmless
+  until restart (the cap fix only affects new fetches; FX still works via the
+  old host's 301 redirect), but `npm run dev` should be cycled to pick them up.
 
 - **Pension flow ported to React** (branch
   `session/pension-react-port-2026-05-27`). The Assets-picker Pension tile is
@@ -62,7 +68,7 @@
   `PATCH /connections/:id/history-months`. Verified live: Max synced 12 months,
   pill rendered `✓ Done — 1116 transactions`, re-sync left the row count flat
   (0 duplicate `(account_id, external_id)` groups — DB dedup proven).
-  Branch `session/sync-window-12mo-2026-05-27` (not yet merged at time of writing).
+  Branch `session/sync-window-12mo-2026-05-27` — merged to `main`.
 - **React migration done, structurally.** All 10 tabs ship from
   `web/` at near-legacy parity. The legacy SPA at
   `sidecar/public/app.html` is still served by the engine and is the
@@ -574,8 +580,8 @@ All 10 tabs render with rich, near-legacy parity. Highlights:
   price (CAPTCHA-walled per memory). **Next React port to do** — and
   it should follow the same dedicated-PickerStep pattern the pension
   port just established (see `PensionPickerStep`).
-- ~~**Pension flow port to React**~~ — **DONE 2026-05-28** on branch
-  `session/pension-react-port-2026-05-27` (not yet merged). See
+- ~~**Pension flow port to React**~~ — **DONE 2026-05-28**, merged to
+  `main` (branch `session/pension-react-port-2026-05-27`). See
   § "What shipped this session (2026-05-28)".
 
 **Pension-port follow-ups** (small, deferred from this session for scope):
