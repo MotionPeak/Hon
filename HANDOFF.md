@@ -65,12 +65,14 @@
   card. Matches the legacy SPA's category-tile picker design 1:1
   (Banks / Credit cards / Brokerages / Car / Pension & savings /
   Loan / Other asset — Car + Pension disabled until React flows ship).
-- **Tests:** `cd web && npm test` → **373** passing. `cd sidecar &&
+- **Tests:** `cd web && npm test` → **415** passing. `cd sidecar &&
   npm test` → **60** passing. Both typechecks clean (verified on the
   merged tree).
-- **Most recent work:** pension React port merged into `main` (this
-  merge). Just prior on `main`: SnapTrade re-link smoke fix +
-  brokerage-chart polish + nav-hover polish (parallel sessions).
+- **Most recent work:** Brokerage Insights full chart port + 5
+  metric-correctness fixes merged into `main` 2026-05-29 — see
+  § "Brokerage Insights" + its "⚠️ More work still needed" list.
+  Prior: pension React port, sync-window/history-months, autosync-on-add,
+  SnapTrade re-link smoke fix (parallel sessions, all merged).
 - **SnapTrade portal flow smoke-verified end-to-end (2026-05-27,
   session/snaptrade-smoke-2026-05-27).** The smoke surfaced a design
   gap: re-linking an already-linked broker (IBKR refreshed via
@@ -268,6 +270,85 @@ Claude session is also editing Hon, vite may be watching their
 worktree, not main — your HMR changes won't show up in the browser
 even though `main` has them. `ps aux | grep vite` shows the cwd via
 the binary path; cross-check with `lsof -p <pid> | grep cwd`.
+
+## Brokerage Insights — full chart port + metric fixes (2026-05-29)
+
+Branch `session/brokerage-chart-full-2026-05-27` — **merged to `main`
+2026-05-29** (the earlier LineChart visual port landed as `594e95f`;
+this merge brings the 5 metric-correctness fixes + `equitySeries` on
+top). The first React brokerage "polish" pass shipped structurally
+but looked/behaved wrong; this is the real port. Each fix was
+verified live in chrome-devtools against the **legacy SPA**
+(engine `:4000`) — they now match.
+
+**Chart (full lineChart port):** new `web/src/insights/LineChart.tsx`
+replaces the thin polyline. SVG with 4-line grid, blurred glow,
+3-stop gradient, tone color (green up / red down), draw-in animation,
+and a React-state hover crosshair + dot + tooltip ("Since start"
+delta), touch support. `web/src/insights/smooth.ts` holds the
+Catmull-Rom path math (tension 0.18). Pills + inception now sit
+BELOW the chart (legacy order). Inception input uses the legacy
+wording.
+
+**Equity series (`web/src/insights/equitySeries.ts`):** ported the
+legacy 3-tier `buildEquitySeries` — broker `performance.totalEquity`
+→ forward-filled `holdingSnapshots` → local `snapshots` — plus
+`sliceRange` (anchors sparse data to the last point before the
+window). Previously React summed ONLY local snapshots (~1 week), so
+1Y/ALL drew a flat line; now it shows the full broker-reported year.
+
+**Metric correctness fixes (all matched to legacy):**
+- Account-filter pills now scope EVERY metric (stats + holdings list
+  + gain), not just the chart.
+- `holdingStats()` port: SnapTrade reports `costBasis`/`openPnl`
+  **per unit** and leaves `value` null for some positions (IBKR
+  VBR/VT). React was treating them as totals → Portfolio ₪0, wrong
+  P&L. Now value = `value ?? units×price`, cost = `units×costBasis`,
+  gain = `value − cost`. Unrealized P&L for IBKR went +₪387 →
+  **+₪4,455.65**, holdings show real values (VT $3,462.36 /
+  VBR $705.87).
+- **Portfolio value = sum of in-scope account `balance`** (includes
+  cash), per legacy ("Total value uses account balances; gain/cost
+  come from priced positions only"). Was holdings-sum (omitted cash);
+  IBKR ₪11,824 → **₪12,205.67** ($4,302.62), matching legacy. Holding
+  allocation weights still divide by the holdings-value sum.
+- Gain·1Y derives "current" from the equity series (not the holdings
+  sum), so a null-value broker position no longer makes it read −100%.
+
+Tests: worktree web suite **389 passing**, typecheck clean.
+`equitySeries` has 14 unit tests; `smooth` 9; `LineChart` 14;
+`InsightsView` integration tests lock the scoping + performance +
+per-unit + balance behaviours.
+
+### ⚠️ More work still needed on the Brokerage Insights page
+
+This pass fixed what was clearly broken, but the page is **not
+"done"** — open items for the next session:
+
+1. **Engine USD/ILS rate looks wrong.** `/brokerage` `ilsRates.USD`
+   came back **~2.84** (real USD/ILS is ~3.7). All USD↔ILS figures
+   are faithful to that rate, so if it's stale/inverted every USD
+   value across the app is off. Investigate `getIlsRates()` /
+   Frankfurter in `sidecar` — this is engine-side, not the UI.
+2. **SnapTrade holding data is internally inconsistent.** For IBKR,
+   `units×price` (~$4,168), `costBasis`+`openPnl`, and the account
+   balance ($4,302) don't fully reconcile, and `value` is null. The
+   UI now copes (legacy formulas), but the underlying SnapTrade
+   mapping in `sidecar/src/snaptrade.ts` deserves a look — the
+   per-unit vs total semantics and the null `value` are fragile.
+3. **Pills only list accounts that have value-snapshots** (the
+   `brkAccounts = accounts ∩ snapshot.accountId` intersection). An
+   account with `performance` but no local snapshot yet wouldn't get
+   a pill. Legacy keys off company type; consider matching.
+4. **No transaction-based "ALL" cap.** Legacy anchors the ALL range
+   to the user's earliest transaction so it doesn't paint years of
+   pretend pre-ownership history; React only has the per-account
+   inception clip. The brokerage tab doesn't fetch `/transactions`.
+5. **Holdings drill-down / sparkline** (legacy `holdingRow` expand)
+   and per-range stats (rate of return, dividends, contributions
+   from `performance.byRange`) are not ported.
+6. **Re-verify once the engine rate is fixed** — the ILS figures
+   shift if #1 changes.
 
 ## Restart workflow (you'll need this)
 

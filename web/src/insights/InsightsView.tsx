@@ -9,6 +9,12 @@ import type { Transaction } from '../activity/types';
 import type { Account } from '../accounts/types';
 import { cycleAnalytics, type MonthBucket } from './analytics';
 import { LineChart } from './LineChart';
+import {
+  buildEquitySeries,
+  sliceRange,
+  type PerformanceEntry,
+  type HoldingSnapshot,
+} from './equitySeries';
 
 function monthLetter(key: string): string {
   // "2026-05" → "M" (English month letter — matches the legacy app).
@@ -243,13 +249,44 @@ interface ValueSnapshot {
 interface BrokerageResp {
   holdings: Holding[];
   snapshots: ValueSnapshot[];
-  holdingSnapshots: unknown[];
-  performance: unknown[];
+  holdingSnapshots: HoldingSnapshot[];
+  performance: PerformanceEntry[];
   ilsRates: Record<string, number> | null;
 }
 
 type Range = '1M' | '3M' | 'YTD' | '1Y' | 'ALL';
 const RANGES: Range[] = ['1M', '3M', 'YTD', '1Y', 'ALL'];
+
+interface HoldingStats {
+  value: number | null;
+  cost: number | null;
+  gain: number | null;
+  gainPct: number | null;
+}
+
+/** Per-holding value / cost / gain in the holding's native currency.
+ *  Faithful port of the legacy SPA's holdingStats() — the key subtlety is
+ *  that SnapTrade reports `costBasis` and `openPnl` PER UNIT, so the
+ *  position totals are `units × …`. `value` is the position total when the
+ *  broker supplies it (Israeli funds); otherwise `units × price` (IBKR's
+ *  VBR/VT leave value null). Gain prefers value − cost and falls back to
+ *  the reported openPnl only when value or cost is unknown. Treating these
+ *  as totals (the earlier React bug) made Portfolio value read ₪0 and the
+ *  P&L wildly wrong. */
+function holdingStats(h: {
+  value: number | null; units: number; price: number | null;
+  costBasis: number | null; openPnl: number | null;
+}): HoldingStats {
+  const value = h.value != null
+    ? h.value
+    : (h.price != null ? h.units * h.price : null);
+  const cost = h.costBasis != null ? h.units * h.costBasis : null;
+  const gain = value != null && cost != null
+    ? value - cost
+    : (h.openPnl != null ? h.openPnl : null);
+  const gainPct = gain != null && cost ? (gain / Math.abs(cost)) * 100 : null;
+  return { value, cost, gain, gainPct };
+}
 
 function convertAmount(
   amount: number, from: string, to: string, rates: Record<string, number> | null,
@@ -453,32 +490,23 @@ function BrokerageSubTab() {
     ? null
     : brkAccounts.find((a) => a.id === acctFilter) ?? null;
 
-  // Snapshots scoped to the current acctFilter, with the focused
-  // account's inceptionDate applied as a min-cutoff to drop synthetic
-  // backfill from before the user actually held the account.
-  const scopedSnapshots = acctFilter === 'all'
-    ? data.snapshots
-    : (() => {
-        const focused = brkAccounts.find((a) => a.id === acctFilter);
-        const inception = focused?.inceptionDate ?? null;
-        return data.snapshots.filter((s) =>
-          s.accountId === acctFilter && (!inception || s.date >= inception),
-        );
-      })();
-
-  // Full series (sum across accounts), in the display currency.
-  const dailyTotals = new Map<string, number>();
-  for (const s of scopedSnapshots) {
-    const v = convertAmount(s.value, s.currency, cur, rates);
-    dailyTotals.set(s.date, (dailyTotals.get(s.date) ?? 0) + v);
-  }
-  const fullSeries: SeriesPoint[] = Array.from(dailyTotals.entries())
-    .map(([date, value]) => ({ date, value }))
-    .sort((a, b) => a.date.localeCompare(b.date));
-
-  const latestDate = fullSeries.at(-1)?.date ?? new Date().toISOString().slice(0, 10);
-  const cutoff = rangeStart(range, latestDate);
-  const series = fullSeries.filter((p) => p.date >= cutoff);
+  // Equity series — full 3-tier resolution (broker performance → forward-
+  // filled holding snapshots → local account snapshots), scoped to the
+  // selected account. This is what gives the chart real long-range history
+  // instead of just the last few local snapshots.
+  const convert = (value: number, currency: string): number =>
+    convertAmount(value, currency, cur, rates);
+  const fullSeries = buildEquitySeries({
+    performance: data.performance,
+    snapshots: data.snapshots,
+    holdingSnapshots: data.holdingSnapshots,
+    accounts: accounts.map((a) => ({
+      id: a.id, connectionId: a.connectionId, inceptionDate: a.inceptionDate,
+    })),
+    acctFilter,
+    convert,
+  });
+  const series = sliceRange(fullSeries, range);
 
   const periodChange = (series.at(-1)?.value ?? 0) - (series[0]?.value ?? 0);
   const chartTone: 'good' | 'bad' = periodChange >= 0 ? 'good' : 'bad';
@@ -488,21 +516,54 @@ function BrokerageSubTab() {
   const change = currentValue - startValue;
   const changePct = startValue > 0 ? (change / startValue) * 100 : 0;
 
-  // Holdings totals — convert each holding into the display currency.
-  let portfolioValue = 0;
+  // Holdings + accounts scoped to the selected pill — every metric below
+  // follows the active account, not the whole portfolio.
+  const scopedHoldings = acctFilter === 'all'
+    ? data.holdings
+    : data.holdings.filter((h) => h.accountId === acctFilter);
+  const scopedBrkAccounts = acctFilter === 'all'
+    ? brkAccounts
+    : brkAccounts.filter((a) => a.id === acctFilter);
+
+  // Portfolio value = sum of in-scope account balances (INCLUDES cash) —
+  // the legacy SPA's definition. The holdings-value sum can be smaller
+  // (uninvested cash) or, for brokers that report positions with null
+  // value, would understate the account. Fall back to the holdings-value
+  // sum only when no in-scope account exposes a balance.
+  let balanceTotal = 0;
+  let haveBalance = false;
+  for (const a of scopedBrkAccounts) {
+    if (a.balance == null) continue;
+    balanceTotal += convertAmount(a.balance, a.currency, cur, rates);
+    haveBalance = true;
+  }
+
+  // Cost + unrealized gain come from priced positions only (holdingStats).
+  // holdingsValueTotal drives each row's allocation weight — relative to
+  // the priced holdings, not the cash-inclusive balance.
+  let holdingsValueTotal = 0;
   let unrealized = 0;
   let costBasis = 0;
-  for (const h of data.holdings) {
-    portfolioValue += convertAmount(h.value ?? 0, h.currency, cur, rates);
-    unrealized   += convertAmount(h.openPnl ?? 0, h.currency, cur, rates);
-    costBasis    += convertAmount(h.costBasis ?? 0, h.currency, cur, rates);
+  for (const h of scopedHoldings) {
+    const s = holdingStats(h);
+    holdingsValueTotal += convertAmount(s.value ?? 0, h.currency, cur, rates);
+    unrealized        += convertAmount(s.gain ?? 0, h.currency, cur, rates);
+    costBasis         += convertAmount(s.cost ?? 0, h.currency, cur, rates);
   }
+  const portfolioValue = haveBalance ? balanceTotal : holdingsValueTotal;
   const returnOnCost = costBasis > 0 ? (unrealized / costBasis) * 100 : 0;
 
-  // Gain · 1Y: portfolio value now vs the snapshot ~365d back (or earliest).
+  // Gain · 1Y: latest equity vs the equity point ~365d back — BOTH taken
+  // from the same equity series so the figure stays internally consistent
+  // and matches the chart. (Using the holdings-value sum as "current" broke
+  // when a broker reports positions with null value — e.g. IBKR's VBR/VT —
+  // making the tile read −100%.) Falls back to the holdings sum only when
+  // the series is empty.
+  const latestEquity = fullSeries.at(-1)?.value ?? portfolioValue;
+  const latestDate = fullSeries.at(-1)?.date ?? new Date().toISOString().slice(0, 10);
   const oneYearAgo = rangeStart('1Y', latestDate);
   const oneYearPoint = fullSeries.find((p) => p.date >= oneYearAgo) ?? fullSeries[0];
-  const gain1y = oneYearPoint ? portfolioValue - oneYearPoint.value : 0;
+  const gain1y = oneYearPoint ? latestEquity - oneYearPoint.value : 0;
   const gain1yPct = oneYearPoint && oneYearPoint.value > 0
     ? (gain1y / oneYearPoint.value) * 100
     : 0;
@@ -538,7 +599,7 @@ function BrokerageSubTab() {
         />
         <StatBox
           label="Holdings"
-          value={String(data.holdings.length)}
+          value={String(scopedHoldings.length)}
           tone=""
         />
       </div>
@@ -594,12 +655,12 @@ function BrokerageSubTab() {
         )
       )}
 
-      {data.holdings.length > 0 && (
+      {scopedHoldings.length > 0 && (
         <section className="ins-card">
           <header className="ins-card-head">
             <div className="ins-sub">
-              Holdings · {data.holdings.length}
-              {' '}position{data.holdings.length === 1 ? '' : 's'}
+              Holdings · {scopedHoldings.length}
+              {' '}position{scopedHoldings.length === 1 ? '' : 's'}
             </div>
             <span className="spacer" />
             <div className="ins-totals">
@@ -608,15 +669,15 @@ function BrokerageSubTab() {
             </div>
           </header>
           <ul className="brokerage-holdings" data-testid="brokerage-holdings">
-            {data.holdings
+            {scopedHoldings
               .slice()
-              .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
+              .sort((a, b) => (holdingStats(b).value ?? 0) - (holdingStats(a).value ?? 0))
               .map((h, i) => {
-                const valCur = convertAmount(h.value ?? 0, h.currency, cur, rates);
-                const weight = portfolioValue > 0 ? (valCur / portfolioValue) * 100 : 0;
-                const pnlCur = convertAmount(h.openPnl ?? 0, h.currency, cur, rates);
-                const costCur = convertAmount(h.costBasis ?? 0, h.currency, cur, rates);
-                const pnlPct = costCur > 0 ? (pnlCur / costCur) * 100 : 0;
+                const s = holdingStats(h);
+                const valCur = convertAmount(s.value ?? 0, h.currency, cur, rates);
+                const weight = holdingsValueTotal > 0 ? (valCur / holdingsValueTotal) * 100 : 0;
+                const pnlCur = convertAmount(s.gain ?? 0, h.currency, cur, rates);
+                const pnlPct = s.gainPct ?? 0;
                 const palette = ['#5C9EF5', '#5CC773', '#A880ED', '#F59942', '#E96B6B'];
                 const dot = palette[i % palette.length];
                 return (
@@ -641,7 +702,7 @@ function BrokerageSubTab() {
                       {money(valCur, cur)}
                       <div className="bh-weight-pct">{weight.toFixed(1)}%</div>
                     </div>
-                    {h.openPnl != null && (
+                    {s.gain != null && (
                       <span className={`brk-pnl ${pnlCur >= 0 ? 'good' : 'bad'}`}>
                         {pnlCur >= 0 ? '▲' : '▼'} {Math.abs(pnlPct).toFixed(2)}%
                         {' '}
@@ -671,8 +732,6 @@ function StatBox({
     </div>
   );
 }
-
-interface SeriesPoint { date: string; value: number }
 
 interface MonthBarsProps {
   months: MonthBucket[];

@@ -398,15 +398,18 @@ describe('InsightsView — Brokerage sub-tab', () => {
       'GET /api/brokerage': () => ({
         holdings: [
           {
+            // costBasis/openPnl are PER UNIT (as SnapTrade reports them):
+            // value 1000, cost 10×80 = 800, gain = 1000 − 800 = 200.
             accountId: 'b1', symbol: 'VT', description: 'Vanguard Total World',
             units: 10, price: 100, currency: 'USD',
-            costBasis: 800, openPnl: 200, value: 1000,
+            costBasis: 80, openPnl: 20, value: 1000,
             updatedAt: today.toISOString().slice(0, 10),
           },
           {
+            // value 250, cost 5×40 = 200, gain = 250 − 200 = 50.
             accountId: 'b1', symbol: 'VBR', description: 'Vanguard Small-Cap',
             units: 5, price: 50, currency: 'USD',
-            costBasis: 200, openPnl: 50, value: 250,
+            costBasis: 40, openPnl: 10, value: 250,
             updatedAt: today.toISOString().slice(0, 10),
           },
         ],
@@ -752,5 +755,76 @@ describe('InsightsView — brokerage account pills', () => {
     const group = await screen.findByRole('group', { name: /accounts/i });
     await user.click(within(group).getByRole('button', { name: /Vanguard/ }));
     expect(screen.getByText(/since when "ALL" counts/i)).toBeInTheDocument();
+  });
+
+  it('scopes the stat tiles + holdings list to the selected account', async () => {
+    installFetchMock(baseMocks);
+    const user = userEvent.setup();
+    await openBrokerage(user);
+    // Portfolio value = sum of in-scope account BALANCES (includes cash).
+    // All accounts: a-ibkr $4,302.44 + a-vg $1,234 = $5,536.44.
+    const statsAll = screen.getAllByTestId('brokerage-stat');
+    expect(within(statsAll[0]!).getByText(/\$5,?536/)).toBeInTheDocument();
+    expect(within(statsAll[4]!).getByText(/^2$/)).toBeInTheDocument(); // Holdings count
+    // Focus IBKR (a-ibkr) → its balance $4,302.44, 1 holding (AAPL).
+    const group = await screen.findByRole('group', { name: /accounts/i });
+    await user.click(within(group).getByRole('button', { name: /IBKR USD/ }));
+    const statsIbkr = screen.getAllByTestId('brokerage-stat');
+    expect(within(statsIbkr[0]!).getByText(/\$4,?302/)).toBeInTheDocument();
+    expect(within(statsIbkr[4]!).getByText(/^1$/)).toBeInTheDocument();
+    // Holdings list shows only AAPL now, not VOO.
+    const list = screen.getByTestId('brokerage-holdings');
+    expect(within(list).getByText('AAPL')).toBeInTheDocument();
+    expect(within(list).queryByText('VOO')).not.toBeInTheDocument();
+  });
+
+  it('values a null-value holding from units × price (not ₪0)', async () => {
+    // SnapTrade leaves `value` null for some IBKR positions but reports
+    // units + price — the real market value is units × price.
+    const nullValueHoldings = {
+      ...brokerageResp,
+      holdings: [
+        { accountId: 'a-ibkr', symbol: 'VBR', description: 'Small-Cap',
+          units: 3, price: 100, currency: 'USD',
+          costBasis: 160, openPnl: 75, value: null, updatedAt: '2026-05-25' },
+      ],
+      ilsRates: { USD: 1 },
+    };
+    installFetchMock({ ...baseMocks, 'GET /api/brokerage': () => nullValueHoldings });
+    const user = userEvent.setup();
+    await openBrokerage(user);
+    // The holding's value comes from units × price (3 × 100 = $300), NOT ₪0
+    // — shown in the holdings list. (Portfolio value is balance-based.)
+    const list = screen.getByTestId('brokerage-holdings');
+    expect(within(list).getByText(/\$300/)).toBeInTheDocument();
+    expect(within(list).queryByText('₪0')).not.toBeInTheDocument();
+  });
+
+  it('uses broker performance for the chart when present (not just local snapshots)', async () => {
+    // Performance for connection c-st has 4 dated points; the snapshots
+    // table has only recent ones. The chart must follow performance.
+    const withPerf = {
+      ...brokerageResp,
+      snapshots: [
+        { accountId: 'a-ibkr', date: '2026-05-26', value: 4000, currency: 'USD' },
+        { accountId: 'a-ibkr', date: '2026-05-27', value: 4000, currency: 'USD' },
+      ],
+      performance: [
+        { connectionId: 'c-st', data: { currency: 'USD', totalEquity: [
+          { date: '2025-06-01', value: 3000, currency: 'USD' },
+          { date: '2025-09-01', value: 3200, currency: 'USD' },
+          { date: '2025-12-01', value: 3600, currency: 'USD' },
+          { date: '2026-03-01', value: 4000, currency: 'USD' },
+        ] } },
+      ],
+    };
+    installFetchMock({ ...baseMocks, 'GET /api/brokerage': () => withPerf });
+    const user = userEvent.setup();
+    await openBrokerage(user);
+    await user.click(screen.getByRole('button', { name: /^ALL$/ }));
+    await screen.findByTestId('brokerage-chart');
+    const points = Number(document.querySelector('.lc-wrap')!.getAttribute('data-points'));
+    // 4 performance points (snapshots would have given 2) → performance wins.
+    expect(points).toBe(4);
   });
 });
