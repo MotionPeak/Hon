@@ -76,12 +76,23 @@ describe('categoryAverages', () => {
     expect(avgByCat.size).toBe(0);
   });
 
-  it('treats windowMonths < 1 as 1', () => {
+  it('treats windowMonths < 1 as exactly 1 (only the cycle before the displayed month)', () => {
+    // Feb -100, Mar -200, Apr -300, displayed May. A window of exactly 1 sees
+    // only April → 300. Any clamp > 1 (e.g. to 3) would average Feb+Mar+Apr → 200.
     const txns = [
-      txn({ id: 'a', date: '2026-03-10', amount: -100 }),
-      txn({ id: 'b', date: '2026-04-10', amount: -300 }),
+      txn({ id: 'a', date: '2026-02-10', amount: -100 }),
+      txn({ id: 'b', date: '2026-03-10', amount: -200 }),
+      txn({ id: 'c', date: '2026-04-10', amount: -300 }),
     ];
     const { avgSpending } = categoryAverages(txns, 1, NONE, 0, '2026-05');
     expect(avgSpending).toBe(300);
+  });
+
+  it('buckets a null category under "Other"', () => {
+    const txns = [
+      txn({ id: 'a', date: '2026-04-10', amount: -250, category: null }),
+    ];
+    const { avgByCat } = categoryAverages(txns, 1, NONE, 1, '2026-05');
+    expect(avgByCat.get('Other')).toBe(250);
   });
 });
