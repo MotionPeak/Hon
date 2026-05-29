@@ -18,7 +18,11 @@ function normalizeCurrency(currency: string): string {
 async function loadRates(): Promise<Record<string, number>> {
   if (cache && Date.now() - cache.fetchedAt < TTL_MS) return cache.ilsPerUnit;
 
-  const res = await fetch('https://api.frankfurter.app/latest?base=ILS');
+  // Frankfurter migrated api.frankfurter.app → api.frankfurter.dev/v1 in
+  // 2026; the old host now only 301-redirects. Hit the canonical endpoint
+  // directly so FX doesn't silently die if that redirect ever stops. Same
+  // response shape: { rates: { <code>: <units per 1 base> } }.
+  const res = await fetch('https://api.frankfurter.dev/v1/latest?base=ILS');
   if (!res.ok) throw new Error(`FX HTTP ${res.status}`);
   const data = (await res.json()) as { rates: Record<string, number> };
 
