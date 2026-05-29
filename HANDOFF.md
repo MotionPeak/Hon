@@ -382,11 +382,55 @@ live (worktree vite :5175 against the real engine).
    to the user's earliest transaction so it doesn't paint years of
    pretend pre-ownership history; React only has the per-account
    inception clip. The brokerage tab doesn't fetch `/transactions`.
-4. **Holdings drill-down / sparkline** (legacy `holdingRow` expand)
-   and per-range stats (rate of return, dividends, contributions
-   from `performance.byRange`) are not ported.
-5. **Server-side AI `/insights`** may also count card-bill totals when
-   it summarises spending — separate (engine + LLM), not yet checked.
+4. ~~**Holdings drill-down / sparkline** + per-range stats~~ —
+   **SHIPPED 2026-05-29** (branch `session/insights-drilldown-aifix-2026-05-29`).
+   See § "Insights drill-down + AI card-bill fix (2026-05-29)".
+5. ~~**Server-side AI `/insights`** counting card-bill totals~~ —
+   **SHIPPED 2026-05-29** (same branch). Intentional gap recorded below.
+
+## Insights drill-down + AI card-bill fix (2026-05-29)
+
+Branch `session/insights-drilldown-aifix-2026-05-29` (12 commits: 2 docs +
+10 code). Built brainstorm → writing-plans → subagent-driven-development;
+item 4 visually verified in chrome-devtools against the real engine
+(holding expand, sparkline, per-range tiles, range flips). Tests: sidecar
+**75**, web **429**; both typechecks clean.
+
+**Item 5 — AI `/insights` no longer double-counts card-bill totals (engine).**
+`repo.monthlyTotals/categorySpending/expenseStats` gained an optional
+`excludeDescPatterns` arg (reusing the existing `buildExcludeClause`);
+`buildAnalytics(repo, cardProviders)` threads it; `InsightsGenerator.start(cardProviders)`
+passes it into BOTH `buildBudgetReport(repo, undefined, { cardProviders })`
+and `buildAnalytics`. `POST /insights` reads `{ cardProviders }` from the
+body; React `AiAnalysisCard` sends `settings.hideCardTotals ?
+settings.cardProviders : []` — same settings source the Spending tab uses,
+so the AI prompt and the Spending breakdown now agree.
+
+- **Intentional fidelity gap (deferred):** the server-side path applies only
+  the `cardProviders` substring rule, NOT per-txn `excluded_manual` overrides.
+  That rule catches the dominant card-bill lump-sum bug; the handful of manual
+  overrides are a rounding error in a prose summary and would need fiddlier
+  SQL (an override can force-INCLUDE a row the rule excludes). Revisit if AI
+  insights and the Activity tab ever need to agree to the shekel.
+
+**Item 4 — Brokerage holdings drill-down + per-range stats (React, client-only).**
+No engine changes — all data was already on the wire. New
+`web/src/insights/holdingSeries.ts` (`buildHoldingSeries`, port of the legacy
+helper); `PerformanceEntry.data` widened with `byRange` + `BrokerageRangeStats`.
+Holdings now consolidate by symbol across in-scope accounts; each row is a
+clickable `<button>` that expands a stats grid (Units / Last price / Avg cost /
+Market value / Total cost / Unrealized·ALL) + a per-holding sparkline
+(`LineChart`, range-sliced, inception-clipped). New per-range stat tiles
+("Rate of return · range", "Dividends · range") read `byRange[range]` scoped to
+the in-focus accounts' connections (avg ROR, summed dividend); the "Gain" tile
+is now period-aware (`Gain · range`, first-vs-last over the sliced equity
+window). Dividend tile is hidden when no dividend data; rate tile hidden when
+no numbers. CSS for `.bh-item/.bh-chev/.hp-detail/.hd-stats/.hd-stat*/.hd-chart-wrap/.hd-empty`
+in `web/src/styles.css` (reuses existing tone vars; button-reset on `.bh-row`).
+
+**Still open on Brokerage Insights:** items 1 (SnapTrade per-unit/null-`value`
+mapping), 2 (pill coverage for accounts without snapshots), 3 (txn-based ALL
+cap) — see the list above.
 
 ## Restart workflow (you'll need this)
 
