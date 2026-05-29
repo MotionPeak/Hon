@@ -1202,7 +1202,7 @@ describe('AddManualAssetForm — initialKind prop', () => {
   });
 });
 
-describe('connection card — history months select', () => {
+describe('connection card — history months picker', () => {
   const baseFixtureMocks = (historyMonths: number, patchSpy?: (body: unknown) => unknown) => ({
     'GET /api/companies': () => ({ companies: [{ id: 'hapoalim', name: 'Hapoalim', loginFields: ['username', 'password'], type: 'bank', interactive: true }] }),
     'GET /api/connections': () => ({ connections: [{
@@ -1217,14 +1217,14 @@ describe('connection card — history months select', () => {
     ...(patchSpy ? { 'PATCH /api/connections/c-bank-1/history-months': patchSpy } : {}),
   });
 
-  it('connection card renders history-months select with current value', async () => {
+  it('renders the history trigger with the current value', async () => {
     installFetchMock(baseFixtureMocks(18));
     render(<AccountsView />);
-    const select = await screen.findByLabelText(/history months/i) as HTMLSelectElement;
-    expect(select.value).toBe('18');
+    const trigger = await screen.findByLabelText(/history months/i);
+    expect(trigger).toHaveTextContent('18 mo');
   });
 
-  it('changing the select PATCHes /connections/:id/history-months', async () => {
+  it('selecting a value PATCHes /connections/:id/history-months', async () => {
     const user = userEvent.setup();
     const patchCalls: unknown[] = [];
     const patchSpy = (body: unknown): Promise<unknown> => {
@@ -1239,20 +1239,35 @@ describe('connection card — history months select', () => {
     };
     installFetchMock(baseFixtureMocks(12, patchSpy));
     render(<AccountsView />);
-    const select = await screen.findByLabelText(/history months/i);
-    await user.selectOptions(select, '6');
+    await user.click(await screen.findByLabelText(/history months/i));
+    await user.click(await screen.findByRole('menuitem', { name: '6 mo' }));
     await waitFor(() => expect(patchCalls.length).toBeGreaterThan(0));
     expect(patchCalls[0]).toEqual({ historyMonths: 6 });
   });
 
-  it('reverts the select when PATCH fails', async () => {
+  it('reverts the trigger value when PATCH fails', async () => {
     const user = userEvent.setup();
     const patchSpy = (_body: unknown): Promise<unknown> =>
       Promise.reject(new ApiError('historyMonths must be an integer in [1, 24]', 400));
     installFetchMock(baseFixtureMocks(12, patchSpy));
     render(<AccountsView />);
-    const select = await screen.findByLabelText(/history months/i) as HTMLSelectElement;
-    await user.selectOptions(select, '6');
-    await waitFor(() => expect(select.value).toBe('12'));
+    const trigger = await screen.findByLabelText(/history months/i);
+    await user.click(trigger);
+    await user.click(await screen.findByRole('menuitem', { name: '6 mo' }));
+    // optimistic update flips to 6, PATCH rejects, value reverts to 12
+    await waitFor(() => expect(trigger).toHaveTextContent('12 mo'));
+  });
+
+  it('shows the History control only on bank and card cards, not pension or brokerage', async () => {
+    installFetchMock(FULL);
+    render(<AccountsView />);
+    const bankCard = (await screen.findByText('Hapoalim main')).closest('article') as HTMLElement;
+    const cardCard = screen.getByText('Max card').closest('article') as HTMLElement;
+    const brkCard = screen.getByText('IBKR').closest('article') as HTMLElement;
+    const penCard = screen.getByText('Harel pension').closest('article') as HTMLElement;
+    expect(within(bankCard).getByLabelText(/history months/i)).toBeInTheDocument();
+    expect(within(cardCard).getByLabelText(/history months/i)).toBeInTheDocument();
+    expect(within(brkCard).queryByLabelText(/history months/i)).not.toBeInTheDocument();
+    expect(within(penCard).queryByLabelText(/history months/i)).not.toBeInTheDocument();
   });
 });
