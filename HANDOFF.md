@@ -31,7 +31,19 @@
    feature → invoke `superpowers:brainstorming` → `writing-plans` →
    `executing-plans`.
 
-## TL;DR — state of the world (2026-05-28)
+## TL;DR — state of the world (2026-05-29)
+
+- **Activity 2-month cap fixed (2026-05-29).** `GET /transactions` defaulted
+  to `limit=200` (hard-capped 1000), so the four bare-fetch React tabs
+  (Activity, Insights, Recurring, Subscriptions) only received the newest
+  ~200 rows ≈ 2 cycles — Activity's month picker could only reach the current
+  + previous month despite 24 months in the DB. Fix: omitted `limit` → full
+  history (`repo.listTransactions` uses SQLite `LIMIT -1`); explicit `?limit`
+  still paginates, 1000 ceiling removed. `sidecar/src/{server,repo}.ts` +
+  2 regression tests in `tests/repo.test.ts`. Verified live (worktree engine
+  :4100 + vite :5180): picker now steps Mar 2026 → May 2024 (24 months).
+  Merged to `main` (`72664a1`), **not pushed**. The running :4000 engine needs
+  a restart to pick it up. Sidecar tests 70 pass; both typechecks clean.
 
 - **Pension flow ported to React** (branch
   `session/pension-react-port-2026-05-27`). The Assets-picker Pension tile is
