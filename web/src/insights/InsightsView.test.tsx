@@ -1010,3 +1010,99 @@ describe('InsightsView — brokerage account pills', () => {
     expect(points).toBe(4);
   });
 });
+
+describe('InsightsView — per-range stat tiles', () => {
+  // Shared fixture: one brokerage account (connectionId: 'conn1') with a
+  // snapshot so it's in scopedBrkAccounts, and a performance entry carrying
+  // byRange data for '1Y'.
+  const rangeAccountsResp = {
+    accounts: [
+      {
+        id: 'a-range', connectionId: 'conn1', companyId: 'snaptrade',
+        connectionName: 'IBKR', accountNumber: '111', label: 'Range Test',
+        balance: 5000, currency: 'USD', updatedAt: today.toISOString().slice(0, 10),
+        excluded: false, inceptionDate: null,
+      },
+    ],
+  };
+
+  const rangeHoldings = [
+    {
+      accountId: 'a-range', symbol: 'VT', description: 'Vanguard Total World',
+      units: 10, price: 100, currency: 'USD',
+      costBasis: 80, openPnl: 20, value: 1000,
+      updatedAt: today.toISOString().slice(0, 10),
+    },
+  ];
+
+  const rangeSnapshots = [
+    { accountId: 'a-range', date: today.toISOString().slice(0, 10), value: 5000, currency: 'USD' },
+  ];
+
+  it('shows rate-of-return and dividend tiles for the active range', async () => {
+    const user = userEvent.setup();
+    installFetchMock({
+      ...EMPTY_TXNS,
+      'GET /api/accounts': () => rangeAccountsResp,
+      'GET /api/brokerage': () => ({
+        holdings: rangeHoldings,
+        snapshots: rangeSnapshots,
+        holdingSnapshots: [],
+        performance: [
+          {
+            connectionId: 'conn1',
+            data: {
+              currency: 'USD',
+              totalEquity: [
+                { date: today.toISOString().slice(0, 10), value: 5000, currency: 'USD' },
+              ],
+              byRange: {
+                '1Y': { rateOfReturn: 0.085, dividendIncome: 42, contributions: 0 },
+              },
+            },
+          },
+        ],
+        ilsRates: { USD: 3.7 },
+      }),
+    });
+    renderView();
+    await user.click(await screen.findByRole('tab', { name: /brokerage/i }));
+    await screen.findByTestId('brokerage-stats');
+    expect(screen.getByText('Rate of return · 1Y')).toBeInTheDocument();
+    expect(screen.getByText('+8.5%')).toBeInTheDocument();
+    expect(screen.getByText('Dividends · 1Y')).toBeInTheDocument();
+  });
+
+  it('hides the rate/dividend tiles when byRange has no numbers', async () => {
+    const user = userEvent.setup();
+    installFetchMock({
+      ...EMPTY_TXNS,
+      'GET /api/accounts': () => rangeAccountsResp,
+      'GET /api/brokerage': () => ({
+        holdings: rangeHoldings,
+        snapshots: rangeSnapshots,
+        holdingSnapshots: [],
+        performance: [
+          {
+            connectionId: 'conn1',
+            data: {
+              currency: 'USD',
+              totalEquity: [
+                { date: today.toISOString().slice(0, 10), value: 5000, currency: 'USD' },
+              ],
+              byRange: {
+                '1Y': { rateOfReturn: null, dividendIncome: null, contributions: null },
+              },
+            },
+          },
+        ],
+        ilsRates: { USD: 3.7 },
+      }),
+    });
+    renderView();
+    await user.click(await screen.findByRole('tab', { name: /brokerage/i }));
+    await screen.findByTestId('brokerage-stats');
+    expect(screen.queryByText(/Rate of return/)).toBeNull();
+    expect(screen.queryByText(/Dividends ·/)).toBeNull();
+  });
+});

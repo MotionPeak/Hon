@@ -327,16 +327,6 @@ function convertAmount(
   return (amount * toIls) / fromIls;
 }
 
-function rangeStart(range: Range, latest: string): string {
-  const d = new Date(latest);
-  if (range === 'ALL') return '0000-01-01';
-  if (range === 'YTD') return `${d.getFullYear()}-01-01`;
-  if (range === '1M') d.setMonth(d.getMonth() - 1);
-  if (range === '3M') d.setMonth(d.getMonth() - 3);
-  if (range === '1Y') d.setFullYear(d.getFullYear() - 1);
-  return d.toISOString().slice(0, 10);
-}
-
 function pickDisplayCurrency(holdings: { currency: string }[]): string {
   const counts = new Map<string, number>();
   for (const h of holdings) counts.set(h.currency, (counts.get(h.currency) ?? 0) + 1);
@@ -592,20 +582,27 @@ function BrokerageSubTab() {
     : 0;
   const hasCashRow = cashValue >= 0.5;
 
-  // Gain · 1Y: latest equity vs the equity point ~365d back — BOTH taken
-  // from the same equity series so the figure stays internally consistent
-  // and matches the chart. (Using the holdings-value sum as "current" broke
-  // when a broker reports positions with null value — e.g. IBKR's VBR/VT —
-  // making the tile read −100%.) Falls back to the holdings sum only when
-  // the series is empty.
-  const latestEquity = fullSeries.at(-1)?.value ?? portfolioValue;
-  const latestDate = fullSeries.at(-1)?.date ?? new Date().toISOString().slice(0, 10);
-  const oneYearAgo = rangeStart('1Y', latestDate);
-  const oneYearPoint = fullSeries.find((p) => p.date >= oneYearAgo) ?? fullSeries[0];
-  const gain1y = oneYearPoint ? latestEquity - oneYearPoint.value : 0;
-  const gain1yPct = oneYearPoint && oneYearPoint.value > 0
-    ? (gain1y / oneYearPoint.value) * 100
-    : 0;
+  // Per-range reporting stats, scoped to the in-focus accounts' connections.
+  // performance[] is connectionId-scoped; aggregate byRange[range] across the
+  // matching entries. Average rate of return; sum dividends (converted to the
+  // display currency). Fall back to the top-level fields for caches predating
+  // the per-range fetch.
+  const scopedConnIds = new Set(scopedBrkAccounts.map((a) => a.connectionId));
+  let rateSum = 0, rateCount = 0, dividend = 0, haveDividend = false;
+  for (const p of data.performance) {
+    if (!scopedConnIds.has(p.connectionId)) continue;
+    const w = p.data.byRange?.[range] ?? {
+      rateOfReturn: p.data.rateOfReturn ?? null,
+      dividendIncome: p.data.dividendIncome ?? null,
+      contributions: null,
+    };
+    if (typeof w.rateOfReturn === 'number') { rateSum += w.rateOfReturn; rateCount += 1; }
+    if (typeof w.dividendIncome === 'number') {
+      const v = convertAmount(w.dividendIncome, p.data.currency ?? cur, cur, rates);
+      dividend += v; haveDividend = true;
+    }
+  }
+  const rateOfReturn = rateCount ? (rateSum / rateCount) * 100 : null;
 
   // Currencies the user can toggle between — ILS + every distinct holding cur.
   const currencies = Array.from(new Set([
@@ -646,16 +643,12 @@ function BrokerageSubTab() {
   return (
     <div className="brokerage-pane">
       <div className="brk-stats" data-testid="brokerage-stats">
+        <StatBox label="Portfolio value" value={money(portfolioValue, cur)} tone="" />
         <StatBox
-          label="Portfolio value"
-          value={money(portfolioValue, cur)}
-          tone=""
-        />
-        <StatBox
-          label="Gain · 1Y"
-          value={`${gain1y >= 0 ? '+' : '−'}${money(Math.abs(gain1y), cur)}`}
-          sub={`${gain1yPct >= 0 ? '+' : '−'}${Math.abs(gain1yPct).toFixed(2)}%`}
-          tone={gain1y >= 0 ? 'good' : 'bad'}
+          label={`Gain · ${range}`}
+          value={`${change >= 0 ? '+' : '−'}${money(Math.abs(change), cur)}`}
+          sub={`${changePct >= 0 ? '+' : '−'}${Math.abs(changePct).toFixed(2)}%`}
+          tone={change >= 0 ? 'good' : 'bad'}
         />
         <StatBox
           label="Unrealized P&L"
@@ -667,11 +660,17 @@ function BrokerageSubTab() {
           value={`${returnOnCost >= 0 ? '+' : '−'}${Math.abs(returnOnCost).toFixed(2)}%`}
           tone={returnOnCost >= 0 ? 'good' : 'bad'}
         />
-        <StatBox
-          label="Holdings"
-          value={String(scopedHoldings.length)}
-          tone=""
-        />
+        {rateOfReturn != null && (
+          <StatBox
+            label={`Rate of return · ${range}`}
+            value={`${rateOfReturn >= 0 ? '+' : ''}${rateOfReturn.toFixed(1)}%`}
+            tone={rateOfReturn >= 0 ? 'good' : 'bad'}
+          />
+        )}
+        {haveDividend && (
+          <StatBox label={`Dividends · ${range}`} value={money(dividend, cur)} tone="good" />
+        )}
+        <StatBox label="Holdings" value={String(scopedHoldings.length)} tone="" />
       </div>
 
       {fullSeries.length > 0 && (
