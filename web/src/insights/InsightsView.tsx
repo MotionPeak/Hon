@@ -566,6 +566,14 @@ function BrokerageSubTab() {
   }
   const portfolioValue = haveBalance ? balanceTotal : holdingsValueTotal;
   const returnOnCost = costBasis > 0 ? (unrealized / costBasis) * 100 : 0;
+  // Uninvested cash = account balance minus the priced positions. Surfaced
+  // as its own holdings row so the positions visibly add up to the
+  // Portfolio total instead of silently falling short. Only when the
+  // balance is the source AND the gap is more than rounding noise.
+  const cashValue = haveBalance
+    ? Math.max(0, portfolioValue - holdingsValueTotal)
+    : 0;
+  const hasCashRow = cashValue >= 0.5;
 
   // Gain · 1Y: latest equity vs the equity point ~365d back — BOTH taken
   // from the same equity series so the figure stays internally consistent
@@ -689,7 +697,10 @@ function BrokerageSubTab() {
               .map((h, i) => {
                 const s = holdingStats(h);
                 const valCur = convertAmount(s.value ?? 0, h.currency, cur, rates);
-                const weight = holdingsValueTotal > 0 ? (valCur / holdingsValueTotal) * 100 : 0;
+                // Weight is relative to the Portfolio total (balance incl.
+                // cash) so the rows — including the Cash row below — sum to
+                // 100%.
+                const weight = portfolioValue > 0 ? (valCur / portfolioValue) * 100 : 0;
                 const pnlCur = convertAmount(s.gain ?? 0, h.currency, cur, rates);
                 const pnlPct = s.gainPct ?? 0;
                 const palette = ['#5C9EF5', '#5CC773', '#A880ED', '#F59942', '#E96B6B'];
@@ -726,6 +737,30 @@ function BrokerageSubTab() {
                   </li>
                 );
               })}
+            {hasCashRow && (
+              <li className="bh-row brk-row" data-testid="brokerage-cash-row">
+                <span className="bh-dot" style={{ background: '#7E8AA0' }} />
+                <div className="bh-main">
+                  <div className="bh-symbol">Cash</div>
+                  <div className="bh-desc">Uninvested balance</div>
+                </div>
+                <div className="bh-weight">
+                  <span
+                    className="bh-weight-fill"
+                    style={{
+                      width: `${Math.max(2, portfolioValue > 0 ? (cashValue / portfolioValue) * 100 : 0)}%`,
+                      background: '#7E8AA0',
+                    }}
+                  />
+                </div>
+                <div className="bh-value">
+                  {money(cashValue, cur)}
+                  <div className="bh-weight-pct">
+                    {(portfolioValue > 0 ? (cashValue / portfolioValue) * 100 : 0).toFixed(1)}%
+                  </div>
+                </div>
+              </li>
+            )}
           </ul>
         </section>
       )}

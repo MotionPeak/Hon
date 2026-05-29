@@ -804,6 +804,29 @@ describe('InsightsView — brokerage account pills', () => {
     expect(within(list).queryByText('VOO')).not.toBeInTheDocument();
   });
 
+  it('shows a Cash row for the uninvested balance so positions add up to the total', async () => {
+    installFetchMock(baseMocks);
+    const user = userEvent.setup();
+    await openBrokerage(user);
+    // Focus IBKR: balance $4,302.44, only holding AAPL $2,000 →
+    // uninvested cash $2,302.44 surfaced as its own row.
+    const group = await screen.findByRole('group', { name: /accounts/i });
+    await user.click(within(group).getByRole('button', { name: /IBKR USD/ }));
+    const cash = screen.getByTestId('brokerage-cash-row');
+    expect(within(cash).getByText('Cash')).toBeInTheDocument();
+    expect(within(cash).getByText(/\$2,?302/)).toBeInTheDocument();
+  });
+
+  it('shows NO cash row when no in-scope account exposes a balance', async () => {
+    // /accounts empty → portfolio falls back to the holdings sum, which
+    // already equals the rows, so there's nothing uninvested to surface.
+    installFetchMock({ ...baseMocks, 'GET /api/accounts': () => ({ accounts: [] }) });
+    const user = userEvent.setup();
+    await openBrokerage(user);
+    await screen.findByTestId('brokerage-holdings');
+    expect(screen.queryByTestId('brokerage-cash-row')).not.toBeInTheDocument();
+  });
+
   it('values a null-value holding from units × price (not ₪0)', async () => {
     // SnapTrade leaves `value` null for some IBKR positions but reports
     // units + price — the real market value is units × price.
