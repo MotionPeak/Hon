@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizePosition } from '../src/snaptrade.js';
+import { isFeatureDisabled, normalizePosition } from '../src/snaptrade.js';
 import type { Position } from 'snaptrade-typescript-sdk';
 
 // ---------------------------------------------------------------------------
@@ -150,5 +150,20 @@ describe('normalizePosition', () => {
     );
     expect(result).not.toBeNull();
     expect(result!.currency).toBe('USD');
+  });
+});
+
+describe('isFeatureDisabled', () => {
+  it('is true for SnapTrade code 1141', () => {
+    expect(isFeatureDisabled({ responseBody: { code: '1141', detail: 'x' } })).toBe(true);
+  });
+  it('is true when the detail mentions the feature is not enabled', () => {
+    expect(isFeatureDisabled({ responseBody: JSON.stringify({
+      detail: 'Feature is not enabled for this customer or this connection',
+    }) })).toBe(true);
+  });
+  it('is false for other errors', () => {
+    expect(isFeatureDisabled({ responseBody: { code: '1012', detail: 'nope' } })).toBe(false);
+    expect(isFeatureDisabled(new Error('network'))).toBe(false);
   });
 });

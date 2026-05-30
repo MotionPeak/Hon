@@ -142,6 +142,16 @@ function isOneUserLimit(err: unknown): boolean {
   return body?.code === '1012' || /only register one user/i.test(body?.detail ?? '');
 }
 
+/** True when SnapTrade reports the reporting/performance feature is not
+ *  enabled for this plan/connection (HTTP 403, code 1141). Distinct from a
+ *  transient failure so the caller can persist the disabled state and stop
+ *  calling the dead endpoint. */
+export function isFeatureDisabled(err: unknown): boolean {
+  const body = snapErrorBody(err);
+  return body?.code === '1141'
+    || /feature is not enabled/i.test(body?.detail ?? '');
+}
+
 async function registerOnce(
   snaptrade: Snaptrade,
 ): Promise<{ userId: string; userSecret: string }> {
