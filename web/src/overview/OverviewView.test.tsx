@@ -25,14 +25,16 @@ const FULL_SUMMARY = {
   ],
   accountCount: 4,
   connectionCount: 3,
+  manualAssetCount: 1,
   netWorthILS: 92000,
-  breakdown: {
-    bank: { ILS: 16000 },
-    card: { ILS: -5000 },
-    brokerage: { USD: 4300 },
-    'asset:car': { ILS: 60000 },
-    loan: { ILS: -780000 },
-  },
+  // Net-worth source buckets (already ILS), the shape the engine returns.
+  sources: [
+    { key: 'asset:car', amount: 60000 },
+    { key: 'bank', amount: 16000 },
+    { key: 'brokerage', amount: 4300 },
+    { key: 'card', amount: -5000 },
+    { key: 'loan', amount: -3000 },
+  ],
 };
 
 const FULL_BUDGET = {
@@ -271,8 +273,27 @@ describe('OverviewView', () => {
     installFetchMock(mocks());
     renderOverview();
     const card = (await screen.findByText(/total net worth/i)).closest('section')!;
-    expect(within(card as HTMLElement).getByText(/78,?000/)).toBeInTheDocument();
-    expect(within(card as HTMLElement).getByText(/4,?300/)).toBeInTheDocument();
+    // Scope to the chips row — the breakdown rows below also show amounts.
+    const chips = (card as HTMLElement).querySelector('.nw-chips') as HTMLElement;
+    expect(within(chips).getByText(/78,?000/)).toBeInTheDocument();
+    expect(within(chips).getByText(/4,?300/)).toBeInTheDocument();
+  });
+
+  it('renders the source breakdown (alloc bar + labelled rows incl. debt)', async () => {
+    installFetchMock(mocks());
+    renderOverview();
+    const card = (await screen.findByText(/total net worth/i)).closest('section')!;
+    // One allocation segment per positive source (car, bank, brokerage = 3).
+    expect((card as HTMLElement).querySelectorAll('.nw-alloc-seg')).toHaveLength(3);
+    // Labelled rows, including debt rows.
+    expect(within(card as HTMLElement).getByText('Car')).toBeInTheDocument();
+    expect(within(card as HTMLElement).getByText('Bank accounts')).toBeInTheDocument();
+    expect(within(card as HTMLElement).getByText('Loans')).toBeInTheDocument();
+    // Debt amount carries the `neg` class (red).
+    const loanRow = within(card as HTMLElement).getByText('Loans').closest('.nw-bd-row')!;
+    expect(loanRow.querySelector('.nw-bd-amt.neg')).not.toBeNull();
+    // Sub line counts accounts + hand-entered assets, not connections.
+    expect(within(card as HTMLElement).getByText('4 accounts · 1 asset')).toBeInTheDocument();
   });
 
   it('renders the "this month" balance headline (income - committed - spent)', async () => {

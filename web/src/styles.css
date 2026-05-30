@@ -859,30 +859,73 @@ button.mini { padding: 5px 11px; font-size: 12px; }
 .balance-line b { color: var(--text); font-weight: 700; }
 .balance-sep { color: var(--faint); }
 
+/* Net-worth banner — the amber-gradient "big yellow" card with the source
+   breakdown, ported from the legacy SPA's .networth. */
 .networth {
-  background: var(--card); border: 1px solid var(--hairline);
-  border-radius: 18px; padding: 22px 24px; box-shadow: var(--shadow-sm);
+  position: relative; overflow: hidden; isolation: isolate;
+  background: linear-gradient(140deg, var(--grad-1) 0%, var(--grad-2) 100%);
+  border-radius: 22px; padding: 24px 26px 22px; color: #fff;
+  box-shadow: var(--shadow);
 }
+/* Single soft top-right highlight over the gradient. */
+.networth::before {
+  content: ""; position: absolute; inset: 0;
+  background: radial-gradient(80% 60% at 95% -20%,
+    rgba(255,255,255,0.22), transparent 60%);
+  pointer-events: none; z-index: 0;
+}
+.networth > * { position: relative; z-index: 1; }
 .networth .label {
-  font-size: 11px; font-weight: 700; letter-spacing: .12em;
-  text-transform: uppercase; color: var(--muted); margin-bottom: 6px;
+  color: rgba(255,255,255,0.72); font-weight: 700;
+  letter-spacing: 1.4px; text-transform: uppercase; font-size: 11px;
 }
 .nw-total {
-  font: 800 36px/1 ui-rounded, "SF Pro Rounded", system-ui;
-  color: var(--text); font-variant-numeric: tabular-nums;
-  letter-spacing: -.5px;
+  font: 800 48px/1.05 ui-rounded, "SF Pro Rounded", system-ui;
+  margin-top: 8px; letter-spacing: -.5px; font-variant-numeric: tabular-nums;
 }
-.nw-total.neg { color: var(--red); }
-.nw-chips {
-  display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px;
-}
+.nw-total.neg { color: #ffd7d1; }
+.nw-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 .nw-chip {
-  font-size: 11.5px; padding: 3px 9px; border-radius: 999px;
-  background: var(--card-hi); color: var(--muted); font-weight: 600;
+  background: rgba(255,255,255,0.16); border-radius: 999px;
+  padding: 5px 12px; font-size: 13px; font-weight: 600;
+  font-variant-numeric: tabular-nums; backdrop-filter: blur(8px);
+}
+/* Stacked allocation bar — one coloured segment per positive source. */
+.nw-alloc {
+  position: relative; display: flex; height: 9px; margin-top: 18px;
+  border-radius: 999px; overflow: hidden; background: rgba(0,0,0,0.18);
+}
+.nw-alloc-seg { height: 100%; transition: width .35s ease; }
+/* Breakdown rows — spacing-based rhythm, no horizontal rules. */
+.nw-breakdown {
+  position: relative; margin-top: 14px;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.nw-bd-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 4px; font-size: 13px; border-radius: 8px;
+  transition: background .15s ease;
+}
+.nw-bd-row:hover { background: rgba(255,255,255,0.06); }
+.nw-bd-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+.nw-bd-ico {
+  font-size: 14px; width: 19px; flex: 0 0 auto; text-align: center; opacity: .9;
+}
+.nw-bd-name {
+  flex: 1; min-width: 0; color: rgba(255,255,255,0.94); font-weight: 600;
+}
+.nw-bd-amt {
+  font: 700 13.5px/1 ui-rounded, "SF Pro Rounded", system-ui;
   font-variant-numeric: tabular-nums;
 }
+.nw-bd-amt.neg { color: #ffd7d1; }
+.nw-bd-pct {
+  width: 38px; text-align: right; font-size: 11.5px; font-weight: 700;
+  color: rgba(255,255,255,0.65); font-variant-numeric: tabular-nums;
+}
 .nw-sub {
-  color: var(--muted); font-size: 12px; margin-top: 12px;
+  color: rgba(255,255,255,0.78); font-size: 12.5px; margin-top: 16px;
+  position: relative;
 }
 
 /* --- Bank projection block (inside .balance-card) -------------------- */

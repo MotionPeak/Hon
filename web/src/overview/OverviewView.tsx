@@ -42,12 +42,18 @@ function budgetPathFor(
 
 interface CurrencyTotal { currency: string; total: number; accountCount: number }
 
+/** One net-worth source bucket from /summary (bank, card, pension, brokerage,
+ *  loan, or an `asset:<kind>`); already converted to ILS by the engine.
+ *  Negative for debt (cards, loans). */
+interface NetWorthSource { key: string; amount: number }
+
 interface Summary {
   byCurrency: CurrencyTotal[];
   accountCount: number;
   connectionCount: number;
+  manualAssetCount?: number;
   netWorthILS: number | null;
-  breakdown?: Record<string, Record<string, number>>;
+  sources?: NetWorthSource[];
 }
 
 interface BudgetVariable {
@@ -352,6 +358,37 @@ function BankProjection({
   );
 }
 
+// Emoji, label and allocation-bar colour for each net-worth source bucket.
+// Ported verbatim from the legacy SPA's SOURCE_LABEL.
+const SOURCE_LABEL: Record<string, [string, string, string]> = {
+  bank: ['🏦', 'Bank accounts', '#3dcd84'],
+  card: ['💳', 'Credit cards', '#f4685a'],
+  brokerage: ['📈', 'Investments', '#7c83ff'],
+  pension: ['🪺', 'Pension funds', '#ffd166'],
+  'asset:car': ['🚗', 'Car', '#5fb0ff'],
+  'asset:property': ['🏠', 'Property', '#f896c8'],
+  'asset:cash': ['💵', 'Cash savings', '#74d0c2'],
+  'asset:crypto': ['🪙', 'Crypto', '#ffb74d'],
+  'asset:other': ['💎', 'Other assets', '#c2b3ff'],
+  loan: ['📉', 'Loans', '#ff8aa1'],
+};
+
+function sourceMeta(key: string): [string, string, string] {
+  const m = SOURCE_LABEL[key];
+  return m ?? ['•', key, '#ffffff'];
+}
+
+/** "N accounts · M assets" — the synced-account + hand-entered-asset tally
+ *  under the figure (matches the legacy SPA's netWorthSub). */
+function netWorthSub(summary: Summary): string {
+  const parts: string[] = [];
+  const a = summary.accountCount || 0;
+  const m = summary.manualAssetCount || 0;
+  if (a) parts.push(`${a} account${a === 1 ? '' : 's'}`);
+  if (m) parts.push(`${m} asset${m === 1 ? '' : 's'}`);
+  return parts.join(' · ') || 'Nothing added yet';
+}
+
 function NetWorthCard({ summary }: { summary: Summary }) {
   const totals = (summary.byCurrency ?? []).slice().sort((a, b) =>
     a.currency === 'ILS' ? -1 : b.currency === 'ILS' ? 1 : b.total - a.total,
@@ -370,25 +407,63 @@ function NetWorthCard({ summary }: { summary: Summary }) {
   } else {
     headline = '—';
   }
+
+  // The breakdown only renders when the engine returns a combined ILS figure
+  // (i.e. FX is up). Positive sources drive the allocation bar; debt rows show
+  // a "—" share so the percentages stay honest.
+  const sources = summary.netWorthILS != null ? (summary.sources ?? []) : [];
+  const positiveTotal = sources
+    .filter((s) => s.amount > 0)
+    .reduce((sum, s) => sum + s.amount, 0);
+
   return (
-    <section className="card networth">
+    <section className="networth">
       <div className="label">Total net worth</div>
       <div className={`nw-total${negative ? ' neg' : ''}`}>{headline}</div>
       {chipTotals.length > 0 && (
         <div className="nw-chips">
           {chipTotals.map((t) => (
-            <span key={t.currency} className="nw-chip">
-              {money(t.total, t.currency)}
-            </span>
+            <span key={t.currency} className="nw-chip">{money(t.total, t.currency)}</span>
           ))}
         </div>
       )}
-      <div className="nw-sub">
-        Across {summary.accountCount} account{summary.accountCount === 1 ? '' : 's'}
-        {summary.connectionCount > 0 && (
-          <> · {summary.connectionCount} connection{summary.connectionCount === 1 ? '' : 's'}</>
-        )}
-      </div>
+      {positiveTotal > 0 && (
+        <div className="nw-alloc">
+          {sources.filter((s) => s.amount > 0).map((s) => {
+            const [, name, color] = sourceMeta(s.key);
+            return (
+              <div
+                key={s.key}
+                className="nw-alloc-seg"
+                style={{ width: `${(s.amount / positiveTotal) * 100}%`, background: color }}
+                title={`${name} · ${money(s.amount, 'ILS')}`}
+              />
+            );
+          })}
+        </div>
+      )}
+      {sources.length > 0 && (
+        <div className="nw-breakdown">
+          {sources.map((s) => {
+            const [emoji, name, color] = sourceMeta(s.key);
+            const pct = s.amount > 0 && positiveTotal
+              ? `${Math.round((s.amount / positiveTotal) * 100)}%`
+              : '—';
+            return (
+              <div key={s.key} className="nw-bd-row">
+                <span className="nw-bd-dot" style={{ background: color }} />
+                <span className="nw-bd-ico">{emoji}</span>
+                <span className="nw-bd-name">{name}</span>
+                <span className={`nw-bd-amt${s.amount < 0 ? ' neg' : ''}`}>
+                  {money(s.amount, 'ILS')}
+                </span>
+                <span className="nw-bd-pct">{pct}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <div className="nw-sub">{netWorthSub(summary)}</div>
     </section>
   );
 }
