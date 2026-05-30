@@ -574,6 +574,73 @@ Neither needs a code change to be *correct* — Hon's numbers are right
 relative to its data source. Both are SnapTrade-side. Logged here so the
 next session doesn't re-diagnose from scratch.
 
+> **Hon-side resilience for issue #2 SHIPPED 2026-05-30** — see
+> "Brokerage graceful degradation" below. Hon now detects the revocation,
+> stitches the chart so it stays live, hides the now-wrong stat tiles, and
+> stops hammering the dead endpoints.
+
+## Brokerage graceful degradation (2026-05-30)
+
+Branch `session/brokerage-degrade-2026-05-30` (11 commits: 2 docs + 9 code).
+Built brainstorm → writing-plans → subagent-driven-development; final
+whole-branch review **READY TO MERGE**. Tests: sidecar **94**, web **506**;
+both typechecks clean.
+
+**Why:** SnapTrade revoked the user's plan endpoints — `/performance/custom`
+→ 403 code 1141 "Feature is not enabled" (confirmed in the SnapTrade
+dashboard request logs), `/activities` → 410. The stored `brokerage_performance`
+row froze (only overwritten on a successful fetch), and `buildEquitySeries`
+Tier-1 "won outright" → the equity chart silently stopped moving, and the
+window-relative Rate-of-return / Dividend tiles showed stale (now-wrong)
+numbers.
+
+**Engine:** `isFeatureDisabled(err)` (snaptrade.ts) detects code 1141.
+`fetchPerformanceHistory` returns `{ data?, disabled }` (disabled = every
+range 1141). `runSnapTradeSync(creds, vault, opts, onProgress?)` gained
+`opts.skipPerformance`/`skipActivities` and sets `outcome.performanceDisabled`.
+The **runner** owns persistence (`repo.get/setPerformanceDisabledAt`, backed by
+the `meta` table — **no migration**): reads the per-connection marker, skips
+the dead calls when it's fresh (`PERF_REPROBE_MS = 24h`) / probes when stale,
+sets-on-disabled / clears-on-real-success. `GET /brokerage` surfaces
+`performanceDisabled: { [connId]: ISO }`.
+
+**Client:** `PerformanceEntry.fetchedAt` typed (already on the wire). New pure
+`stitchSeries(broker, snapshot)` — broker points up to its last date, then
+Hon's own snapshot points after. `buildEquitySeries` now computes BOTH the
+broker (Tier-1) and snapshot (Tier-2-else-3) series and returns the stitch
+(replacing broker-wins) — so the chart stays deep AND live regardless of feed
+health. `BrokerageSubTab` skips disabled connections in the ROR/dividend tile
+accumulation (the existing null/false guards then hide those tiles). Live
+position-derived tiles (Portfolio / Gain·range / Unrealized / Return-on-cost /
+Holdings) are unaffected.
+
+**Live verification (worktree engine :4100 + vite :5174 against the real DB):**
+the all-accounts equity chart's right edge now reaches **MAY 30** even though
+the only stored broker performance (the **Meitav pension** conn `0988fe11`,
+NOT IBKR) freezes at **Apr 30** — proving the stitch extends the frozen curve
+with live snapshots. `/brokerage` confirmed serving `performanceDisabled` +
+`fetchedAt`. **Not live-demoable this session:** the 1141→marker-write path and
+the tile-hiding on a real disabled connection — the vault was locked (no real
+sync) AND the IBKR connection has no stored `byRange` to hide. Those are
+covered by the B3 integration tests + A1 unit test + reviewed runner logic.
+
+**Note on the real data:** the ROR/dividend tiles the user sees come from the
+**Meitav pension** performance (a non-SnapTrade source, last fetched 2026-05-28,
+NOT disabled) — they correctly stay. IBKR (`3a0c9645`, re-linked) has no
+`brokerage_performance` row, so its chart already builds from snapshots and it
+contributes no stat tiles.
+
+### Deferred follow-up (from the final review)
+
+- **`skipActivities` is coupled to the performance-disabled marker.** Once
+  performance is disabled, the 24h skip also suppresses the `/activities`
+  call (inception auto-detect). Harmless for the user (both endpoints are
+  revoked anyway, and they use a manual investment-start date), but for a
+  *new* SnapTrade connection that hits 1141 on its first sync before ever
+  fetching activities, `inceptionDate` would stay undefined until the
+  re-probe. A proper fix is a separate `snaptrade:activities-disabled:<connId>`
+  marker (the spec named the key). Not a regression; deferred.
+
 ## Restart workflow (you'll need this)
 
 ```bash
