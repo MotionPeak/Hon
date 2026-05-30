@@ -12,6 +12,7 @@ import type { Transaction } from './types';
 import { merchantKey, recurrenceChoices, type Frequency } from '../recurring/helpers';
 import { isExcludedFromCycle, ruleMatches } from './excluded';
 import { SplitwiseSection } from './SplitwiseSection';
+import { SplitwiseRepaymentSection } from './SplitwiseRepaymentSection';
 import { useSplitwise } from '../splitwise/useSplitwise';
 
 /** Stored merchant-frequency value. 'income'/'ignore' are tags the editor
@@ -954,6 +955,7 @@ function CategoryPickerSidebar(
             />
 
             <SplitwiseSection transaction={transaction} />
+            <SplitwiseRepaymentSection transaction={transaction} />
 
             <div className="txn-sidebar-section">
               <div className="label">Cycle calculations</div>
