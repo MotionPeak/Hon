@@ -5,6 +5,50 @@
 
 import type { Repo, SplitwiseCounterparty, SplitwiseLink } from './repo.js';
 
+// --- Pure allocation helpers -------------------------------------------------
+
+export interface PaidResult {
+  transactionId: string;
+  paidAmount: number;
+  paidState: 'open' | 'partial' | 'paid';
+  counterparties: SplitwiseCounterparty[];
+}
+
+/**
+ * Pure allocation: consume each person's repayment pool against their linked
+ * expenses oldest-first, setting per-counterparty `paid`. `pool` is keyed
+ * `counterpartyId|currency`. Splitwise tracks debt per person, not per expense,
+ * so oldest-first is the honest approximation.
+ */
+export function allocatePayments(
+  links: SplitwiseLink[],
+  pool: Map<string, number>,
+): PaidResult[] {
+  const remaining = new Map(pool);
+  const ordered = [...links].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const results: PaidResult[] = [];
+  for (const link of ordered) {
+    let paid = 0;
+    const counterparties = link.counterparties.map((cp) => {
+      const key = `${cp.id}|${link.currency}`;
+      const available = remaining.get(key) ?? 0;
+      const take = Math.min(cp.owed, available);
+      if (take > 0) {
+        remaining.set(key, available - take);
+        paid += take;
+      }
+      return { ...cp, paid: Math.round(take * 100) / 100 };
+    });
+    paid = Math.round(paid * 100) / 100;
+    const paidState: PaidResult['paidState'] =
+      paid >= link.owedToMe - 0.01 ? 'paid' : paid > 0.01 ? 'partial' : 'open';
+    results.push({ transactionId: link.transactionId, paidAmount: paid, paidState, counterparties });
+  }
+  return results;
+}
+
+// --- API constants -----------------------------------------------------------
+
 const API_BASE = 'https://secure.splitwise.com/api/v3.0';
 
 // --- Wire types — the subset of the Splitwise API that Hon reads ------------
