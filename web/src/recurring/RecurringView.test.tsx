@@ -221,6 +221,40 @@ const TWO_RENT = {
   ...EMPTY_HELPERS,
 } as const;
 
+describe('RecurringView — Subscriptions area', () => {
+  it('renders Netflix in the subs area and omits a fixed "Subscriptions" category header', async () => {
+    installFetchMock({
+      'GET /api/transactions': () => ({
+        transactions: [
+          // Two Housing charges so they're detected as recurring fixed
+          { id: 't1', accountId: 'a', externalId: 'x1', date: `${month(-2)}-15`,
+            processedDate: null, amount: -4000, currency: 'ILS',
+            description: 'Rent', memo: null, kind: null, status: null,
+            category: 'Housing', createdAt: '2025-01-01' },
+          { id: 't2', accountId: 'a', externalId: 'x2', date: `${month(-1)}-15`,
+            processedDate: null, amount: -4000, currency: 'ILS',
+            description: 'Rent', memo: null, kind: null, status: null,
+            category: 'Housing', createdAt: '2025-01-01' },
+          // Netflix subscription — should appear in the subs area, not the fixed list
+          { id: 't3', accountId: 'a', externalId: 'x3', date: `${month(-1)}-10`,
+            processedDate: null, amount: -55, currency: 'ILS',
+            description: 'Netflix', memo: null, kind: null, status: null,
+            category: 'Subscriptions', createdAt: '2025-01-01' },
+        ],
+      }),
+      'GET /api/categories': () => CATEGORIES,
+      ...EMPTY_HELPERS,
+    });
+    renderView();
+
+    const subsArea = (await screen.findByRole('heading', { name: /🔁 Subscriptions/i })).closest('section')!;
+    expect(within(subsArea as HTMLElement).getByText('Netflix')).toBeInTheDocument();
+
+    // No fixed-bills "Subscriptions" category header
+    expect(screen.queryByRole('heading', { name: /^Subscriptions$/ })).not.toBeInTheDocument();
+  });
+});
+
 describe('RecurringView — CRUD', () => {
   it('shows a × remove button on each row (Remove from Fixed bills)', async () => {
     installFetchMock({ ...TWO_RENT });

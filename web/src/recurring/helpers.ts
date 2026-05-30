@@ -85,7 +85,7 @@ export interface RecurringData {
   categories: Category[];
   frequencies: Record<string, FreqOrIgnore>;
   splits: Record<string, number>;
-  cancelled: Record<string, boolean>;
+  cancelled: Record<string, string>;
 }
 
 /**

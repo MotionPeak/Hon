@@ -11,6 +11,7 @@ import {
   type Frequency, type FreqOrIgnore, type MerchantRow, type RecurringData,
   detectMerchants, cyclesBetween, cycleStatus, expectedFixedThisCycle,
 } from './helpers';
+import { SubscriptionsSection } from '../subscriptions/SubscriptionsSection';
 
 function fmtDate(dateStr: string | null): string {
   if (!dateStr) return '—';
@@ -53,8 +54,8 @@ export function RecurringView() {
         api<{ categories: Category[] }>('/categories'),
         api<{ frequencies: Record<string, FreqOrIgnore> }>('/merchant-frequencies'),
         api<{ splits: Record<string, number> }>('/category-splits'),
-        api<{ cancelled: Record<string, boolean> }>('/subscriptions/cancelled')
-          .catch(() => ({ cancelled: {} as Record<string, boolean> })),
+        api<{ cancelled: Record<string, string> }>('/subscriptions/cancelled')
+          .catch(() => ({ cancelled: {} as Record<string, string> })),
       ]);
       setData({
         transactions: t.transactions,
@@ -88,20 +89,8 @@ export function RecurringView() {
 
   if (!data || !detected) return <DelayedLoader />;
 
-  const { rows } = detected;
-  if (rows.length === 0) {
-    return (
-      <div className="recurring-view">
-        <h1>Fixed bills</h1>
-        <p className="blank">
-          No recurring fixed bills detected yet. They appear here once a
-          fixed-category charge (Housing · Utilities · Insurance · Subscriptions
-          · Education · Fees) is seen in two or more billing cycles — or once
-          you set a frequency on a charge by hand.
-        </p>
-      </div>
-    );
-  }
+  // Subscriptions render in the dedicated area below, not as a fixed section.
+  const rows = detected.rows.filter((r) => r.category !== 'Subscriptions');
 
   // Group by category, sort each by monthly share desc, sort categories by
   // their combined monthly cost desc.
@@ -137,88 +126,105 @@ export function RecurringView() {
         appeared in 2+ billing cycles, or a single charge you've told Hon
         bills regularly. Hover the status pill for details.
       </p>
-      <div className="recurring-totals">
-        <div data-testid="recurring-due" className="recurring-total recurring-due">
-          <span className="emoji">🎯</span>
-          <span>Due this cycle</span>
-          <b>{money(dueThisCycle, 'ILS')}</b>
-        </div>
-        <div data-testid="recurring-total" className="recurring-total recurring-total-sub">
-          <span className="emoji">📆</span>
-          <span>Expected monthly</span>
-          <b>{money(grandMonthly, 'ILS')}</b>
-        </div>
-      </div>
-      <div className="recurring-sections">
-        {catOrder.map((catName) => {
-          const list = byCat.get(catName) ?? [];
-          const cat = catByName.get(catName);
-          const sectionTotal = list.reduce((s, r) => s + r.monthlyShare, 0);
-          const split = data.splits[catName] || 1;
-          const shared = split > 1;
-          return (
-            <section key={catName} className="rec-section">
-              <h3 className="rec-section-head">
-                <span
-                  className="rec-section-emoji"
-                  style={{ background: cat ? cat.color + '22' : 'var(--card-hi)' }}
-                >
-                  {cat?.emoji ?? '▫️'}
-                </span>
-                <span className="rec-section-name">{catName}</span>
-                <button
-                  type="button"
-                  className={`rec-split${shared ? ' on' : ''}`}
-                  onClick={() => setSplitEdit(catName)}
-                  aria-label={`Split ${catName}`}
-                  title={shared
-                    ? `You pay 1/${split} of every ${catName} bill. Click to change.`
-                    : 'Share this category with roommates / partner'}
-                >÷{split}</button>
-                <span className="rec-section-total">
-                  {money(sectionTotal, 'ILS')}
-                  <span className="rec-unit">/mo</span>
-                </span>
-              </h3>
-              <ul className="rec-list">
-                {list.map((r) => {
-                  const status = statusFor(r, settings.monthStartDay);
-                  return (
-                    <li key={r.key} className="rec-row">
-                      <div className="rec-main">
-                        <div className="rec-name">
-                          {r.desc}
-                          <span className={`rec-tag rec-tag-${status.cls}`} title={status.hint}>
-                            {status.label}
-                          </span>
-                        </div>
-                        <div className="rec-meta">
-                          {FREQ_LABEL[r.freq]} · {money(r.lastChargeAbs, 'ILS')} per charge
-                          · last {fmtDate(r.lastTxnDate)}
-                          · {r.count} charge{r.count === 1 ? '' : 's'}
-                        </div>
-                      </div>
-                      <div className="rec-amount">
-                        {money(r.monthlyShare, 'ILS')}
-                        <span className="rec-unit">/mo</span>
-                      </div>
-                      <button
-                        type="button"
-                        className="rec-remove"
-                        aria-label="Remove from Fixed bills"
-                        title={"Remove from Fixed bills — keeps the underlying " +
-                          "transactions, just stops counting this merchant " +
-                          "toward Expected fixed"}
-                        onClick={() => void removeFromFixed(r.key)}
-                      >✕</button>
-                    </li>
-                  );
-                })}
-              </ul>
-            </section>
-          );
-        })}
-      </div>
+      {rows.length === 0 ? (
+        <p className="blank">
+          No recurring fixed bills detected yet. They appear here once a
+          fixed-category charge (Housing · Utilities · Insurance · Education ·
+          Fees) is seen in two or more billing cycles — or once you set a
+          frequency on a charge by hand.
+        </p>
+      ) : (
+        <>
+          <div className="recurring-totals">
+            <div data-testid="recurring-due" className="recurring-total recurring-due">
+              <span className="emoji">🎯</span>
+              <span>Due this cycle</span>
+              <b>{money(dueThisCycle, 'ILS')}</b>
+            </div>
+            <div data-testid="recurring-total" className="recurring-total recurring-total-sub">
+              <span className="emoji">📆</span>
+              <span>Expected monthly</span>
+              <b>{money(grandMonthly, 'ILS')}</b>
+            </div>
+          </div>
+          <div className="recurring-sections">
+            {catOrder.map((catName) => {
+              const list = byCat.get(catName) ?? [];
+              const cat = catByName.get(catName);
+              const sectionTotal = list.reduce((s, r) => s + r.monthlyShare, 0);
+              const split = data.splits[catName] || 1;
+              const shared = split > 1;
+              return (
+                <section key={catName} className="rec-section">
+                  <h3 className="rec-section-head">
+                    <span
+                      className="rec-section-emoji"
+                      style={{ background: cat ? cat.color + '22' : 'var(--card-hi)' }}
+                    >
+                      {cat?.emoji ?? '▫️'}
+                    </span>
+                    <span className="rec-section-name">{catName}</span>
+                    <button
+                      type="button"
+                      className={`rec-split${shared ? ' on' : ''}`}
+                      onClick={() => setSplitEdit(catName)}
+                      aria-label={`Split ${catName}`}
+                      title={shared
+                        ? `You pay 1/${split} of every ${catName} bill. Click to change.`
+                        : 'Share this category with roommates / partner'}
+                    >÷{split}</button>
+                    <span className="rec-section-total">
+                      {money(sectionTotal, 'ILS')}
+                      <span className="rec-unit">/mo</span>
+                    </span>
+                  </h3>
+                  <ul className="rec-list">
+                    {list.map((r) => {
+                      const status = statusFor(r, settings.monthStartDay);
+                      return (
+                        <li key={r.key} className="rec-row">
+                          <div className="rec-main">
+                            <div className="rec-name">
+                              {r.desc}
+                              <span className={`rec-tag rec-tag-${status.cls}`} title={status.hint}>
+                                {status.label}
+                              </span>
+                            </div>
+                            <div className="rec-meta">
+                              {FREQ_LABEL[r.freq]} · {money(r.lastChargeAbs, 'ILS')} per charge
+                              · last {fmtDate(r.lastTxnDate)}
+                              · {r.count} charge{r.count === 1 ? '' : 's'}
+                            </div>
+                          </div>
+                          <div className="rec-amount">
+                            {money(r.monthlyShare, 'ILS')}
+                            <span className="rec-unit">/mo</span>
+                          </div>
+                          <button
+                            type="button"
+                            className="rec-remove"
+                            aria-label="Remove from Fixed bills"
+                            title={"Remove from Fixed bills — keeps the underlying " +
+                              "transactions, just stops counting this merchant " +
+                              "toward Expected fixed"}
+                            onClick={() => void removeFromFixed(r.key)}
+                          >✕</button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </section>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      <SubscriptionsSection
+        transactions={data.transactions}
+        frequencies={data.frequencies}
+        cancelled={data.cancelled}
+      />
 
       <SplitEditorDialog
         category={splitEdit}
