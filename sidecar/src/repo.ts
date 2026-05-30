@@ -252,6 +252,8 @@ export interface SplitwiseCounterparty {
   id: number;
   name: string;
   owed: number;
+  /** Amount of `owed` covered by linked repayments (set by recomputePaidStates). */
+  paid?: number;
 }
 
 /** A Hon transaction linked to the Splitwise expense created from it. */
@@ -270,6 +272,16 @@ export interface SplitwiseLink {
 }
 
 type SplitwiseLinkRow = Omit<SplitwiseLink, 'counterparties'> & { counterparties: string };
+
+/** An incoming transaction the user marked as a friend repaying them. */
+export interface SplitwiseRepayment {
+  transactionId: string;
+  counterpartyId: number;
+  counterpartyName: string;
+  currency: string;
+  amount: number;
+  createdAt: string;
+}
 
 function toSplitwiseLink(row: SplitwiseLinkRow): SplitwiseLink {
   let counterparties: SplitwiseCounterparty[] = [];
@@ -681,18 +693,109 @@ export class Repo {
     return this.getSplitwiseLink(link.transactionId)!;
   }
 
-  /** Updates a link's paid figures after a Splitwise refresh. */
-  updateSplitwiseLinkPaid(transactionId: string, paidAmount: number, paidState: string): void {
+  /** Updates a link's paid figures + per-counterparty paid after a recompute. */
+  updateSplitwiseLinkPaid(
+    transactionId: string,
+    paidAmount: number,
+    paidState: string,
+    counterparties: SplitwiseCounterparty[],
+  ): void {
     this.db
       .prepare(
-        `UPDATE splitwise_links SET paid_amount = ?, paid_state = ?, synced_at = ?
-         WHERE transaction_id = ?`,
+        `UPDATE splitwise_links
+            SET paid_amount = ?, paid_state = ?, counterparties = ?, synced_at = ?
+          WHERE transaction_id = ?`,
       )
-      .run(paidAmount, paidState, new Date().toISOString(), transactionId);
+      .run(
+        paidAmount,
+        paidState,
+        JSON.stringify(counterparties),
+        new Date().toISOString(),
+        transactionId,
+      );
   }
 
   deleteSplitwiseLink(transactionId: string): void {
     this.db.prepare('DELETE FROM splitwise_links WHERE transaction_id = ?').run(transactionId);
+  }
+
+  // --- Splitwise repayments -------------------------------------------------
+  // Incoming transactions the user marked as a friend paying them back. These
+  // drive paid-state (via recomputePaidStates), replacing Splitwise's settle-up
+  // flag. `amount` is captured at mark time from the incoming txn.
+
+  private static readonly SWR_COLS =
+    'transaction_id AS transactionId, counterparty_id AS counterpartyId, ' +
+    'counterparty_name AS counterpartyName, currency, amount, created_at AS createdAt';
+
+  private static toRepayment(row: {
+    transactionId: string; counterpartyId: string; counterpartyName: string;
+    currency: string; amount: number; createdAt: string;
+  }): SplitwiseRepayment {
+    return { ...row, counterpartyId: Number(row.counterpartyId) };
+  }
+
+  /** Returns all repayment records ordered by creation time. */
+  listRepayments(): SplitwiseRepayment[] {
+    const rows = this.db
+      .prepare(`SELECT ${Repo.SWR_COLS} FROM splitwise_repayments ORDER BY created_at`)
+      .all() as Parameters<typeof Repo.toRepayment>[0][];
+    return rows.map(Repo.toRepayment);
+  }
+
+  /** Returns the repayment linked to the given transaction, or undefined. */
+  getRepayment(transactionId: string): SplitwiseRepayment | undefined {
+    const row = this.db
+      .prepare(`SELECT ${Repo.SWR_COLS} FROM splitwise_repayments WHERE transaction_id = ?`)
+      .get(transactionId) as Parameters<typeof Repo.toRepayment>[0] | undefined;
+    return row ? Repo.toRepayment(row) : undefined;
+  }
+
+  /** Inserts (or replaces on conflict) a repayment record. */
+  createRepayment(r: {
+    transactionId: string;
+    counterpartyId: number;
+    counterpartyName: string;
+    currency: string;
+    amount: number;
+  }): SplitwiseRepayment {
+    this.db
+      .prepare(
+        `INSERT INTO splitwise_repayments
+           (transaction_id, counterparty_id, counterparty_name, currency, amount, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (transaction_id) DO UPDATE SET
+           counterparty_id = excluded.counterparty_id,
+           counterparty_name = excluded.counterparty_name,
+           currency = excluded.currency, amount = excluded.amount`,
+      )
+      .run(
+        r.transactionId,
+        String(r.counterpartyId),
+        r.counterpartyName,
+        r.currency,
+        r.amount,
+        new Date().toISOString(),
+      );
+    return this.getRepayment(r.transactionId)!;
+  }
+
+  /** Removes the repayment record for the given transaction. */
+  deleteRepayment(transactionId: string): void {
+    this.db.prepare('DELETE FROM splitwise_repayments WHERE transaction_id = ?').run(transactionId);
+  }
+
+  /** Pool of money each person has repaid, keyed `counterpartyId|currency`. */
+  getRepaymentPool(): Map<string, number> {
+    const rows = this.db
+      .prepare(
+        `SELECT counterparty_id AS counterpartyId, currency, SUM(amount) AS amount
+           FROM splitwise_repayments GROUP BY counterparty_id, currency`,
+      )
+      .all() as { counterpartyId: string; currency: string; amount: number }[];
+    const pool = new Map<string, number>();
+    for (const row of rows) pool.set(`${row.counterpartyId}|${row.currency}`, row.amount);
+    return pool;
   }
 
   summary(): Summary {
