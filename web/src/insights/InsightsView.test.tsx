@@ -1008,9 +1008,10 @@ describe('InsightsView — brokerage account pills', () => {
     expect(within(list).queryByText('₪0')).not.toBeInTheDocument();
   });
 
-  it('uses broker performance for the chart when present (not just local snapshots)', async () => {
-    // Performance for connection c-st has 4 dated points; the snapshots
-    // table has only recent ones. The chart must follow performance.
+  it('uses broker performance for the chart when present, extended by the newer snapshot tail', async () => {
+    // Performance for connection c-st has 4 dated points; the snapshots table
+    // has 2 newer ones (after the broker's last point). The chart keeps the
+    // deep broker history and stitches the live snapshot tail on top.
     const withPerf = {
       ...brokerageResp,
       snapshots: [
@@ -1032,8 +1033,9 @@ describe('InsightsView — brokerage account pills', () => {
     await user.click(screen.getByRole('button', { name: /^ALL$/ }));
     await screen.findByTestId('brokerage-chart');
     const points = Number(document.querySelector('.lc-wrap')!.getAttribute('data-points'));
-    // 4 performance points (snapshots would have given 2) → performance wins.
-    expect(points).toBe(4);
+    // 4 broker points + 2 snapshot points dated after the broker's last
+    // (2026-03-01) → stitched, so the frozen broker feed no longer freezes the chart.
+    expect(points).toBe(6);
   });
 
   it('renders a pill for an account that has performance but no local snapshots or holdings (regression fix)', async () => {

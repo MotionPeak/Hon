@@ -129,13 +129,14 @@ export function buildEquitySeries(input: BuildEquityInput): SeriesPoint[] {
       fromPerf.set(pt.date, (fromPerf.get(pt.date) ?? 0) + v);
     }
   }
-  if (havePerformance) {
-    return [...fromPerf.entries()]
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([date, value]) => ({ date, value }));
-  }
+  const brokerSeries: SeriesPoint[] = havePerformance
+    ? [...fromPerf.entries()]
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([date, value]) => ({ date, value }))
+    : [];
 
   // --- Tier 2: per-holding snapshots, forward-filled ---------------------
+  let snapshotSeries: SeriesPoint[] = [];
   if (scopedHoldSnaps.length) {
     const acctIdsInSeries = new Set(scopedHoldSnaps.map((s) => s.accountId));
     const inceptionDates = accounts
@@ -176,29 +177,33 @@ export function buildEquitySeries(input: BuildEquityInput): SeriesPoint[] {
       }
       if (any) out.push({ date: d, value: sum });
     }
-    if (out.length) return out;
+    if (out.length) snapshotSeries = out;
   }
 
   // --- Tier 3: account-level snapshots (Hon's per-sync fallback) ---------
-  const acctInception = new Map<string, string | null>();
-  for (const a of accounts) {
-    if (focusedAcctId) {
-      acctInception.set(a.id, a.id === focusedAcctId ? focusedInception : null);
-    } else if (a.inceptionDate) {
-      acctInception.set(a.id, a.inceptionDate);
+  if (!snapshotSeries.length) {
+    const acctInception = new Map<string, string | null>();
+    for (const a of accounts) {
+      if (focusedAcctId) {
+        acctInception.set(a.id, a.id === focusedAcctId ? focusedInception : null);
+      } else if (a.inceptionDate) {
+        acctInception.set(a.id, a.inceptionDate);
+      }
     }
+    const byDate = new Map<string, number>();
+    for (const s of scopedSnaps) {
+      const inception = acctInception.get(s.accountId);
+      if (inception && s.date < inception) continue;
+      const v = convert(s.value, s.currency);
+      if (v == null) continue;
+      byDate.set(s.date, (byDate.get(s.date) ?? 0) + v);
+    }
+    snapshotSeries = [...byDate.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([date, value]) => ({ date, value }));
   }
-  const byDate = new Map<string, number>();
-  for (const s of scopedSnaps) {
-    const inception = acctInception.get(s.accountId);
-    if (inception && s.date < inception) continue;
-    const v = convert(s.value, s.currency);
-    if (v == null) continue;
-    byDate.set(s.date, (byDate.get(s.date) ?? 0) + v);
-  }
-  return [...byDate.entries()]
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([date, value]) => ({ date, value }));
+
+  return stitchSeries(brokerSeries, snapshotSeries);
 }
 
 /** Stitches a broker-reported equity series with Hon's own snapshot-derived

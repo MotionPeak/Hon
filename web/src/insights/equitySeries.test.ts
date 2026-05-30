@@ -32,7 +32,7 @@ function base(over: Partial<BuildEquityInput>): BuildEquityInput {
 }
 
 describe('buildEquitySeries — tier 1: performance', () => {
-  it('prefers performance.totalEquity over snapshots, summed across connections', () => {
+  it('uses performance.totalEquity, summed across connections, then stitches the newer snapshot tail', () => {
     const out = buildEquitySeries(base({
       performance: [
         { connectionId: 'c-st', data: { totalEquity: [
@@ -43,12 +43,14 @@ describe('buildEquitySeries — tier 1: performance', () => {
           { date: '2025-01-01', value: 40, currency: 'ILS' }, // /4 = 10
         ] } },
       ],
-      // snapshots present but must be IGNORED when performance exists.
+      // Snapshot dated AFTER the broker's last point (2025-02-01) now stitches
+      // in as the live tail — a stale broker feed no longer freezes the chart.
       snapshots: [{ accountId: 'ibkr', date: '2025-03-01', value: 999, currency: 'USD' }],
     }));
     expect(out).toEqual([
       { date: '2025-01-01', value: 110 }, // 100 USD + 40 ILS/4
       { date: '2025-02-01', value: 110 },
+      { date: '2025-03-01', value: 999 }, // snapshot tail past broker's last point
     ]);
   });
 
@@ -219,5 +221,35 @@ describe('stitchSeries', () => {
   it('returns broker as-is when snapshot is empty', () => {
     const broker = [P('2024-01-01', 100)];
     expect(stitchSeries(broker, [])).toEqual(broker);
+  });
+});
+
+describe('buildEquitySeries stitches broker history with newer snapshots', () => {
+  const convert = (v: number) => v;
+  const accounts = [{ id: 'a1', connectionId: 'c1', inceptionDate: null }];
+
+  it('extends the broker curve with account snapshots past its last point', () => {
+    const out = buildEquitySeries({
+      performance: [{
+        connectionId: 'c1',
+        data: { totalEquity: [
+          { date: '2024-01-01', value: 100 },
+          { date: '2024-06-01', value: 120 },
+        ], currency: 'USD' },
+      }],
+      snapshots: [
+        { accountId: 'a1', date: '2024-06-01', value: 120, currency: 'USD' },
+        { accountId: 'a1', date: '2024-07-01', value: 150, currency: 'USD' },
+      ],
+      holdingSnapshots: [],
+      accounts,
+      acctFilter: 'all',
+      convert,
+    });
+    expect(out).toEqual([
+      { date: '2024-01-01', value: 100 },
+      { date: '2024-06-01', value: 120 },
+      { date: '2024-07-01', value: 150 },
+    ]);
   });
 });
