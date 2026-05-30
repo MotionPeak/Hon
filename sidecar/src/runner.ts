@@ -66,7 +66,12 @@ export class ScrapeRunner {
   // process per abandoned 2FA prompt. On timeout we REJECT so the scraper's
   // own error path (and execute()'s catch → finish('error', …)) closes the
   // browser and tears the run down.
-  private static readonly OTP_TIMEOUT_MS = 5 * 60_000;
+  // 5 minutes by default; overridable via HON_OTP_TIMEOUT_MS for testing the
+  // abandoned-OTP cleanup path without a full 5-minute wait.
+  private static readonly OTP_TIMEOUT_MS =
+    Number(process.env.HON_OTP_TIMEOUT_MS) > 0
+      ? Number(process.env.HON_OTP_TIMEOUT_MS)
+      : 5 * 60_000;
 
   private readonly runs = new Map<string, RunStatus>();
   private readonly otpResolvers = new Map<string, (code: string) => void>();
