@@ -71,20 +71,6 @@ interface SwGroup {
   name: string;
   members?: SwPerson[];
 }
-interface SwRepayment {
-  from: number;
-  to: number;
-  amount: string;
-}
-interface SwExpense {
-  id: number;
-  payment?: boolean;
-  currency_code?: string;
-  date?: string | null;
-  deleted_at?: string | null;
-  repayments?: SwRepayment[];
-}
-
 // --- HTTP -------------------------------------------------------------------
 
 class SplitwiseError extends Error {}
@@ -308,14 +294,12 @@ export interface SplitwiseRefresh {
 }
 
 /**
- * Refreshes the per-friend balances and recomputes the paid state of every
- * linked expense. Settle-up payments are pooled per person and consumed by
- * that person's linked expenses oldest first — an honest approximation, since
- * Splitwise tracks debt per person, not per expense.
+ * Refreshes per-friend balances (for the picker) and recomputes paid-state from
+ * the user's linked repayment transactions. Splitwise's own settle-up flag is no
+ * longer trusted — only real repayments the user marked move a split toward paid.
  */
 export async function refreshSplitwise(
   apiKey: string,
-  myId: number,
   repo: Repo,
 ): Promise<SplitwiseRefresh> {
   const friendsData = await swRequest<{ friends?: SwFriend[] }>(apiKey, '/get_friends');
@@ -326,62 +310,16 @@ export async function refreshSplitwise(
       .map((b) => ({ currency: b.currency_code, amount: Number(b.amount) || 0 }))
       .filter((b) => b.amount !== 0),
   }));
-
-  const links = repo.listSplitwiseLinks();
-  if (links.length > 0) {
-    try {
-      await attributePayments(apiKey, myId, repo, links);
-    } catch {
-      // A failed payment lookup must not drop the balance data above.
-    }
-  }
+  recomputePaidStates(repo);
   return { friends, links: repo.listSplitwiseLinks() };
 }
 
-async function attributePayments(
-  apiKey: string,
-  myId: number,
-  repo: Repo,
-  links: SplitwiseLink[],
-): Promise<void> {
-  // The oldest link bounds how far back settle-up payments can matter.
-  const since = links.reduce(
-    (min, l) => (l.createdAt < min ? l.createdAt : min),
-    links[0].createdAt,
-  );
-  const query = new URLSearchParams({ limit: '100', dated_after: since });
-  const data = await swRequest<{ expenses?: SwExpense[] }>(
-    apiKey,
-    `/get_expenses?${query.toString()}`,
-  );
-
-  // Money each person has paid the user, keyed by `userId|currency`.
-  const pool = new Map<string, number>();
-  for (const exp of data.expenses ?? []) {
-    if (!exp.payment || exp.deleted_at) continue;
-    const currency = exp.currency_code ?? '';
-    for (const r of exp.repayments ?? []) {
-      if (r.to !== myId) continue;
-      const key = `${r.from}|${currency}`;
-      pool.set(key, (pool.get(key) ?? 0) + (Number(r.amount) || 0));
-    }
-  }
-
-  // Consume each person's payments against their links, oldest first.
-  const ordered = [...links].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  for (const link of ordered) {
-    let paid = 0;
-    for (const cp of link.counterparties) {
-      const key = `${cp.id}|${link.currency}`;
-      const available = pool.get(key) ?? 0;
-      const take = Math.min(cp.owed, available);
-      if (take > 0) {
-        pool.set(key, available - take);
-        paid += take;
-      }
-    }
-    paid = Math.round(paid * 100) / 100;
-    const state = paid >= link.owedToMe - 0.01 ? 'paid' : paid > 0.01 ? 'partial' : 'open';
-    repo.updateSplitwiseLinkPaid(link.transactionId, paid, state);
+/** Recomputes every link's paid-state from the local repayment pool. */
+export function recomputePaidStates(repo: Repo): void {
+  const links = repo.listSplitwiseLinks();
+  if (links.length === 0) return;
+  const pool = repo.getRepaymentPool();
+  for (const r of allocatePayments(links, pool)) {
+    repo.updateSplitwiseLinkPaid(r.transactionId, r.paidAmount, r.paidState, r.counterparties);
   }
 }

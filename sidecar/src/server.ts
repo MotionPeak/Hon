@@ -919,7 +919,7 @@ app.post('/splitwise/refresh', async (_req, reply) => {
   const acct = loadSplitwiseAccount();
   if (!acct) return reply.code(400).send({ error: 'Splitwise is not connected' });
   try {
-    return await refreshSplitwise(acct.apiKey, acct.userId, repo);
+    return await refreshSplitwise(acct.apiKey, repo);
   } catch (err) {
     return reply.code(502).send({ error: err instanceof Error ? err.message : String(err) });
   }

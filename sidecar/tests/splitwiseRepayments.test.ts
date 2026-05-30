@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { openDatabase, SCHEMA_VERSION } from '../src/db.js';
 import { Repo } from '../src/repo.js';
+import { recomputePaidStates } from '../src/splitwise.js';
 
 function makeRepo() {
   const dir = mkdtempSync(join(tmpdir(), 'hon-repo-'));
@@ -76,5 +77,32 @@ describe('Repo — splitwise repayments', () => {
     expect(link.paidAmount).toBe(60);
     expect(link.paidState).toBe('paid');
     expect(link.counterparties[0].paid).toBe(60);
+  });
+});
+
+describe('recomputePaidStates', () => {
+  it('marks a link paid from a linked repayment, not from Splitwise', () => {
+    const { repo, db } = makeRepo();
+    db.pragma('foreign_keys = OFF');
+    repo.createSplitwiseLink({
+      transactionId: 'e1', expenseId: 'x1', groupId: null, currency: 'ILS',
+      owedToMe: 60, counterparties: [{ id: 2, name: 'Roomie', owed: 60 }],
+    });
+    // No repayment yet → stays open.
+    recomputePaidStates(repo);
+    expect(repo.getSplitwiseLink('e1')!.paidState).toBe('open');
+
+    // Link the real repayment → paid.
+    repo.createRepayment({ transactionId: 'r1', counterpartyId: 2, counterpartyName: 'Roomie', currency: 'ILS', amount: 60 });
+    recomputePaidStates(repo);
+    const link = repo.getSplitwiseLink('e1')!;
+    expect(link.paidState).toBe('paid');
+    expect(link.paidAmount).toBe(60);
+    expect(link.counterparties[0].paid).toBe(60);
+
+    // Unlink → reverts to open.
+    repo.deleteRepayment('r1');
+    recomputePaidStates(repo);
+    expect(repo.getSplitwiseLink('e1')!.paidState).toBe('open');
   });
 });
