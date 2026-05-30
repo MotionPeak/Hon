@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { LoansView } from './LoansView';
 import { installFetchMock } from '../test/mockFetch';
 
@@ -40,6 +41,20 @@ describe('LoansView', () => {
     installFetchMock({ 'GET /api/loans': () => ({ loans: [], rates: {} }) });
     render(<LoansView />);
     expect(await screen.findByText(/no loans/i)).toBeInTheDocument();
+  });
+
+  it('empty state offers + Add a loan that hands off to the Assets tab', async () => {
+    const user = userEvent.setup();
+    installFetchMock({ 'GET /api/loans': () => ({ loans: [], rates: {} }) });
+    const events: string[] = [];
+    const onGo = (): void => { events.push('go-to-assets'); };
+    window.addEventListener('hon.go-to-assets', onGo);
+    render(<LoansView />);
+    await user.click(await screen.findByRole('button', { name: /\+ add a loan/i }));
+    expect(window.localStorage.getItem('hon.pendingAddLoan')).toBe('1');
+    expect(events).toContain('go-to-assets');
+    window.removeEventListener('hon.go-to-assets', onGo);
+    window.localStorage.removeItem('hon.pendingAddLoan');
   });
 
   it('renders each loan card with name + outstanding + monthly payment', async () => {

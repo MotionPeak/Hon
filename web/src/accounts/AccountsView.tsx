@@ -154,6 +154,17 @@ export function AccountsView() {
   //   'manual-loan'   — form for a hand-entered loan (Spitzer amortisation)
   type AddFlow = null | 'picker' | 'manual-asset' | 'manual-loan' | 'manual-pension' | 'car' | Company;
   const [addFlow, setAddFlow] = useState<AddFlow>(null);
+
+  // The empty Loans tab's "+ Add a loan" button sends the user here and asks us
+  // to open the loan form. The handoff rides a localStorage flag (not a window
+  // event) because AccountsView isn't mounted when Loans dispatches — we read it
+  // once on mount and clear it.
+  useEffect(() => {
+    if (window.localStorage.getItem('hon.pendingAddLoan') === '1') {
+      window.localStorage.removeItem('hon.pendingAddLoan');
+      setAddFlow('manual-loan');
+    }
+  }, []);
   // When set, render <SnapTradeLinkFlow> in its own modal portal. Holds the
   // connectionId of the newly-created (or existing) SnapTrade connection,
   // and (optionally) a pre-selected broker if the user picked one in the
@@ -386,14 +397,6 @@ export function AccountsView() {
   };
 
   const totalItems = data.connections.length + data.assets.length;
-  if (totalItems === 0) {
-    return (
-      <div className="accounts-view">
-        <h1>Assets</h1>
-        <p className="hint">Nothing here yet — hit + Add asset.</p>
-      </div>
-    );
-  }
 
   return (
     <div className="accounts-view">
@@ -404,6 +407,9 @@ export function AccountsView() {
         </button>
       </div>
       <NewLoanBanner data={data} />
+      {totalItems === 0 ? (
+        <p className="hint">Nothing here yet — hit + Add asset.</p>
+      ) : (
       <div className="assets-grid">
         {SECTIONS.map((s) => {
           const count = sectionCount(s.key);
@@ -440,6 +446,7 @@ export function AccountsView() {
           );
         })}
       </div>
+      )}
       {editingBalance && (
         <BalanceModal
           account={editingBalance}

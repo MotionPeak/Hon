@@ -58,6 +58,15 @@ export function App() {
     return () => window.removeEventListener('hon.go-to-loans', h);
   }, []);
 
+  // The empty Loans tab's "+ Add a loan" button dispatches this to flip to the
+  // Assets tab; AccountsView then opens the loan form (via its
+  // 'hon.pendingAddLoan' localStorage flag, read on mount).
+  useEffect(() => {
+    const h = (): void => setTab('accounts');
+    window.addEventListener('hon.go-to-assets', h);
+    return () => window.removeEventListener('hon.go-to-assets', h);
+  }, []);
+
   // Reads localStorage['hon.unseenLoanIds'] (written by AccountsView's
   // new-loan detector). Non-empty → the Loans nav button gets data-unseen
   // so it can render an amber pulse dot. Same-tab updates fire via a

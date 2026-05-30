@@ -121,6 +121,34 @@ describe('AccountsView — section grouping', () => {
     render(<AccountsView />);
     expect(await screen.findByText(/nothing here yet/i)).toBeInTheDocument();
   });
+
+  it('still shows + Add asset when completely empty, and it opens the picker', async () => {
+    const user = userEvent.setup();
+    installFetchMock({
+      ...FULL,
+      'GET /api/connections': () => ({ connections: [] }),
+      'GET /api/accounts': () => ({ accounts: [] }),
+      'GET /api/assets': () => ({ assets: [] }),
+      'GET /api/loans': () => ({ loans: [] }),
+    });
+    render(<AccountsView />);
+    await user.click(await screen.findByRole('button', { name: /\+ add asset/i }));
+    expect(await screen.findByRole('heading', { name: /add an asset/i })).toBeInTheDocument();
+  });
+
+  it('opens the Add-a-loan form on mount when hon.pendingAddLoan is set', async () => {
+    window.localStorage.setItem('hon.pendingAddLoan', '1');
+    installFetchMock({
+      ...FULL,
+      'GET /api/connections': () => ({ connections: [] }),
+      'GET /api/accounts': () => ({ accounts: [] }),
+      'GET /api/assets': () => ({ assets: [] }),
+      'GET /api/loans': () => ({ loans: [] }),
+    });
+    render(<AccountsView />);
+    expect(await screen.findByRole('dialog', { name: /add a loan/i })).toBeInTheDocument();
+    expect(window.localStorage.getItem('hon.pendingAddLoan')).toBeNull();
+  });
 });
 
 describe('AccountsView — connection cards', () => {
