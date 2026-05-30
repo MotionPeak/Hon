@@ -5,6 +5,7 @@ import { money } from '../format';
 import type {
   Account, AssetSectionKey, BrokerageOption, Company, Connection, Holding, Loan, ManualAsset,
 } from './types';
+import { carSubline } from './vehicle';
 import { DelayedLoader } from '../ui/DelayedLoader';
 import { SnapTradeBrokeragePicker } from './SnapTradeBrokeragePicker';
 import { PensionPickerStep } from './PensionPickerStep';
@@ -954,6 +955,10 @@ function LinkBrokerageButton({ connectionId, accounts, onLink }: LinkBrokerageBu
 }
 
 function AssetCard({ asset, callbacks }: { asset: ManualAsset; callbacks: RowCallbacks }) {
+  const isCar = asset.kind === 'car';
+  // ManualAsset.details is typed Record<string, unknown> | null (matches the
+  // engine), so carSubline accepts it directly — no cast needed.
+  const sub = isCar ? carSubline(asset.details) : '';
   return (
     <article className={`asset-card${asset.excluded ? ' nw-off' : ''}`}>
       <div className="asset-head">
@@ -963,9 +968,21 @@ function AssetCard({ asset, callbacks }: { asset: ManualAsset; callbacks: RowCal
           onChange={(next) => callbacks.onToggleAssetExcluded(asset, next)}
         />
       </div>
-      <div className="asset-meta">{asset.kind}</div>
+      <div className="asset-meta">{isCar ? (sub || 'car') : asset.kind}</div>
       <div className="amount">{money(asset.value, asset.currency)}</div>
       <div className="conn-buttons" style={{ marginTop: 10 }}>
+        {isCar && (
+          <button
+            type="button"
+            className="mini"
+            onClick={() => {
+              window.open('https://www.yad2.co.il/price-list', '_blank');
+              callbacks.onEditAsset(asset);
+            }}
+          >
+            Re-check value ↗
+          </button>
+        )}
         <button type="button" className="mini" onClick={() => callbacks.onEditAsset(asset)}>Edit</button>
         <button type="button" className="mini danger" onClick={() => callbacks.onRemoveAsset(asset)}>Remove</button>
       </div>

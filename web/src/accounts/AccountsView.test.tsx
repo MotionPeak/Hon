@@ -745,6 +745,31 @@ describe('AccountsView — assets', () => {
     expect(screen.queryByText('Mortgage')).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: /loans/i })).not.toBeInTheDocument();
   });
+
+  it('car asset card shows a spec sub-line and a Re-check value button', async () => {
+    const user = userEvent.setup();
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    installFetchMock({
+      ...FULL,
+      'GET /api/assets': () => ({
+        assets: [{
+          id: 'c1', kind: 'car', name: 'Toyota Corolla', value: 55000,
+          currency: 'ILS', excluded: false,
+          details: { plate: '12345678', year: 2020, km: 60000, color: 'Blue' },
+          createdAt: '2025-01-01', updatedAt: '2026-05-25',
+        }],
+      }),
+    });
+    render(<AccountsView />);
+    expect(await screen.findByText('2020 · 60,000 km · Blue')).toBeInTheDocument();
+    const recheck = screen.getByRole('button', { name: /re-check value/i });
+    await user.click(recheck);
+    expect(open).toHaveBeenCalledWith('https://www.yad2.co.il/price-list', '_blank');
+    // Clicking Re-check also opens the existing edit modal (value-focused).
+    // AssetEditModal's aria-label is `Edit ${asset.name}`.
+    expect(await screen.findByRole('dialog', { name: /edit toyota corolla/i }))
+      .toBeInTheDocument();
+  });
 });
 
 describe('AccountsView — add connection (picker + bank/card form)', () => {
