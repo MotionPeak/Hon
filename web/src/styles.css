@@ -725,10 +725,11 @@ button.mini { padding: 5px 11px; font-size: 12px; }
   font: 800 22px/1 ui-rounded, "SF Pro Rounded", system-ui;
   color: var(--text); letter-spacing: -.2px; margin-bottom: 8px;
 }
+.recurring-totals { display: flex; flex-direction: column; gap: 8px; margin: 14px 0 18px; }
 .recurring-total {
   display: flex; gap: 10px; align-items: center;
   background: var(--card); border: 1px solid var(--hairline);
-  border-radius: 13px; padding: 12px 15px; margin: 14px 0 18px;
+  border-radius: 13px; padding: 12px 15px;
   font-size: 13px; color: var(--muted);
 }
 .recurring-total b {
@@ -737,6 +738,11 @@ button.mini { padding: 5px 11px; font-size: 12px; }
   font-size: 16px;
 }
 .recurring-total .emoji { font-size: 18px; }
+/* "Due this cycle" is the primary figure (matches the Overview headline);
+   "Expected monthly" is the smoothed secondary, muted + smaller. */
+.recurring-due b { font-size: 19px; }
+.recurring-total-sub { padding: 9px 15px; opacity: .78; }
+.recurring-total-sub b { font-size: 14px; font-weight: 700; }
 
 .recurring-sections { display: flex; flex-direction: column; gap: 18px; }
 .rec-section {
