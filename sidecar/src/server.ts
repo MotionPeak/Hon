@@ -209,6 +209,9 @@ app.post('/vault/unlock', async (req, reply) => {
     vault.unlock(body.passphrase ?? '');
     // Fold any plaintext SnapTrade users from older versions into the vault.
     migrateLegacySnapTradeUsers(vault, dataDir);
+    // Move any legacy plaintext LLM provider API keys into the vault and strip
+    // them from llm-provider.json (H-2). No-op when there's nothing to migrate.
+    llm.migrateProviderKeysToVault();
     return { ok: true, exists: vault.exists(), unlocked: true };
   } catch (err) {
     return reply.code(400).send({ error: (err as Error).message });

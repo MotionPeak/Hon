@@ -91,3 +91,42 @@ describe('Vault — H-6 scrypt cost via salt-version prefix', () => {
     expect(() => wrong.unlock('wrong-pass')).toThrow(/wrong passphrase/i);
   });
 });
+
+describe('Vault — H-2 LLM provider API keys never hit plaintext on disk', () => {
+  it('round-trips an llm-provider secret blob', () => {
+    // The LLM manager stores its API keys as a single named secret. Prove the
+    // round-trip works AND that the on-disk (meta) form does NOT contain the
+    // plaintext key — only the AES-GCM ciphertext.
+    const repo = makeRepo();
+    const vault = new Vault(repo);
+    vault.unlock('provider-pass');
+
+    const secret = JSON.stringify({
+      ollamaKey: 'ollama-cloud-key-123',
+      apiKey: 'groq-sk-super-secret-456',
+    });
+    vault.saveSecret('llm-provider-keys', secret);
+
+    // Round-trips back out cleanly through the unlocked vault.
+    expect(vault.loadSecret('llm-provider-keys')).toBe(secret);
+
+    // The persisted form (whatever the vault wrote to the meta table) must not
+    // leak either plaintext key — the stored secret row holds only AES-GCM
+    // ciphertext, never the keys themselves.
+    const onDisk = JSON.stringify(collectMeta(repo));
+    expect(onDisk).not.toContain('groq-sk-super-secret-456');
+    expect(onDisk).not.toContain('ollama-cloud-key-123');
+  });
+});
+
+// Best-effort sweep of the meta table for the assertion above. Repo has no
+// "dump everything" method, so reconstruct the values we know the vault uses
+// (the secret row) plus the salt/verifier — none of which should ever contain
+// a plaintext API key.
+function collectMeta(repo: Repo): Record<string, string | undefined> {
+  return {
+    'vault_secret:llm-provider-keys': repo.getMeta('vault_secret:llm-provider-keys'),
+    vault_salt: repo.getMeta('vault_salt'),
+    vault_verifier: repo.getMeta('vault_verifier'),
+  };
+}

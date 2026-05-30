@@ -10,6 +10,7 @@ import {
   type LlamaModel,
   type ModelDownloader,
 } from 'node-llama-cpp';
+import type { Vault } from './vault.js';
 
 export interface ModelCatalogEntry {
   id: string;
@@ -98,10 +99,30 @@ export interface ApiConfig {
   model: string; // e.g. llama-3.3-70b-versatile
 }
 
+// The non-secret half of the provider config, written PLAINTEXT to
+// llm-provider.json. API keys are deliberately absent here — they live only in
+// the encrypted vault (H-2). Old files may still carry an `apiKey` per provider;
+// `restoreProvider` migrates and strips those once the vault is unlocked.
 interface PersistedProvider {
   mode: LlmMode;
-  ollama: OllamaConfig;
-  api: ApiConfig;
+  ollama: Omit<OllamaConfig, 'apiKey'>;
+  api: Omit<ApiConfig, 'apiKey'>;
+}
+
+// The shape of a legacy llm-provider.json that may still embed plaintext keys.
+// Used only to read & migrate older files; never written.
+interface LegacyPersistedProvider {
+  mode?: LlmMode;
+  ollama?: Partial<OllamaConfig>;
+  api?: Partial<ApiConfig>;
+}
+
+// The single vault secret that holds both API keys, JSON-encoded.
+const PROVIDER_KEYS_SECRET = 'llm-provider-keys';
+
+interface ProviderKeys {
+  ollamaKey: string;
+  apiKey: string;
 }
 
 /**
@@ -287,7 +308,13 @@ export class LlmManager {
   private model: LlamaModel | null = null;
   private modelPath: string | null = null;
 
-  constructor(dataDir: string) {
+  // The vault is optional so tests (and any caller that doesn't need remote
+  // providers) can construct an LlmManager without one. When absent, API keys
+  // simply aren't persisted and aren't restored — local mode is unaffected.
+  constructor(
+    dataDir: string,
+    private readonly vault?: Vault,
+  ) {
     this.modelsDir = join(dataDir, 'models');
     this.stateFile = join(this.modelsDir, 'active-model.json');
     this.providerFile = join(dataDir, 'llm-provider.json');
@@ -594,11 +621,28 @@ export class LlmManager {
   }
 
   private persistProvider(): void {
+    // Secrets (the API keys) go to the encrypted vault, NEVER to the plaintext
+    // file (H-2). The file keeps only the non-secret fields. If the vault is
+    // locked or absent we still persist everything else, and the keys stay in
+    // memory for this session — they get written to the vault on next unlock
+    // via migrateProviderKeysToVault().
+    if (this.vault?.unlocked) {
+      try {
+        const keys: ProviderKeys = {
+          ollamaKey: this.ollama.apiKey,
+          apiKey: this.api.apiKey,
+        };
+        this.vault.saveSecret(PROVIDER_KEYS_SECRET, JSON.stringify(keys));
+      } catch {
+        // best-effort: a vault write failure must not lose the provider choice
+      }
+    }
     try {
       const data: PersistedProvider = {
         mode: this.mode,
-        ollama: this.ollama,
-        api: this.api,
+        // apiKey deliberately omitted from both — see PersistedProvider.
+        ollama: { baseUrl: this.ollama.baseUrl, model: this.ollama.model },
+        api: { baseUrl: this.api.baseUrl, model: this.api.model },
       };
       writeFileSync(this.providerFile, JSON.stringify(data, null, 2), 'utf8');
     } catch {
@@ -609,21 +653,97 @@ export class LlmManager {
   private restoreProvider(): void {
     if (!existsSync(this.providerFile)) return;
     try {
-      const saved = JSON.parse(readFileSync(this.providerFile, 'utf8')) as Partial<PersistedProvider>;
+      // Read with the legacy shape: older files may still carry plaintext keys
+      // we want to pick up (and later migrate into the vault + strip).
+      const saved = JSON.parse(
+        readFileSync(this.providerFile, 'utf8'),
+      ) as LegacyPersistedProvider;
       this.mode =
         saved.mode === 'ollama' ? 'ollama' : saved.mode === 'api' ? 'api' : 'local';
+
+      // Keys come from the vault when it's unlocked; otherwise leave them ''.
+      // A legacy plaintext key in the file is honoured as a fallback so the
+      // provider keeps working this session even before the first unlock — the
+      // migration on unlock then moves it into the vault and rewrites the file.
+      const vaultKeys = this.loadKeysFromVault();
+      const ollamaKey = vaultKeys?.ollamaKey ?? saved.ollama?.apiKey ?? '';
+      const apiKey = vaultKeys?.apiKey ?? saved.api?.apiKey ?? '';
+
       this.ollama = {
         baseUrl: normalizeUrl(saved.ollama?.baseUrl ?? ''),
-        apiKey: saved.ollama?.apiKey ?? '',
+        apiKey: ollamaKey,
         model: (saved.ollama?.model ?? '').trim(),
       };
       this.api = {
         baseUrl: normalizeUrl(saved.api?.baseUrl ?? ''),
-        apiKey: saved.api?.apiKey ?? '',
+        apiKey,
         model: (saved.api?.model ?? '').trim(),
       };
+
+      // If the file still embedded plaintext keys and the vault is already
+      // unlocked at construction time, migrate immediately. The common case
+      // (vault locked at startup) is handled later by the unlock route calling
+      // migrateProviderKeysToVault().
+      if ((saved.ollama?.apiKey || saved.api?.apiKey) && this.vault?.unlocked) {
+        this.migrateProviderKeysToVault();
+      }
     } catch {
       // ignore a corrupt provider file — defaults to the local model
+    }
+  }
+
+  /** Reads the API-key blob from the vault, or undefined when locked/absent. */
+  private loadKeysFromVault(): ProviderKeys | undefined {
+    if (!this.vault?.unlocked) return undefined;
+    try {
+      const raw = this.vault.loadSecret(PROVIDER_KEYS_SECRET);
+      if (!raw) return undefined;
+      const parsed = JSON.parse(raw) as Partial<ProviderKeys>;
+      return {
+        ollamaKey: parsed.ollamaKey ?? '',
+        apiKey: parsed.apiKey ?? '',
+      };
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Moves any plaintext API keys still sitting in llm-provider.json into the
+   * encrypted vault, then rewrites the file without them. Safe to call on every
+   * unlock: it's a no-op when the file has no keys, and when keys already live
+   * in memory it simply ensures the vault and the on-disk file are consistent.
+   * No-op while the vault is locked or absent.
+   */
+  migrateProviderKeysToVault(): void {
+    if (!this.vault?.unlocked) return;
+
+    // Pull any plaintext keys the file may still embed into memory first, so a
+    // key the UI set before unlock isn't lost when we rewrite the file.
+    let fileHadKeys = false;
+    if (existsSync(this.providerFile)) {
+      try {
+        const saved = JSON.parse(
+          readFileSync(this.providerFile, 'utf8'),
+        ) as LegacyPersistedProvider;
+        if (saved.ollama?.apiKey && !this.ollama.apiKey) {
+          this.ollama.apiKey = saved.ollama.apiKey;
+        }
+        if (saved.api?.apiKey && !this.api.apiKey) {
+          this.api.apiKey = saved.api.apiKey;
+        }
+        fileHadKeys = !!(saved.ollama?.apiKey || saved.api?.apiKey);
+      } catch {
+        // corrupt file — nothing to migrate
+      }
+    }
+
+    // If the vault has no key blob yet but we hold keys in memory, seed it.
+    // Either way, persistProvider() writes the secret to the vault and rewrites
+    // llm-provider.json WITHOUT the plaintext keys, completing the migration.
+    const haveKeys = !!(this.ollama.apiKey || this.api.apiKey);
+    if (fileHadKeys || haveKeys || this.loadKeysFromVault() !== undefined) {
+      this.persistProvider();
     }
   }
 }
