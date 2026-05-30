@@ -28,6 +28,37 @@ export function isSafeCompanyId(companyId: string): boolean {
   return /^[A-Za-z0-9._-]{1,60}$/.test(companyId);
 }
 
+/**
+ * Returns true only for a public, brand-style hostname that is safe to fetch a
+ * logo from. The caller's hostname regex (`^[a-z0-9-]+(\.[a-z0-9-]+)+$`) still
+ * lets through raw IPs and internal names — `127.0.0.1`, `169.254.169.254`
+ * (cloud metadata), `192.168.x.x` / `10.x` / `172.16-31.x` (RFC-1918),
+ * `localhost`, `*.local`. A malicious local browser tab could pass any of those
+ * as `?domain=` and make Hon fetch an internal/link-local host (SSRF, H-1).
+ *
+ * Logo domains are ALWAYS real brand hostnames with an alphabetic TLD
+ * (`interactivebrokers.ca`, `max.co.il`) and never IP literals, so the rule is:
+ *   - the final label must be alphabetic (`\.[a-z]{2,}$`). This rejects every
+ *     IPv4 literal outright (the last octet is digits) including link-local and
+ *     loopback addresses, and anything with a numeric TLD.
+ *   - reject loopback / mDNS names explicitly: `localhost`, `*.local`,
+ *     `*.localdomain` (these have an alpha "TLD" so the rule above misses them).
+ * IPv6 literals can't reach here — they contain `:` which the caller's regex
+ * already rejects — but the alpha-TLD test would also block a bare hex form.
+ */
+export function isPublicLogoDomain(domain: string): boolean {
+  const host = domain.trim().toLowerCase();
+  if (!host) return false;
+  // Final label must be an alphabetic TLD — blocks all raw IPv4 (last octet is
+  // numeric) and numeric-TLD junk.
+  if (!/\.[a-z]{2,}$/.test(host)) return false;
+  // Explicit loopback / mDNS names that survive the alpha-TLD test.
+  if (host === 'localhost' || host === 'localhost.localdomain') return false;
+  if (host.endsWith('.local') || host.endsWith('.localdomain')) return false;
+  if (host.endsWith('.localhost')) return false;
+  return true;
+}
+
 const UA = { 'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' };
 const TIMEOUT_MS = 8000;
 
