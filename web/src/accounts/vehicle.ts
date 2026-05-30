@@ -28,6 +28,9 @@ export interface CarDetails {
   color: string | null;
 }
 
+/** Deep-link to Yad2's price-list page for re-checking a car's market value. */
+export const YAD2_PRICE_LIST = 'https://www.yad2.co.il/price-list';
+
 /** Strip everything but digits from a raw plate input. */
 export function cleanPlate(raw: string): string {
   return raw.replace(/\D/g, '');
@@ -61,9 +64,9 @@ export function carSubline(details: Record<string, unknown> | null): string {
   if (!details) return '';
   const bits: string[] = [];
   const year = details.year;
-  if (typeof year === 'number' && Number.isFinite(year)) bits.push(String(year));
+  if (typeof year === 'number' && Number.isFinite(year) && year > 1900) bits.push(String(year));
   const km = details.km;
-  if (typeof km === 'number' && Number.isFinite(km)) {
+  if (typeof km === 'number' && Number.isFinite(km) && km > 0) {
     bits.push(`${km.toLocaleString('en-US')} km`);
   }
   const color = details.color;

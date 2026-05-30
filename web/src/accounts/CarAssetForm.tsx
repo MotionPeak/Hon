@@ -3,8 +3,8 @@ import { useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { api, ApiError } from '../api';
 import {
-  cleanPlate, isValidPlate, vehicleName, ownershipKey,
-  type VehicleInfo, type Ownership,
+  cleanPlate, isValidPlate, vehicleName, ownershipKey, YAD2_PRICE_LIST,
+  type VehicleInfo, type Ownership, type CarDetails,
 } from './vehicle';
 
 /** Local portal helper, mirroring the one in AccountsView (module-private
@@ -25,8 +25,6 @@ const OWNERSHIP_OPTIONS: { value: Ownership; label: string }[] = [
   { value: 'lease', label: 'Lease' },
   { value: 'rental', label: 'Ex-rental' },
 ];
-
-const YAD2_PRICE_LIST = 'https://www.yad2.co.il/price-list';
 
 /**
  * Add-a-car modal. Plate lookup (GET /vehicle/:plate) autofills a polished
@@ -87,7 +85,7 @@ export function CarAssetForm({ onClose, onSaved }: CarAssetFormProps) {
     if (!name.trim()) { setError("Enter the car's make and model."); return; }
     const v = Number(value);
     if (!Number.isFinite(v) || v <= 0) { setError("Enter the car's current value."); return; }
-    const details = {
+    const details: CarDetails = {
       plate: cleanPlate(plate) || null,
       year: Number(year) || null,
       km: Number(km) || null,

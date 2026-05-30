@@ -5,7 +5,7 @@ import { money } from '../format';
 import type {
   Account, AssetSectionKey, BrokerageOption, Company, Connection, Holding, Loan, ManualAsset,
 } from './types';
-import { carSubline } from './vehicle';
+import { carSubline, YAD2_PRICE_LIST } from './vehicle';
 import { DelayedLoader } from '../ui/DelayedLoader';
 import { SnapTradeBrokeragePicker } from './SnapTradeBrokeragePicker';
 import { PensionPickerStep } from './PensionPickerStep';
@@ -976,7 +976,7 @@ function AssetCard({ asset, callbacks }: { asset: ManualAsset; callbacks: RowCal
             type="button"
             className="mini"
             onClick={() => {
-              window.open('https://www.yad2.co.il/price-list', '_blank');
+              window.open(YAD2_PRICE_LIST, '_blank');
               callbacks.onEditAsset(asset);
             }}
           >
@@ -1324,8 +1324,6 @@ interface CategoryTile {
   leaf?: 'manual-asset' | 'manual-loan';
   /** Static sub-label when the count would be misleading (e.g. SnapTrade). */
   subOverride?: string;
-  /** Disabled until the flow lands in the React app. */
-  comingSoon?: boolean;
 }
 
 const PICKER_TILES: CategoryTile[] = [
@@ -1397,8 +1395,6 @@ function AddConnectionPicker(
               onClick={onClick}
               data-tile={tile.key}
               aria-label={tile.label}
-              disabled={tile.comingSoon}
-              title={tile.comingSoon ? 'Coming soon — use the legacy view for now' : undefined}
             >
               <span className="pc-emoji">{tile.emoji}</span>
               <span className="pc-label">{tile.label}</span>
