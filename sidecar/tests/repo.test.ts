@@ -147,3 +147,35 @@ describe('snaptrade performance-disabled marker', () => {
     expect(repo.getPerformanceDisabledAt('connB')).toBeNull();
   });
 });
+
+describe('applyMerchantRule', () => {
+  it('only flips uncategorized rows, leaving hand-categorized ones intact (H-4)', () => {
+    const { repo } = makeRepo();
+    const conn = repo.createConnection('wolt', 'Wolt');
+    repo.saveScrapeResult(conn.id, [{
+      accountNumber: '1', currency: 'ILS', balance: 0,
+      transactions: [
+        { externalId: 'tx-categorized', date: '2026-05-02', amount: -50, currency: 'ILS', description: 'WOLT' },
+        { externalId: 'tx-uncategorized', date: '2026-05-03', amount: -75, currency: 'ILS', description: 'WOLT' },
+      ],
+    }]);
+
+    // Hand-categorize exactly one of the two WOLT rows. updateTransactionCategory
+    // is the real method the UI uses when the user moves a txn by hand.
+    const handPicked = repo.listTransactions({}).find((t) => t.externalId === 'tx-categorized');
+    expect(handPicked).toBeTruthy();
+    repo.updateTransactionCategory(handPicked!.id, 'Groceries');
+
+    // Apply a merchant rule for WOLT -> Dining.
+    const changed = repo.applyMerchantRule('WOLT', 'Dining');
+
+    // Only the still-uncategorized row should flip; the hand-categorized one stays.
+    expect(changed).toBe(1);
+
+    const rows = repo.listTransactions({});
+    const cat = rows.find((t) => t.externalId === 'tx-categorized');
+    const unc = rows.find((t) => t.externalId === 'tx-uncategorized');
+    expect(cat?.category).toBe('Groceries');
+    expect(unc?.category).toBe('Dining');
+  });
+});

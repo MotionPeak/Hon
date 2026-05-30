@@ -1532,10 +1532,15 @@ export class Repo {
       .run(description, category, new Date().toISOString());
   }
 
-  /** Forces a category onto every transaction with this exact description. */
+  /**
+   * Applies a merchant rule's category to every still-uncategorized
+   * transaction with this exact description. Mirrors applyCategory: the
+   * `AND category IS NULL` guard stops a new/edited rule from clobbering
+   * categories the user set by hand (H-4).
+   */
   applyMerchantRule(description: string, category: string): number {
     return this.db
-      .prepare('UPDATE transactions SET category = ? WHERE description = ?')
+      .prepare('UPDATE transactions SET category = ? WHERE description = ? AND category IS NULL')
       .run(category, description).changes;
   }
 
