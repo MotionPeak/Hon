@@ -169,6 +169,21 @@ describe('OverviewView', () => {
     expect(url).toContain('מקס');
   });
 
+  it('scopes /budget to the current billing cycle (start + end)', async () => {
+    const spy = installFetchMock(mocks());
+    renderOverview();
+    await screen.findByTestId('balance-card');
+    const budgetCall = spy.mock.calls.find(
+      ([input]) => String(input).includes('/api/budget'),
+    );
+    const url = decodeURIComponent(String(budgetCall![0]));
+    // Default monthStartDay = 1 → the current calendar month's bounds.
+    const today = new Date();
+    const start = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`;
+    expect(url).toContain(`start=${start}`);
+    expect(url).toContain('end=');
+  });
+
   it('uses predicted fixed (not posted) for "Expected fixed + essentials"', async () => {
     // One detected ₪3,000 monthly Housing bill (two prior cycles) + ₪2,100
     // essentialSpent → committedDisplay = 5,100, regardless of the budget's

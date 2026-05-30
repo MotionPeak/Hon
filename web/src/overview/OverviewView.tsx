@@ -4,6 +4,7 @@ import { money } from '../format';
 import type { Account, Company } from '../accounts/types';
 import { DelayedLoader } from '../ui/DelayedLoader';
 import { useSettings } from '../settings/useSettings';
+import { currentCycleRange } from '../cycle';
 import type { Transaction } from '../activity/types';
 import type { Category } from '../settings/CategoriesPanel';
 import {
@@ -14,19 +15,24 @@ import { useSplitwise } from '../splitwise/useSplitwise';
 import { OwedToYouCard } from './OwedToYouCard';
 
 /**
- * Builds the `/budget` path with the card-bill exclusion list as repeated
- * `?cardProvider=` params. Bank-side credit-card bill lump sums (e.g. the
- * monthly "מקס איט פיננסים" debit) are already itemised under the card
- * account, so counting them again on the bank side double-counts spending.
- * The engine drops them only when these params are present — the same
- * contract Insights, Activity, and the legacy SPA already use.
+ * Builds the `/budget` query path, scoping it to the user's billing-cycle
+ * window (`start`/`end`) so posted spend, income and essentials match the
+ * cycle — not the calendar month — when monthStartDay ≠ 1. Also appends the
+ * card-bill exclusion list as repeated `cardProvider` params: bank-side
+ * credit-card bill lump sums (e.g. the monthly "מקס איט פיננסים" debit) are
+ * already itemised under the card account, so counting them again on the bank
+ * side double-counts spending. Same contract Insights, Activity, and the
+ * legacy SPA already use.
  */
-function budgetPathFor(cardProviders: string[]): string {
-  if (cardProviders.length === 0) return '/budget';
-  const qs = cardProviders
-    .map((p) => `cardProvider=${encodeURIComponent(p)}`)
-    .join('&');
-  return `/budget?${qs}`;
+function budgetPathFor(
+  cardProviders: string[],
+  range: { start: string; end: string },
+): string {
+  const params = new URLSearchParams();
+  params.set('start', range.start);
+  params.set('end', range.end);
+  for (const p of cardProviders) params.append('cardProvider', p);
+  return `/budget?${params.toString()}`;
 }
 
 interface CurrencyTotal { currency: string; total: number; accountCount: number }
@@ -70,11 +76,13 @@ export function OverviewView() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [recurring, setRecurring] = useState<RecurringData | null>(null);
 
-  // A plain string, stable by VALUE across renders (same providers → same
-  // path), so the effect refetches only when the exclusion list actually
-  // changes — not on every re-render an array dependency would trigger.
+  // A plain string, stable by VALUE across renders (same providers + same
+  // cycle → same path), so the effect refetches only when the exclusion list
+  // or the billing cycle actually changes — not on every re-render an array
+  // dependency would trigger.
   const budgetPath = budgetPathFor(
     settings.hideCardTotals ? settings.cardProviders : [],
+    currentCycleRange(settings.monthStartDay),
   );
 
   useEffect(() => {

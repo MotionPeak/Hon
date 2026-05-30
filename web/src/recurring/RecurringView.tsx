@@ -9,7 +9,7 @@ import type { Category } from '../settings/CategoriesPanel';
 import type { Transaction } from '../activity/types';
 import {
   type Frequency, type FreqOrIgnore, type MerchantRow, type RecurringData,
-  detectMerchants, cyclesBetween, cycleStatus,
+  detectMerchants, cyclesBetween, cycleStatus, expectedFixedThisCycle,
 } from './helpers';
 
 function fmtDate(dateStr: string | null): string {
@@ -119,6 +119,10 @@ export function RecurringView() {
   });
 
   const grandMonthly = rows.reduce((s, r) => s + r.monthlyShare, 0);
+  // The full charges actually due THIS cycle (bimonthly counted full when on-
+  // cycle, ₪0 off-cycle) — the same number the Overview "Expected fixed +
+  // essentials" headline uses. Differs from the smoothed monthly equivalent.
+  const dueThisCycle = expectedFixedThisCycle(rows, settings.monthStartDay);
   const catByName = new Map<string, Category>();
   for (const c of data.categories) catByName.set(c.name, c);
   const FREQ_LABEL: Record<Frequency, string> = {
@@ -133,10 +137,17 @@ export function RecurringView() {
         appeared in 2+ billing cycles, or a single charge you've told Hon
         bills regularly. Hover the status pill for details.
       </p>
-      <div data-testid="recurring-total" className="recurring-total">
-        <span className="emoji">📆</span>
-        <span>Expected monthly</span>
-        <b>{money(grandMonthly, 'ILS')}</b>
+      <div className="recurring-totals">
+        <div data-testid="recurring-due" className="recurring-total recurring-due">
+          <span className="emoji">🎯</span>
+          <span>Due this cycle</span>
+          <b>{money(dueThisCycle, 'ILS')}</b>
+        </div>
+        <div data-testid="recurring-total" className="recurring-total recurring-total-sub">
+          <span className="emoji">📆</span>
+          <span>Expected monthly</span>
+          <b>{money(grandMonthly, 'ILS')}</b>
+        </div>
       </div>
       <div className="recurring-sections">
         {catOrder.map((catName) => {

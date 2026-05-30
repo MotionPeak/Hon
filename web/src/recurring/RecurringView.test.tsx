@@ -178,6 +178,30 @@ describe('RecurringView — read-only', () => {
     const strip = await screen.findByTestId('recurring-total');
     expect(within(strip).getByText(/4,?000/)).toBeInTheDocument();
   });
+
+  it('shows a "Due this cycle" total at the full charge, not the smoothed monthly', async () => {
+    installFetchMock({
+      'GET /api/transactions': () => ({
+        transactions: [
+          { id: 't1', accountId: 'a', externalId: 'x1', date: `${month(-2)}-15`,
+            processedDate: null, amount: -4000, currency: 'ILS',
+            description: 'Rent', memo: null, kind: null, status: null,
+            category: 'Housing', createdAt: '2025-01-01' },
+        ],
+      }),
+      'GET /api/categories': () => CATEGORIES,
+      ...EMPTY_HELPERS,
+      // Force bimonthly so a single charge counts and due (full) != monthly (half).
+      'GET /api/merchant-frequencies': () => ({ frequencies: { rent: 'bimonthly' } }),
+    });
+    renderView();
+    // Due this cycle = full charge (4,000); it's due (last billed 2 cycles ago).
+    const due = await screen.findByTestId('recurring-due');
+    expect(within(due).getByText(/4,?000/)).toBeInTheDocument();
+    // Expected monthly stays the smoothed half (2,000).
+    const monthly = screen.getByTestId('recurring-total');
+    expect(within(monthly).getByText(/2,?000/)).toBeInTheDocument();
+  });
 });
 
 const TWO_RENT = {
