@@ -1767,6 +1767,9 @@ app.patch('/transactions/:id/loan', async (req, reply) => {
   const { id } = req.params as { id: string };
   const body = (req.body ?? {}) as { loanId?: string | null };
   const loanId = body.loanId ?? null;
+  if (!repo.getTransaction(id)) {
+    return reply.code(404).send({ error: 'transaction not found' });
+  }
   if (loanId !== null && !repo.getLoan(loanId)) {
     return reply.code(404).send({ error: 'loan not found' });
   }
