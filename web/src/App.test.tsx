@@ -13,8 +13,9 @@ const HEALTH = {
 };
 
 const EMPTY = {
+  // Engine wraps the payload in a `summary` envelope (OverviewView unwraps it).
   'GET /api/summary': () => ({
-    byCurrency: [], accountCount: 0, connectionCount: 0, netWorthILS: 0,
+    summary: { byCurrency: [], accountCount: 0, connectionCount: 0, netWorthILS: 0 },
   }),
   'GET /api/health': () => HEALTH,
   'GET /api/companies': () => ({ companies: [] }),

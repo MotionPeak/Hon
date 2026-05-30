@@ -133,7 +133,9 @@ const RECURRING_DEFAULT = {
 
 function mocks(overrides: Record<string, unknown> = {}): Record<string, () => unknown> {
   return {
-    'GET /api/summary': () => FULL_SUMMARY,
+    // The engine wraps the summary in a `summary` envelope (legacy unwraps
+    // `r.summary`); the mock must match that contract.
+    'GET /api/summary': () => ({ summary: FULL_SUMMARY }),
     'GET /api/budget': () => FULL_BUDGET,
     'GET /api/companies': () => COMPANIES,
     'GET /api/accounts': () => ACCOUNTS,
@@ -299,7 +301,7 @@ describe('OverviewView', () => {
 
   it('shows the empty state when there are no accounts or budget data', async () => {
     installFetchMock(mocks({
-      'GET /api/summary': () => EMPTY_SUMMARY,
+      'GET /api/summary': () => ({ summary: EMPTY_SUMMARY }),
       'GET /api/budget': () => EMPTY_BUDGET,
       'GET /api/companies': () => ({ companies: [] }),
       'GET /api/accounts': () => ({ accounts: [] }),

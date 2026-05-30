@@ -94,12 +94,14 @@ export function OverviewView() {
 
   useEffect(() => {
     Promise.all([
-      api<Summary>('/summary'),
+      // The engine wraps it as `{ summary: {...} }` (the legacy SPA unwraps
+      // `r.summary`); reading it flat left net worth permanently "—".
+      api<{ summary: Summary }>('/summary'),
       api<BudgetResponse>(budgetPath),
       api<{ companies: Company[] }>('/companies').catch(() => ({ companies: [] })),
       api<{ accounts: Account[] }>('/accounts').catch(() => ({ accounts: [] })),
     ]).then(([s, b, c, a]) => {
-      setSummary(s);
+      setSummary(s.summary);
       setBudget(b);
       setCompanies(c.companies ?? []);
       setAccounts(a.accounts ?? []);
