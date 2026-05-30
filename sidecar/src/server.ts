@@ -146,17 +146,27 @@ const webAppHtml = (() => {
 // --- HTTP server ------------------------------------------------------------
 const app = Fastify({ logger: false });
 
-// Every request must carry the bearer token the app generated this launch.
-// The web app page itself is exempt (it holds no data); its scripts then
-// authenticate every API call with the token passed in the page URL.
+// GET-only URL prefixes exempt from the bearer token, alongside the exact
+// path `/` (the web app shell). All three carry no private data:
+//  - `/`               the SPA page itself; its scripts then authenticate
+//                      every API call with the token passed in the page URL.
+//  - `/logo/`          institution logos, loaded by <img> tags that cannot
+//                      send an Authorization header.
+//  - `/snaptrade/done` the post-connection landing page SnapTrade opens in
+//                      a browser, which carries no token.
+const PUBLIC_ROUTE_PREFIXES = ['/logo/', '/snaptrade/done'];
+
+/** True for the small set of GET routes that are exempt from the token. */
+function isPublicRoute(method: string, url: string): boolean {
+  if (method !== 'GET') return false;
+  if (url === '/') return true;
+  return PUBLIC_ROUTE_PREFIXES.some((prefix) => url.startsWith(prefix));
+}
+
+// Every request must carry the bearer token the app generated this launch,
+// except for the public routes enumerated above.
 app.addHook('onRequest', async (req, reply) => {
-  if (req.method === 'GET' && req.url === '/') return;
-  // Institution logos carry no private data and are loaded by <img> tags,
-  // which cannot send an Authorization header — so they are exempt.
-  if (req.method === 'GET' && req.url.startsWith('/logo/')) return;
-  // The post-connection landing page is opened by SnapTrade in a browser,
-  // which carries no token. It is a static page with no private data.
-  if (req.method === 'GET' && req.url.startsWith('/snaptrade/done')) return;
+  if (isPublicRoute(req.method, req.url)) return;
   if (token && req.headers.authorization !== `Bearer ${token}`) {
     return reply.code(401).send({ error: 'unauthorized' });
   }
