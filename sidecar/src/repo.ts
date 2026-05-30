@@ -1769,6 +1769,22 @@ export class Repo {
     this.db.prepare('DELETE FROM meta WHERE key = ?').run(key);
   }
 
+  private perfDisabledKey(connectionId: string): string {
+    return `snaptrade:perf-disabled:${connectionId}`;
+  }
+
+  /** ISO timestamp of when SnapTrade performance was last seen disabled for
+   *  this connection, or null if currently considered available. */
+  getPerformanceDisabledAt(connectionId: string): string | null {
+    return this.getMeta(this.perfDisabledKey(connectionId)) ?? null;
+  }
+
+  /** Records (ISO string) or clears (null) the performance-disabled marker. */
+  setPerformanceDisabled(connectionId: string, when: string | null): void {
+    if (when === null) this.deleteMeta(this.perfDisabledKey(connectionId));
+    else this.setMeta(this.perfDisabledKey(connectionId), when);
+  }
+
   getCredentialBlob(connectionId: string): string | undefined {
     const row = this.db
       .prepare('SELECT blob FROM credentials WHERE connection_id = ?')
