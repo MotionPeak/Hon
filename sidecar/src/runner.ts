@@ -191,7 +191,7 @@ export class ScrapeRunner {
       };
       if (isSnapTrade(args.companyId)) {
         log.info('dispatch', { runner: 'snaptrade' });
-        outcome = await runSnapTradeSync(args.credentials, this.vault, (message) => {
+        outcome = await runSnapTradeSync(args.credentials, this.vault, {}, (message) => {
           status.message = message;
           log.info('snaptrade.progress', { message });
         });

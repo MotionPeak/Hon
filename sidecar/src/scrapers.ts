@@ -131,6 +131,10 @@ export interface ScrapeOutcome {
   errorMessage?: string;
   /** Optional brokerage performance series, captured during a SnapTrade sync. */
   brokeragePerformance?: BrokeragePerformanceData;
+  /** True when SnapTrade's performance feature is disabled for this plan
+   *  (every reporting range returned 403 code 1141). The runner persists
+   *  this so the UI can degrade and future syncs can skip the dead calls. */
+  performanceDisabled?: boolean;
   /** Loans pulled from the bank's loans page (FIBI-group today). The runner
    *  upserts these into the loans table keyed by the connection + bank id. */
   scrapedLoans?: ScrapedLoan[];
