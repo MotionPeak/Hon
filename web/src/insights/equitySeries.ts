@@ -6,7 +6,8 @@
 //
 //   1. performance.totalEquity — the broker's own reported equity timeline
 //      (SnapTrade reports, Meitav GetTsuot). Connection-scoped; the bulk of
-//      real long-range history. If ANY performance points exist, they win.
+//      real long-range history. Provides the historical spine; extended by the
+//      snapshot tiers for dates after the broker's last reported point.
 //   2. holdingSnapshots — per-(account,symbol) price-history backfill
 //      (Yahoo/Maya), forward-filled so a missing day doesn't tank the total.
 //   3. snapshots — Hon's per-sync account-level fallback.
@@ -116,10 +117,8 @@ export function buildEquitySeries(input: BuildEquityInput): SeriesPoint[] {
 
   // --- Tier 1: broker-reported performance timeline ----------------------
   const fromPerf = new Map<string, number>();
-  let havePerformance = false;
   for (const p of scopedPerf) {
     const pts = p.data?.totalEquity ?? [];
-    if (pts.length) havePerformance = true;
     const pcur = p.data?.currency ?? 'USD';
     const inception = inceptionFor(p.connectionId);
     for (const pt of pts) {
@@ -129,11 +128,9 @@ export function buildEquitySeries(input: BuildEquityInput): SeriesPoint[] {
       fromPerf.set(pt.date, (fromPerf.get(pt.date) ?? 0) + v);
     }
   }
-  const brokerSeries: SeriesPoint[] = havePerformance
-    ? [...fromPerf.entries()]
-        .sort((a, b) => a[0].localeCompare(b[0]))
-        .map(([date, value]) => ({ date, value }))
-    : [];
+  const brokerSeries: SeriesPoint[] = [...fromPerf.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([date, value]) => ({ date, value }));
 
   // --- Tier 2: per-holding snapshots, forward-filled ---------------------
   let snapshotSeries: SeriesPoint[] = [];
