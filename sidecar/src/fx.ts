@@ -10,6 +10,12 @@ interface CachedRates {
 const TTL_MS = 6 * 60 * 60 * 1000;
 let cache: CachedRates | null = null;
 
+// In-flight fetch dedup (H-9): when several callers ask for rates before the
+// first network request resolves, they all await this single promise instead
+// of each firing their own fetch (wasteful + races the cache write). Cleared
+// in `finally` so a failed fetch doesn't pin a rejected promise forever.
+let inflight: Promise<Record<string, number>> | null = null;
+
 function normalizeCurrency(currency: string): string {
   const code = currency.toUpperCase();
   return code === 'NIS' ? 'ILS' : code;
@@ -18,21 +24,41 @@ function normalizeCurrency(currency: string): string {
 async function loadRates(): Promise<Record<string, number>> {
   if (cache && Date.now() - cache.fetchedAt < TTL_MS) return cache.ilsPerUnit;
 
-  // Frankfurter migrated api.frankfurter.app → api.frankfurter.dev/v1 in
-  // 2026; the old host now only 301-redirects. Hit the canonical endpoint
-  // directly so FX doesn't silently die if that redirect ever stops. Same
-  // response shape: { rates: { <code>: <units per 1 base> } }.
-  const res = await fetch('https://api.frankfurter.dev/v1/latest?base=ILS');
-  if (!res.ok) throw new Error(`FX HTTP ${res.status}`);
-  const data = (await res.json()) as { rates: Record<string, number> };
+  // A request is already on the wire — share it rather than racing a second.
+  if (inflight) return inflight;
 
-  // data.rates[X] = units of X per 1 ILS — invert to get ILS per 1 unit of X.
-  const ilsPerUnit: Record<string, number> = { ILS: 1 };
-  for (const [code, perIls] of Object.entries(data.rates)) {
-    if (perIls > 0) ilsPerUnit[code] = 1 / perIls;
+  inflight = (async () => {
+    // Frankfurter migrated api.frankfurter.app → api.frankfurter.dev/v1 in
+    // 2026; the old host now only 301-redirects. Hit the canonical endpoint
+    // directly so FX doesn't silently die if that redirect ever stops. Same
+    // response shape: { rates: { <code>: <units per 1 base> } }.
+    const res = await fetch('https://api.frankfurter.dev/v1/latest?base=ILS');
+    if (!res.ok) throw new Error(`FX HTTP ${res.status}`);
+    const data = (await res.json()) as { rates: Record<string, number> };
+
+    // data.rates[X] = units of X per 1 ILS — invert to get ILS per 1 unit of X.
+    const ilsPerUnit: Record<string, number> = { ILS: 1 };
+    for (const [code, perIls] of Object.entries(data.rates)) {
+      if (perIls > 0) ilsPerUnit[code] = 1 / perIls;
+    }
+    cache = { fetchedAt: Date.now(), ilsPerUnit };
+    return ilsPerUnit;
+  })();
+
+  try {
+    return await inflight;
+  } finally {
+    inflight = null;
   }
-  cache = { fetchedAt: Date.now(), ilsPerUnit };
-  return ilsPerUnit;
+}
+
+/**
+ * Test-only: clears the in-process rate cache and any in-flight fetch so each
+ * test starts cold. Not referenced by production code paths.
+ */
+export function __resetFxCache(): void {
+  cache = null;
+  inflight = null;
 }
 
 /**

@@ -281,6 +281,9 @@ export class LlmManager {
 
   private abortController: AbortController | null = null;
   private llama: Llama | null = null;
+  // In-flight load dedup (H-9): concurrent load() callers share this single
+  // promise instead of each kicking off a fresh (expensive) model load.
+  private loadingPromise: Promise<void> | null = null;
   private model: LlamaModel | null = null;
   private modelPath: string | null = null;
 
@@ -540,11 +543,22 @@ export class LlmManager {
     if (this.status.state === 'ready' && this.model) {
       return;
     }
+    // Concurrent callers share the in-flight load rather than each starting
+    // their own. Cleared in `finally` so a failed load can be retried.
+    if (this.loadingPromise) return this.loadingPromise;
+    this.loadingPromise = this._load().finally(() => {
+      this.loadingPromise = null;
+    });
+    return this.loadingPromise;
+  }
+
+  private async _load(): Promise<void> {
     this.status.state = 'loading';
     this.status.message = 'Loading the model into memory…';
     try {
       this.llama ??= await getLlama();
-      this.model = await this.llama.loadModel({ modelPath: this.modelPath });
+      // Non-null: public load() already threw if modelPath was null/missing.
+      this.model = await this.llama.loadModel({ modelPath: this.modelPath! });
       this.status.state = 'ready';
       this.status.message = `${this.status.modelName ?? 'Model'} ready.`;
     } catch (err) {
