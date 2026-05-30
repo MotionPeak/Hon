@@ -309,21 +309,6 @@ function BankProjection({
   const sign = up ? '+' : '−';
   const dcls = up ? 'good' : 'bad';
 
-  const Detail = ({ label, amount, tone }: {
-    label: string; amount: number; tone: 'good' | 'bad';
-  }) => {
-    const dSign = amount === 0 ? '' : tone === 'good' ? '+' : '−';
-    const toneClass = amount === 0 ? '' : tone;
-    return (
-      <div className="balance-detail">
-        <span>{label}</span>
-        <span className={`balance-detail-amt ${toneClass}`}>
-          {dSign}{money(Math.abs(amount), currency)}
-        </span>
-      </div>
-    );
-  };
-
   return (
     <div className="balance-sub" data-testid="bank-projection">
       <div className="balance-sub-head">Projected bank balance at end of cycle</div>
@@ -340,14 +325,29 @@ function BankProjection({
             {money(bankNow, currency)}
           </span>
         </div>
-        <Detail label="Income expected this cycle" amount={expectedIncome} tone="good" />
+        <Detail label="Income expected this cycle" amount={expectedIncome} tone="good" currency={currency} />
         {owed > 0 && (
-          <Detail label="Owed to you (Splitwise)" amount={owed} tone="good" />
+          <Detail label="Owed to you (Splitwise)" amount={owed} tone="good" currency={currency} />
         )}
-        <Detail label="Fixed + essentials this cycle" amount={fixedEss} tone="bad" />
-        <Detail label="Variable spent so far" amount={cycleVariable} tone="bad" />
-        <Detail label="Set asides (piggies)" amount={cyclePiggy} tone="bad" />
+        <Detail label="Fixed + essentials this cycle" amount={fixedEss} tone="bad" currency={currency} />
+        <Detail label="Variable spent so far" amount={cycleVariable} tone="bad" currency={currency} />
+        <Detail label="Set asides (piggies)" amount={cyclePiggy} tone="bad" currency={currency} />
       </div>
+    </div>
+  );
+}
+
+function Detail({ label, amount, tone, currency }: {
+  label: string; amount: number; tone: 'good' | 'bad'; currency: string;
+}) {
+  const dSign = amount === 0 ? '' : tone === 'good' ? '+' : '−';
+  const toneClass = amount === 0 ? '' : tone;
+  return (
+    <div className="balance-detail">
+      <span>{label}</span>
+      <span className={`balance-detail-amt ${toneClass}`}>
+        {dSign}{money(Math.abs(amount), currency)}
+      </span>
     </div>
   );
 }
