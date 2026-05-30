@@ -42,4 +42,32 @@ describe('SnapTradeBrokeragePicker', () => {
     render(<SnapTradeBrokeragePicker brokerages={noIbkr} onPick={() => {}} />);
     expect(document.querySelector('[data-pre-focused="true"]')).toBeNull();
   });
+
+  it('filters the list as the user types (case-insensitive substring)', async () => {
+    const user = userEvent.setup();
+    render(<SnapTradeBrokeragePicker brokerages={SAMPLE} onPick={() => {}} />);
+    await user.type(screen.getByRole('searchbox', { name: /search brokerages/i }), 'schw');
+    expect(screen.getByRole('button', { name: /Charles Schwab/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Interactive Brokers/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Robinhood/i })).toBeNull();
+  });
+
+  it('shows the no-match hint when the query matches nothing', async () => {
+    const user = userEvent.setup();
+    render(<SnapTradeBrokeragePicker brokerages={SAMPLE} onPick={() => {}} />);
+    await user.type(screen.getByRole('searchbox', { name: /search brokerages/i }), 'zzz');
+    expect(screen.getByText(/no brokerages/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Charles Schwab/i })).toBeNull();
+  });
+
+  it('clearing the query restores the full list', async () => {
+    const user = userEvent.setup();
+    render(<SnapTradeBrokeragePicker brokerages={SAMPLE} onPick={() => {}} />);
+    const box = screen.getByRole('searchbox', { name: /search brokerages/i });
+    await user.type(box, 'schw');
+    expect(screen.queryByRole('button', { name: /Robinhood/i })).toBeNull();
+    await user.click(screen.getByRole('button', { name: /clear search/i }));
+    expect(screen.getByRole('button', { name: /Robinhood/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Interactive Brokers/i })).toBeInTheDocument();
+  });
 });

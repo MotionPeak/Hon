@@ -1904,6 +1904,9 @@ button.bh-row:active { transform: none; }        /* suppress global scale(.97) *
 }
 .act-search-clear:hover { color: var(--text); }
 
+/* SnapTrade brokerage picker — search pill sits full-width above the list. */
+.brk-search { flex: 1 1 auto; margin-bottom: 10px; }
+
 .activity-view { max-width: 1200px; }
 
 /* Umbrella sections (Income / Essentials / Fixed / Variable) stack on the
