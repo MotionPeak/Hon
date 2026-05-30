@@ -42,7 +42,7 @@ import {
   refreshSplitwise,
   recomputePaidStates,
 } from './splitwise.js';
-import { getLogo } from './logos.js';
+import { getLogo, isSafeCompanyId } from './logos.js';
 import { Vault } from './vault.js';
 import { LlmManager } from './llm.js';
 import { Categorizer, CATEGORIES } from './categorize.js';
@@ -151,7 +151,17 @@ const app = Fastify({ logger: false });
 //  - `/`               the SPA page itself; its scripts then authenticate
 //                      every API call with the token passed in the page URL.
 //  - `/logo/`          institution logos, loaded by <img> tags that cannot
-//                      send an Authorization header.
+//                      send an Authorization header. NOTE: the H-1 review
+//                      asked to additionally token-gate /logo/ via a ?t=
+//                      query param. That is DEFERRED: the legacy SPA builds
+//                      bare /logo/... <img> URLs in several places (bank
+//                      picker, brokerage tiles, voucher tiles) with no token
+//                      plumbing, so threading ?t= through all of them is broad
+//                      and risky. The path-traversal + SSRF holes — the bulk
+//                      of H-1 — are already closed by isSafeCompanyId() and the
+//                      strict ?domain= hostname check in the /logo route. The
+//                      route serves only public favicons (no private data), so
+//                      leaving it token-exempt is low risk in the interim.
 //  - `/snaptrade/done` the post-connection landing page SnapTrade opens in
 //                      a browser, which carries no token.
 const PUBLIC_ROUTE_PREFIXES = ['/logo/', '/snaptrade/done'];
@@ -221,7 +231,19 @@ app.get('/connections', async (_req, reply) => {
 // the scraper catalog (e.g. Interactive Brokers).
 app.get('/logo/:companyId', async (req, reply) => {
   const { companyId } = req.params as { companyId: string };
+  // companyId is interpolated into a cache filename inside getLogo, so reject
+  // anything that could traverse out of the logos directory (H-1). Fail with
+  // 400 here so a bad id is an explicit client error, not a silent 404.
+  if (!isSafeCompanyId(companyId)) {
+    return reply.code(400).send({ error: 'bad companyId' });
+  }
   const q = req.query as { domain?: string };
+  // `?domain=` is required for SnapTrade brokerages and voucher providers,
+  // which are not in the scraper catalog. It is the host Hon will fetch a
+  // favicon from, so it is the SSRF-sensitive input: constrain it to a strict
+  // hostname shape (labels of [a-z0-9-] joined by dots, no scheme, no path, no
+  // port, no userinfo, no `..`). The catalog domain is trusted and used as the
+  // fallback when no override is supplied.
   let domain = q.domain;
   if (domain && !/^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(domain)) {
     return reply.code(400).send({ error: 'bad domain' });

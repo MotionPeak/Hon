@@ -11,6 +11,23 @@ export interface CachedLogo {
   body: Buffer;
 }
 
+/**
+ * Validates a companyId before it is interpolated into a logo cache filename
+ * (`<dataDir>/logos/<companyId>.img`). Without this an id like
+ * `../../etc/passwd` would escape the logos directory (path traversal) and a
+ * crafted id could poison the on-disk cache.
+ *
+ * The charset intentionally allows dots and hyphens because legitimate ids
+ * include `brk-<domain>` (e.g. `brk-interactivebrokers.ca`) and `voucher-<id>`.
+ * To stay safe while allowing dots, any `..` sequence is rejected outright —
+ * that is the only way a dot can be used to climb directories. Slashes and
+ * backslashes are excluded by the charset, so a single isolated dot is inert.
+ */
+export function isSafeCompanyId(companyId: string): boolean {
+  if (companyId.includes('..')) return false;
+  return /^[A-Za-z0-9._-]{1,60}$/.test(companyId);
+}
+
 const UA = { 'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' };
 const TIMEOUT_MS = 8000;
 
@@ -107,6 +124,9 @@ export async function getLogo(
   companyId: string,
   domain: string,
 ): Promise<CachedLogo | null> {
+  // Fail closed: never let an unvalidated id reach the filesystem path below.
+  if (!isSafeCompanyId(companyId)) return null;
+
   if (memCache.has(companyId)) return memCache.get(companyId) ?? null;
 
   const dir = logosDir(dataDir);
