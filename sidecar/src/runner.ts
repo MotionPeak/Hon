@@ -60,6 +60,14 @@ export interface RunStatus {
  * starts a scrape, then polls getStatus() until it is done.
  */
 export class ScrapeRunner {
+  // How long to wait for the user to POST the OTP before giving up. Without
+  // this, requestOtp()'s promise never settles when the user walks away —
+  // the underlying Puppeteer browser stays open forever, leaking a Chrome
+  // process per abandoned 2FA prompt. On timeout we REJECT so the scraper's
+  // own error path (and execute()'s catch → finish('error', …)) closes the
+  // browser and tears the run down.
+  private static readonly OTP_TIMEOUT_MS = 5 * 60_000;
+
   private readonly runs = new Map<string, RunStatus>();
   private readonly otpResolvers = new Map<string, (code: string) => void>();
   private readonly debugDir: string;
@@ -134,13 +142,31 @@ export class ScrapeRunner {
     }
   }
 
-  /** Called by the scraper when it needs a 2FA code; resolves when one arrives. */
+  /**
+   * Called by the scraper when it needs a 2FA code; resolves when one arrives.
+   *
+   * Rejects with `otp.timeout` if the user never submits a code within
+   * OTP_TIMEOUT_MS. The rejection bubbles up through the scraper's
+   * `await getOtp()` and out to execute()'s catch, which calls
+   * finish('error', …) and lets the scraper close its Puppeteer browser —
+   * otherwise an abandoned prompt would pin an open Chrome forever.
+   */
   private requestOtp(status: RunStatus): Promise<string> {
     runnerLog.info('otp.requested', { runId: status.runId, connectionId: status.connectionId });
-    return new Promise<string>((resolve) => {
+    return new Promise<string>((resolve, reject) => {
       status.status = 'needs-otp';
       status.message = 'Waiting for the verification code…';
+      const timer = setTimeout(() => {
+        this.otpResolvers.delete(status.runId);
+        runnerLog.warn('otp.timeout', {
+          runId: status.runId,
+          connectionId: status.connectionId,
+          waitedMs: ScrapeRunner.OTP_TIMEOUT_MS,
+        });
+        reject(new Error('otp.timeout'));
+      }, ScrapeRunner.OTP_TIMEOUT_MS);
       this.otpResolvers.set(status.runId, (code) => {
+        clearTimeout(timer);
         status.status = 'running';
         status.message = 'Submitting the verification code…';
         runnerLog.info('otp.submitted', {
