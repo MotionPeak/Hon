@@ -79,6 +79,8 @@ export function OverviewView() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [recurring, setRecurring] = useState<RecurringData | null>(null);
+  // Bumped after the budget editor saves, to re-run the /budget fetch below.
+  const [refreshKey, setRefreshKey] = useState(0);
 
   // A plain string, stable by VALUE across renders (same providers + same
   // cycle → same path), so the effect refetches only when the exclusion list
@@ -123,7 +125,7 @@ export function OverviewView() {
         cancelled: sub.cancelled ?? {},
       });
     }).catch(() => setRecurring(null));
-  }, [budgetPath]);
+  }, [budgetPath, refreshKey]);
 
   if (summary === null) return <DelayedLoader />;
 
@@ -194,7 +196,15 @@ export function OverviewView() {
         <NetWorthCard summary={summary} />
         {v && (
           <div className="ov-grid">
-            <SpendingCard cats={spend.cats} total={spend.total} changePct={spendChangePct} />
+            <SpendingCard
+              cats={spend.cats}
+              total={spend.total}
+              changePct={spendChangePct}
+              transactions={recurring?.transactions ?? []}
+              accounts={accounts}
+              monthStartDay={settings.monthStartDay}
+              isExcluded={isExcluded}
+            />
             <BudgetCard
               variable={v}
               essentials={essentials}
@@ -203,6 +213,7 @@ export function OverviewView() {
               totalSpent={spend.total}
               currency={budget!.currency}
               monthStartDay={settings.monthStartDay}
+              onSaved={() => setRefreshKey((k) => k + 1)}
             />
           </div>
         )}

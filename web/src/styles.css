@@ -3299,3 +3299,70 @@ button.bh-row:active { transform: none; }        /* suppress global scale(.97) *
 .bgt-left.ok { color: var(--green); }
 .bgt-left.warn { color: var(--amber); }
 .bgt-left.over { color: var(--red); }
+
+/* --- Category drill-in modal (slice / legend click) -------------------- */
+.drill-head { display: flex; align-items: center; gap: 12px; margin: -2px 0 14px; }
+.drill-em { width: 38px; height: 38px; flex: 0 0 38px; border-radius: 11px;
+  display: flex; align-items: center; justify-content: center; font-size: 19px;
+  box-shadow: inset 0 0 0 1px var(--hairline); }
+.drill-h-main { flex: 1; min-width: 0; }
+.drill-h-cat { font: 800 17px/1.1 ui-rounded, "SF Pro Rounded", system-ui;
+  margin-bottom: 2px; color: var(--text); }
+.drill-h-sub { font-size: 11.5px; color: var(--faint); }
+.drill-h-total { font: 800 18px/1 ui-rounded, "SF Pro Rounded", system-ui;
+  color: var(--text); font-variant-numeric: tabular-nums; }
+.drill-list { max-height: 56vh; overflow-y: auto; margin: 0 -4px;
+  border-top: 1px solid var(--hairline); padding-top: 4px; }
+.drill-row { display: flex; align-items: center; gap: 10px; padding: 9px 4px;
+  border-bottom: 1px solid var(--hairline);
+  animation: drill-row-in .35s cubic-bezier(.2,.8,.2,1) both; }
+.drill-row:last-child { border-bottom: 0; }
+.drill-main { flex: 1; min-width: 0; }
+.drill-name { font-size: 13.5px; font-weight: 600; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.drill-sub { font-size: 11px; color: var(--faint); margin-top: 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.drill-amt { font: 700 14px/1 ui-rounded, "SF Pro Rounded", system-ui;
+  color: var(--text); font-variant-numeric: tabular-nums; }
+@keyframes drill-row-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* --- Budget editor modal rows (bm-) ------------------------------------ */
+.bm-row { display: flex; align-items: center; gap: 11px; padding: 10px 0;
+  border-top: 1px solid var(--hairline); }
+.bm-row:first-of-type { border-top: 0; }
+.bm-ico { width: 32px; height: 32px; flex: none; border-radius: 9px;
+  display: flex; align-items: center; justify-content: center; font-size: 16px; }
+.bm-info { flex: 1; min-width: 0; }
+.bm-name { font-size: 13.5px; font-weight: 600; color: var(--text); }
+.bm-spent { font-size: 11.5px; color: var(--faint); margin-top: 1px; }
+.bm-spent.over { color: var(--red); }
+.bm-spent b { color: var(--text); font-weight: 700; }
+.bm-toggle { display: flex; align-items: flex-start; gap: 7px; margin-top: 6px;
+  font-size: 11.5px; color: var(--muted); cursor: pointer; line-height: 1.4; }
+.bm-toggle input { width: 14px; height: 14px; margin-top: 2px;
+  flex: 0 0 auto; accent-color: var(--accent); cursor: pointer; }
+.bm-max-btn { padding: 5px 10px; border-radius: 7px;
+  border: 1px solid var(--hairline-2); background: var(--card-hi);
+  color: var(--muted); cursor: pointer; font-size: 11px; font-weight: 700;
+  letter-spacing: 0.04em; text-transform: uppercase; flex: none;
+  transition: border-color .14s, color .14s, background-color .14s; }
+.bm-max-btn:hover { border-color: var(--indigo); color: var(--text);
+  background: var(--indigo-soft); }
+.bm-input { position: relative; width: 116px; flex: none; }
+.bm-input .bm-cur { position: absolute; left: 10px; top: 50%;
+  transform: translateY(-50%); color: var(--faint); font-size: 13px;
+  pointer-events: none; }
+.bm-input input { padding-left: 22px; text-align: right;
+  font-variant-numeric: tabular-nums; width: 100%; }
+.bm-summary { display: flex; justify-content: space-between;
+  padding: 11px 13px; margin-bottom: 6px; border-radius: 12px;
+  background: var(--card-hi); font-size: 13px; font-weight: 700; color: var(--text); }
+.bm-summary span:last-child { font-variant-numeric: tabular-nums; }
+.bm-var { padding: 12px 13px; border-radius: 12px; background: var(--card-hi); }
+.bm-var-amt { font: 800 21px/1 ui-rounded, "SF Pro Rounded", system-ui;
+  color: var(--text); font-variant-numeric: tabular-nums; }
+.bm-var-note { font-size: 12px; color: var(--muted); line-height: 1.5;
+  margin-top: 5px; }

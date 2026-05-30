@@ -2,6 +2,9 @@ import { useState } from 'react';
 import { money, moneyShort } from '../format';
 import type { PieCat } from './spend';
 import { buildSlices } from './pieGeometry';
+import { CategoryDrillModal } from './CategoryDrillModal';
+import type { Transaction } from '../activity/types';
+import type { Account } from '../accounts/types';
 
 /** CSS custom properties live on the slice style for the hover-lift transform
  *  (`--mx` / `--my`); the standard CSSProperties type rejects `--*` keys. */
@@ -19,16 +22,25 @@ interface SpendingCardProps {
   total: number;
   /** % spend vs last cycle, for the "↓ N% vs last month" pill; null hides it. */
   changePct: number | null;
+  /** Backing data for the click-to-drill modal (txn list per category). */
+  transactions: Transaction[];
+  accounts: Account[];
+  monthStartDay: number;
+  isExcluded: (t: Transaction) => boolean;
 }
 
 /**
  * "This month" card: total ILS spend, a month-over-month trend pill, and a
  * donut of where the money went with a per-category legend. Hovering a slice
- * or legend row swaps the donut centre from the total to that category. Mirrors
- * the legacy SPA's `spendingCard` + `spendPie`.
+ * or legend row swaps the donut centre from the total to that category;
+ * clicking one drills into that category's transactions. Mirrors the legacy
+ * SPA's `spendingCard` + `spendPie` + `categoryDrillModal`.
  */
-export function SpendingCard({ cats, total, changePct }: SpendingCardProps) {
+export function SpendingCard({
+  cats, total, changePct, transactions, accounts, monthStartDay, isExcluded,
+}: SpendingCardProps) {
   const [hovered, setHovered] = useState<PieCat | null>(null);
+  const [drill, setDrill] = useState<PieCat | null>(null);
 
   let badge: React.ReactNode = null;
   if (changePct != null) {
@@ -50,19 +62,37 @@ export function SpendingCard({ cats, total, changePct }: SpendingCardProps) {
       {total <= 0 ? (
         <div className="empty">No spending recorded this month.</div>
       ) : (
-        <SpendPie cats={cats} total={total} hovered={hovered} setHovered={setHovered} />
+        <SpendPie
+          cats={cats} total={total}
+          hovered={hovered} setHovered={setHovered}
+          onPick={setDrill}
+        />
+      )}
+      {drill && (
+        <CategoryDrillModal
+          category={drill.category}
+          color={drill.color}
+          emoji={drill.emoji}
+          transactions={transactions}
+          accounts={accounts}
+          monthStartDay={monthStartDay}
+          isExcluded={isExcluded}
+          currency="ILS"
+          onClose={() => setDrill(null)}
+        />
       )}
     </section>
   );
 }
 
 function SpendPie({
-  cats, total, hovered, setHovered,
+  cats, total, hovered, setHovered, onPick,
 }: {
   cats: PieCat[];
   total: number;
   hovered: PieCat | null;
   setHovered: (c: PieCat | null) => void;
+  onPick: (c: PieCat) => void;
 }) {
   const slices = buildSlices(cats, CX, CY, R_OUTER, R_INNER, PUSH_PX);
   const centreAmt = hovered ? moneyShort(hovered.amount, 'ILS') : moneyShort(total, 'ILS');
@@ -90,6 +120,7 @@ function SpendPie({
                   style={style}
                   onMouseEnter={() => setHovered(cat)}
                   onMouseLeave={() => setHovered(null)}
+                  onClick={() => onPick(cat)}
                 />
               );
             })}
@@ -123,6 +154,7 @@ function SpendPie({
               className="lg-row"
               onMouseEnter={() => setHovered(c)}
               onMouseLeave={() => setHovered(null)}
+              onClick={() => onPick(c)}
             >
               <span className="lg-dot" style={{ background: c.color }} />
               <span className="lg-name">{c.category}</span>

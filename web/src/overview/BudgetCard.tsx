@@ -1,7 +1,9 @@
+import { useState } from 'react';
 import { money } from '../format';
 import { currentCycleKey, cycleLabel } from '../cycle';
 import type { Category } from '../settings/CategoriesPanel';
 import { projectVariable, type VariableInput, type ProjectedVariable } from './projectedVariable';
+import { BudgetEditorModal } from './BudgetEditorModal';
 
 export interface BudgetLine {
   category: string;
@@ -22,6 +24,8 @@ interface BudgetCardProps {
   totalSpent: number;
   currency: string;
   monthStartDay: number;
+  /** Refetch /budget after the editor saves new limits / income / savings. */
+  onSaved: () => void;
 }
 
 /**
@@ -31,8 +35,9 @@ interface BudgetCardProps {
  * card rather than living in a separate one).
  */
 export function BudgetCard({
-  variable, essentials, categories, predictedFixed, totalSpent, currency, monthStartDay,
+  variable, essentials, categories, predictedFixed, totalSpent, currency, monthStartDay, onSaved,
 }: BudgetCardProps) {
+  const [editing, setEditing] = useState(false);
   const essentialBudgetTotal = essentials.reduce((s, l) => s + (l.budget ?? 0), 0);
   const v = projectVariable(variable, essentialBudgetTotal, predictedFixed);
   const monthLabel = cycleLabel(currentCycleKey(monthStartDay));
@@ -49,7 +54,11 @@ export function BudgetCard({
 
   return (
     <section className="card budget-card" data-testid="budget-card">
-      <div className="card-head"><h3>Budget · {monthLabel}</h3></div>
+      <div className="card-head">
+        <h3>Budget · {monthLabel}</h3>
+        <span className="spacer" />
+        <button type="button" className="mini" onClick={() => setEditing(true)}>Edit</button>
+      </div>
       <VariableAllowance v={v} currency={currency} />
       {sortedEssentials.length > 0 && (
         <>
@@ -68,6 +77,18 @@ export function BudgetCard({
         <span>Spent this month</span>
         <span>{money(totalSpent, currency)}</span>
       </div>
+      {editing && (
+        <BudgetEditorModal
+          essentials={essentials}
+          categories={categories}
+          variable={variable}
+          predictedFixed={predictedFixed}
+          currency={currency}
+          monthStartDay={monthStartDay}
+          onClose={() => setEditing(false)}
+          onSaved={onSaved}
+        />
+      )}
     </section>
   );
 }
