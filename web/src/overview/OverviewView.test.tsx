@@ -219,12 +219,16 @@ describe('OverviewView', () => {
   });
 
   it('adds an "Owed to you (Splitwise)" line to the projection and end balance', async () => {
+    // owed comes from link counterparties, not Splitwise friend balances.
+    const link = {
+      transactionId: 'e3', expenseId: 'x3', groupId: null, currency: 'ILS',
+      owedToMe: 800, counterparties: [{ id: 5, name: 'Noga', owed: 800, paid: 0 }],
+      paidAmount: 0, paidState: 'open', createdAt: '2026-05-01', syncedAt: null,
+    };
     installFetchMock(mocks({
       'GET /api/splitwise/status': () => ({ connected: true, user: { id: 1 } }),
-      'POST /api/splitwise/refresh': () => ({
-        friends: [{ name: 'Noga', balances: [{ amount: 800, currency: 'ILS' }] }],
-        links: [],
-      }),
+      'GET /api/splitwise/links': () => ({ links: [link] }),
+      'POST /api/splitwise/refresh': () => ({ friends: [], links: [link] }),
     }));
     renderOverview();
     const card = await screen.findByTestId('bank-projection');
@@ -234,15 +238,20 @@ describe('OverviewView', () => {
   });
 
   it('omits the owed line when Splitwise has no ILS balance owed', async () => {
+    // A USD link: owed comes from link counterparties, filtered by currency.
+    // The projection only includes same-currency (ILS) owed amounts.
+    const usdLink = {
+      transactionId: 'e4', expenseId: 'x4', groupId: null, currency: 'USD',
+      owedToMe: 50, counterparties: [{ id: 6, name: 'Noga', owed: 50, paid: 0 }],
+      paidAmount: 0, paidState: 'open', createdAt: '2026-05-01', syncedAt: null,
+    };
     installFetchMock(mocks({
       'GET /api/splitwise/status': () => ({ connected: true, user: { id: 1 } }),
-      'POST /api/splitwise/refresh': () => ({
-        friends: [{ name: 'Noga', balances: [{ amount: 50, currency: 'USD' }] }],
-        links: [],
-      }),
+      'GET /api/splitwise/links': () => ({ links: [usdLink] }),
+      'POST /api/splitwise/refresh': () => ({ friends: [], links: [usdLink] }),
     }));
     renderOverview();
-    // Wait for Splitwise to finish loading (the OwedToYouCard shows the friend),
+    // Wait for Splitwise to finish loading (the OwedToYouCard shows the USD friend),
     // then assert the projection has no owed line — USD is filtered out.
     await screen.findByText('Noga');
     const card = await screen.findByTestId('bank-projection');

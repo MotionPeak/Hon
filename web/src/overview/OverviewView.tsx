@@ -12,6 +12,7 @@ import {
   type FreqOrIgnore, type RecurringData,
 } from '../recurring/helpers';
 import { useSplitwise } from '../splitwise/useSplitwise';
+import { owedByFriend } from '../splitwise/owed';
 import { OwedToYouCard } from './OwedToYouCard';
 
 /**
@@ -246,10 +247,9 @@ function BankProjection({
   if (bankAccounts.length === 0) return null;
 
   const owed = sw.connected
-    ? sw.friends
-        .flatMap((f) => f.balances)
-        .filter((b) => b.currency === currency && b.amount > 0)
-        .reduce((s, b) => s + b.amount, 0)
+    ? owedByFriend(sw.links)
+        .filter((f) => f.currency === currency)
+        .reduce((s, f) => s + f.owed, 0)
     : 0;
   const bankNow = bankAccounts.reduce((s, a) => s + (a.balance ?? 0), 0);
   const expectedIncome = variable.income;
