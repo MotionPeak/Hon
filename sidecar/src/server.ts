@@ -42,7 +42,7 @@ import {
   refreshSplitwise,
   recomputePaidStates,
 } from './splitwise.js';
-import { getLogo, isSafeCompanyId } from './logos.js';
+import { getLogo, isSafeCompanyId, isPublicLogoDomain } from './logos.js';
 import { Vault } from './vault.js';
 import { LlmManager } from './llm.js';
 import { Categorizer, CATEGORIES } from './categorize.js';
