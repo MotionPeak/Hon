@@ -416,6 +416,16 @@ export async function runInteractiveScrape(
     const scrapePromise = scraper
       .scrape(credentials as unknown as ScraperCredentials)
       .finally(() => controller.abort());
+    // If the OTP-failure arm wins the race below, this scrapePromise is left
+    // pending — the library is still grinding toward its own timeout. Once the
+    // browser is closed in `finally`, the library call will reject (Target
+    // closed). Swallow that here so it can't surface as an unhandled rejection
+    // AFTER this function has already returned its error outcome (H-5).
+    scrapePromise.catch((err) => {
+      log.info('library.scrape.lateError', {
+        message: err instanceof Error ? err.message : String(err),
+      });
+    });
 
     // The OTP watcher looks for generic Hebrew/English 2FA phrases ("סיסמה
     // חד פעמית", "קוד אימות", etc.) and then dispatches to a per-bank
@@ -423,16 +433,51 @@ export async function runInteractiveScrape(
     // against Max / Isracard / Cal / Amex risks misfiring on any page
     // that coincidentally contains those phrases. The driver name passed
     // through is the company id so otp.ts can pick FIBI vs. Hapoalim.
-    if (HON_OTP_WATCHER_COMPANIES.has(companyId)) {
+    //
+    // watchForOtp rejects when it cannot complete the 2FA step — most
+    // importantly when onOtpNeeded() rejects with `otp.timeout` after the
+    // user abandoned the prompt (H-5). We surface that rejection on a
+    // dedicated promise and RACE it against the main scrape: if the OTP wait
+    // fails, the race rejects, control falls into this function's catch and
+    // then `finally { browser.close() }`, tearing the Puppeteer browser down
+    // immediately instead of leaving Chrome pinned for the library's full
+    // 240s defaultTimeout. controller.abort() also stops the watcher's poll
+    // loop. The promise is created even when the watcher is disabled so the
+    // race below always has two arms — a never-rejecting placeholder then.
+    // This arm only ever REJECTS (on an OTP failure) — it never resolves, so
+    // when the watcher completes 2FA happily the scrape promise is the only one
+    // that can settle the race. A resolving arm would make Promise.race yield
+    // `undefined` and break `result.success` below.
+    const otpFailure: Promise<never> = new Promise<never>((_, reject) => {
+      if (!HON_OTP_WATCHER_COMPANIES.has(companyId)) {
+        // No watcher for this bank → leave the promise pending forever; the
+        // scrape promise wins the race unconditionally.
+        return;
+      }
       log.info('otp.watcher.armed', { companyId });
       void pagePromise
         .then((page) => watchForOtp(page, onOtpNeeded, controller.signal, companyId))
-        .catch((err) => log.warn('otp.watcher.threw', {
-          message: err instanceof Error ? err.message : String(err),
-        }));
-    }
+        .then(
+          () => {
+            // 2FA handled (or no 2FA was needed). Do nothing — let the scrape
+            // promise settle the race normally.
+          },
+          (err) => {
+            // OTP wait/drive failed — most importantly onOtpNeeded() rejecting
+            // with `otp.timeout`. Abort the watcher loop and reject the race so
+            // the awaited path unwinds into `finally { browser.close() }` (H-5).
+            controller.abort();
+            log.warn('otp.watcher.threw', {
+              message: err instanceof Error ? err.message : String(err),
+            });
+            reject(err instanceof Error ? err : new Error(String(err)));
+          },
+        );
+    });
 
-    const result = await scrapePromise;
+    // Whichever settles first wins: a normal scrape result, or an OTP-watcher
+    // rejection we propagate so the catch + finally close the browser promptly.
+    const result = await Promise.race([scrapePromise, otpFailure]);
     scrapeDone({ success: result.success, errorType: result.errorType });
     if (!result.success) {
       log.error('library.unsuccessful', {

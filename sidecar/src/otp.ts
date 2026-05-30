@@ -515,7 +515,13 @@ export async function watchForOtp(
           driver: driver.name,
           message: err instanceof Error ? err.message : String(err),
         });
-        // leave it — the scraper will time out and report the failure
+        // Rethrow so the caller (runInteractiveScrape) can unwind the awaited
+        // scrape path and close the browser. The common case is `getCode()`
+        // rejecting with `otp.timeout` after the user walked away from the 2FA
+        // prompt: if we swallowed it here the watcher would resolve normally and
+        // the bank page would sit on the OTP screen until the library's own
+        // 240s defaultTimeout, pinning an open Chrome the whole time (H-5).
+        throw err;
       }
       return;
     }
