@@ -3165,3 +3165,204 @@ button.bh-row:active { transform: none; }        /* suppress global scale(.97) *
   }
   .app-nav .nav-pill { transition-duration: .08s; }
 }
+
+/* --- Overview: spend pie + budget grid (ported from the legacy SPA) ----- */
+.ov-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.ov-grid > section { margin-bottom: 0; }
+@media (max-width: 940px) { .ov-grid { grid-template-columns: 1fr; } }
+
+/* These two cards carry their own chrome (the React app has no base .card). */
+.spending-card, .budget-card {
+  background: var(--card); border: 1px solid var(--hairline);
+  border-radius: 18px; padding: 20px; box-shadow: var(--shadow-sm);
+}
+.card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.card-head h3 {
+  margin: 0; font: 800 15px/1 ui-rounded, "SF Pro Rounded", system-ui;
+  color: var(--text);
+}
+.card-head .spacer { margin-left: auto; }
+
+/* --- Spending pie + trend ---------------------------------------------- */
+.spend-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 4px; }
+.spend-num { font: 800 30px/1 ui-rounded, "SF Pro Rounded", system-ui;
+  color: var(--text); font-variant-numeric: tabular-nums; }
+.delta { font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 999px; }
+.delta.good { color: var(--green); background: rgba(61,220,132,0.15); }
+.delta.bad { color: var(--red); background: rgba(244,104,90,0.15); }
+.lg-tr.good { color: var(--green); }
+.lg-tr.bad { color: var(--amber); }
+.pie-wrap { display: flex; justify-content: center; margin: 14px 0 16px; }
+/* SVG donut: slices stagger-fade in; hovering pushes the slice outward along
+   its own mid-angle (var(--mx,--my)) while siblings softly dim. */
+.pie-svg { width: 240px; height: 240px; overflow: visible;
+  filter: drop-shadow(0 14px 32px rgba(0,0,0,.42)); }
+.pie-slice {
+  cursor: pointer;
+  stroke: var(--card); stroke-width: 2.25; stroke-linejoin: round;
+  transform: translate(0,0);
+  transition: transform .42s cubic-bezier(.22,1,.36,1),
+              filter .25s ease, opacity .25s ease;
+  animation: pie-slice-in .85s cubic-bezier(.16,1,.3,1) both;
+}
+@keyframes pie-slice-in {
+  0%   { opacity: 0; transform: scale(.86); }
+  60%  { opacity: 1; }
+  100% { opacity: 1; transform: scale(1); }
+}
+.pie-slices:hover .pie-slice { opacity: .58; filter: saturate(.78); }
+.pie-slices:hover .pie-slice:hover {
+  opacity: 1; filter: brightness(1.06) saturate(1.08);
+  transform: translate(var(--mx,0), var(--my,0));
+}
+.pie-c-amt { font: 800 28px/1 ui-rounded, "SF Pro Rounded", system-ui;
+  fill: var(--text); transition: fill .2s ease;
+  font-variant-numeric: tabular-nums; }
+.pie-c-lbl { font-size: 10.5px; fill: var(--faint); letter-spacing: 1.6px;
+  text-transform: uppercase; font-weight: 700;
+  transition: fill .2s ease, letter-spacing .2s ease; }
+.pie-c-amt.hov { fill: var(--text); }
+.pie-c-lbl.hov { fill: var(--text); letter-spacing: .5px;
+  text-transform: none; font-size: 11px; }
+.legend { display: flex; flex-direction: column; }
+.lg-row { display: flex; align-items: center; gap: 9px; padding: 7px 6px;
+  border-top: 1px solid var(--hairline); font-size: 12.5px;
+  border-radius: 8px; cursor: pointer;
+  transition: background .15s ease, transform .15s ease; }
+.lg-row:hover { background: var(--card-hi); transform: translateX(2px); }
+.lg-row:first-child { border-top: 0; }
+.lg-dot { width: 11px; height: 11px; border-radius: 4px; flex: 0 0 auto; }
+.lg-name { font-weight: 600; color: var(--text); }
+.lg-tr { font-size: 11px; font-weight: 700; }
+.lg-amt { margin-left: auto; font-weight: 700; color: var(--text);
+  font-family: ui-rounded, "SF Pro Rounded", system-ui;
+  font-variant-numeric: tabular-nums; }
+.lg-pct { color: var(--faint); font-size: 11px; width: 32px; text-align: right; }
+
+/* --- Budget card: variable allowance + essentials ---------------------- */
+.bgt-group { font-size: 11px; font-weight: 700; letter-spacing: .5px;
+  text-transform: uppercase; color: var(--faint); margin: 14px 0 6px;
+  padding-top: 11px; border-top: 1px solid var(--hairline); }
+.bgt-group:first-child { margin-top: 2px; padding-top: 0; border-top: 0; }
+.bgt-var { border-radius: 13px; padding: 14px 14px 12px; background: var(--card-hi); }
+.bgt-var-top { display: flex; align-items: baseline; gap: 7px; }
+.bgt-var-amt { font: 800 27px/1 ui-rounded, "SF Pro Rounded", system-ui;
+  color: var(--text); font-variant-numeric: tabular-nums; }
+.bgt-var.ok .bgt-var-amt { color: var(--green); }
+.bgt-var.low .bgt-var-amt { color: var(--amber); }
+.bgt-var.none .bgt-var-amt { color: var(--red); }
+.bgt-var-unit { font-size: 11.5px; font-weight: 600; color: var(--faint); }
+.bgt-var-cap { font-size: 11.5px; color: var(--muted); line-height: 1.5;
+  margin-top: 6px; }
+.bgt-var-track { height: 9px; border-radius: 6px; background: var(--bg-elev);
+  overflow: hidden; margin: 12px 0 10px; }
+.bgt-var-fill { height: 100%; border-radius: 6px; min-width: 3px;
+  transition: width .55s cubic-bezier(.2,.7,.2,1);
+  animation: bgt-grow .7s cubic-bezier(.2,.7,.2,1) both; }
+@keyframes bgt-grow { from { width: 0; } }
+.bgt-var-rows { display: flex; flex-direction: column; }
+.bgt-var-row { display: flex; justify-content: space-between; gap: 10px;
+  font-size: 12px; padding: 6px 0; border-top: 1px solid var(--hairline); }
+.bgt-var-row:first-child { border-top: 0; }
+.bgt-var-row .k { color: var(--muted); }
+.bgt-var-row .v { font-weight: 700; color: var(--text);
+  font-variant-numeric: tabular-nums; }
+.bgt-var-row .v.out { color: var(--faint); }
+.bgt-var-note { font-size: 11px; color: var(--faint); line-height: 1.45;
+  margin-top: 9px; }
+.bgt-tot { display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 13px; font-weight: 700; color: var(--text);
+  padding: 13px 11px 3px; margin-top: 7px; border-top: 1px solid var(--hairline-2); }
+/* Essential lines — read-only in React (no budget editor yet), so no hover
+   affordance, unlike the clickable legacy rows. */
+.bgt-line { padding: 12px 11px; border-radius: 13px; }
+.bgt-line + .bgt-line { margin-top: 3px; }
+.bgt-head { display: flex; align-items: center; gap: 8px; }
+.bgt-emoji { font-size: 15px; }
+.bgt-cat { font-size: 13.5px; font-weight: 600; color: var(--text); }
+.bgt-amt { margin-left: auto; font-size: 13px; font-weight: 700;
+  color: var(--text); font-variant-numeric: tabular-nums; }
+.bgt-amt .bgt-cap { color: var(--faint); font-weight: 600; }
+.bgt-nolimit { margin-left: auto; font-size: 11px; color: var(--faint);
+  font-weight: 600; }
+.bgt-track { height: 9px; border-radius: 6px; background: var(--card-hi);
+  overflow: hidden; margin: 9px 0 0; }
+.bgt-fill { height: 100%; border-radius: 6px; min-width: 3px;
+  transition: width .55s cubic-bezier(.2,.7,.2,1); }
+.bgt-fill.over { background-image: repeating-linear-gradient(45deg,
+  rgba(0,0,0,.18) 0 6px, transparent 6px 12px); }
+.bgt-foot { display: flex; justify-content: space-between; margin-top: 6px;
+  font-size: 11px; }
+.bgt-pct { color: var(--faint); font-variant-numeric: tabular-nums; }
+.bgt-left { font-variant-numeric: tabular-nums; }
+.bgt-left.ok { color: var(--green); }
+.bgt-left.warn { color: var(--amber); }
+.bgt-left.over { color: var(--red); }
+
+/* --- Category drill-in modal (slice / legend click) -------------------- */
+.drill-head { display: flex; align-items: center; gap: 12px; margin: -2px 0 14px; }
+.drill-em { width: 38px; height: 38px; flex: 0 0 38px; border-radius: 11px;
+  display: flex; align-items: center; justify-content: center; font-size: 19px;
+  box-shadow: inset 0 0 0 1px var(--hairline); }
+.drill-h-main { flex: 1; min-width: 0; }
+.drill-h-cat { font: 800 17px/1.1 ui-rounded, "SF Pro Rounded", system-ui;
+  margin-bottom: 2px; color: var(--text); }
+.drill-h-sub { font-size: 11.5px; color: var(--faint); }
+.drill-h-total { font: 800 18px/1 ui-rounded, "SF Pro Rounded", system-ui;
+  color: var(--text); font-variant-numeric: tabular-nums; }
+.drill-list { max-height: 56vh; overflow-y: auto; margin: 0 -4px;
+  border-top: 1px solid var(--hairline); padding-top: 4px; }
+.drill-row { display: flex; align-items: center; gap: 10px; padding: 9px 4px;
+  border-bottom: 1px solid var(--hairline);
+  animation: drill-row-in .35s cubic-bezier(.2,.8,.2,1) both; }
+.drill-row:last-child { border-bottom: 0; }
+.drill-main { flex: 1; min-width: 0; }
+.drill-name { font-size: 13.5px; font-weight: 600; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.drill-sub { font-size: 11px; color: var(--faint); margin-top: 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.drill-amt { font: 700 14px/1 ui-rounded, "SF Pro Rounded", system-ui;
+  color: var(--text); font-variant-numeric: tabular-nums; }
+@keyframes drill-row-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* --- Budget editor modal rows (bm-) ------------------------------------ */
+.bm-row { display: flex; align-items: center; gap: 11px; padding: 10px 0;
+  border-top: 1px solid var(--hairline); }
+.bm-row:first-of-type { border-top: 0; }
+.bm-ico { width: 32px; height: 32px; flex: none; border-radius: 9px;
+  display: flex; align-items: center; justify-content: center; font-size: 16px; }
+.bm-info { flex: 1; min-width: 0; }
+.bm-name { font-size: 13.5px; font-weight: 600; color: var(--text); }
+.bm-spent { font-size: 11.5px; color: var(--faint); margin-top: 1px; }
+.bm-spent.over { color: var(--red); }
+.bm-spent b { color: var(--text); font-weight: 700; }
+.bm-toggle { display: flex; align-items: flex-start; gap: 7px; margin-top: 6px;
+  font-size: 11.5px; color: var(--muted); cursor: pointer; line-height: 1.4; }
+.bm-toggle input { width: 14px; height: 14px; margin-top: 2px;
+  flex: 0 0 auto; accent-color: var(--accent); cursor: pointer; }
+.bm-max-btn { padding: 5px 10px; border-radius: 7px;
+  border: 1px solid var(--hairline-2); background: var(--card-hi);
+  color: var(--muted); cursor: pointer; font-size: 11px; font-weight: 700;
+  letter-spacing: 0.04em; text-transform: uppercase; flex: none;
+  transition: border-color .14s, color .14s, background-color .14s; }
+.bm-max-btn:hover { border-color: var(--indigo); color: var(--text);
+  background: var(--indigo-soft); }
+.bm-input { position: relative; width: 116px; flex: none; }
+.bm-input .bm-cur { position: absolute; left: 10px; top: 50%;
+  transform: translateY(-50%); color: var(--faint); font-size: 13px;
+  pointer-events: none; }
+.bm-input input { padding-left: 22px; text-align: right;
+  font-variant-numeric: tabular-nums; width: 100%; }
+.bm-summary { display: flex; justify-content: space-between;
+  padding: 11px 13px; margin-bottom: 6px; border-radius: 12px;
+  background: var(--card-hi); font-size: 13px; font-weight: 700; color: var(--text); }
+.bm-summary span:last-child { font-variant-numeric: tabular-nums; }
+.bm-var { padding: 12px 13px; border-radius: 12px; background: var(--card-hi); }
+.bm-var-amt { font: 800 21px/1 ui-rounded, "SF Pro Rounded", system-ui;
+  color: var(--text); font-variant-numeric: tabular-nums; }
+.bm-var-note { font-size: 12px; color: var(--muted); line-height: 1.5;
+  margin-top: 5px; }

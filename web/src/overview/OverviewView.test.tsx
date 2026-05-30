@@ -359,15 +359,17 @@ describe('OverviewView', () => {
     expect(screen.queryByTestId('bank-projection')).not.toBeInTheDocument();
   });
 
-  it('renders an essentials card with one row per essential budget line', async () => {
+  it('renders essentials inside the budget card, one row per line', async () => {
     installFetchMock(mocks());
     renderOverview();
-    const card = await screen.findByTestId('essentials-card');
+    const card = await screen.findByTestId('budget-card');
     expect(within(card).getByText('Groceries')).toBeInTheDocument();
     expect(within(card).getByText('Transport')).toBeInTheDocument();
     // Groceries — 1,800 / 2,500
-    expect(within(card).getByText(/1,?800/)).toBeInTheDocument();
-    expect(within(card).getByText(/2,?500/)).toBeInTheDocument();
+    const row = within(card).getByText('Groceries').closest('.bgt-line') as HTMLElement;
+    expect(row).not.toBeNull();
+    expect(within(row).getByText(/1,?800/)).toBeInTheDocument();
+    expect(within(row).getByText(/2,?500/)).toBeInTheDocument();
   });
 
   it('marks an essentials row over-budget when spent exceeds budget', async () => {
@@ -378,18 +380,20 @@ describe('OverviewView', () => {
       }),
     }));
     renderOverview();
-    const card = await screen.findByTestId('essentials-card');
-    const row = within(card).getByText('Groceries').closest('.ess-row');
+    const card = await screen.findByTestId('budget-card');
+    const row = within(card).getByText('Groceries').closest('.bgt-line');
     expect(row).not.toBeNull();
-    expect(row!.className).toMatch(/\bover\b/);
+    // The bar fill picks up the `over` class once spend exceeds budget.
+    expect(row!.querySelector('.bgt-fill.over')).not.toBeNull();
   });
 
-  it('omits the essentials card when no essential lines exist', async () => {
+  it('shows the budget card with no essential rows when no essential lines exist', async () => {
     installFetchMock(mocks({
       'GET /api/budget': () => ({ ...FULL_BUDGET, essentials: [] }),
     }));
     renderOverview();
-    await screen.findByTestId('balance-card');
-    expect(screen.queryByTestId('essentials-card')).not.toBeInTheDocument();
+    const card = await screen.findByTestId('budget-card');
+    expect(card.querySelector('.bgt-line')).toBeNull();
+    expect(within(card).queryByText('Essentials')).not.toBeInTheDocument();
   });
 });

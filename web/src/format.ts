@@ -23,3 +23,16 @@ export function money(amount: number | null | undefined, currency: string = 'ILS
   const sign = amount < 0 ? '−' : '';
   return `${sign}${symbol}${formatted}`;
 }
+
+/**
+ * Compact currency for tight spots like the donut centre: ₪12.3k, ₪840.
+ * Amounts ≥ 10k drop the decimal (₪23k); 1k–10k keep one (₪1.4k); under 1k
+ * round to whole units. Ported from the legacy SPA's `moneyShort`.
+ */
+export function moneyShort(value: number, currency: string = 'ILS'): string {
+  const sym = SYMBOLS[(currency || '').toUpperCase()] || '';
+  const abs = Math.abs(value);
+  const sign = value < 0 ? '−' : '';
+  if (abs >= 1000) return sign + sym + (abs / 1000).toFixed(abs >= 10000 ? 0 : 1) + 'k';
+  return sign + sym + Math.round(abs);
+}
