@@ -81,4 +81,27 @@ describe('useSplitwise', () => {
     expect((thrown as Error).message).toMatch(/vault/i);
     expect(result.current.vaultLocked).toBe(true);
   });
+
+  it('marks a repayment and updates links + repayments from the response', async () => {
+    const link = {
+      transactionId: 'e1', expenseId: 'x1', groupId: null, currency: 'ILS',
+      owedToMe: 60, counterparties: [{ id: 2, name: 'Roomie', owed: 60, paid: 0 }],
+      paidAmount: 0, paidState: 'open', createdAt: '2026-05-01', syncedAt: null,
+    };
+    const paidLink = { ...link, paidAmount: 60, paidState: 'paid',
+      counterparties: [{ id: 2, name: 'Roomie', owed: 60, paid: 60 }] };
+    const repayment = { transactionId: 'r1', counterpartyId: 2, counterpartyName: 'Roomie',
+      currency: 'ILS', amount: 60, createdAt: '2026-05-10' };
+    installFetchMock({
+      'GET /api/splitwise/status': () => ({ connected: true, user: { id: 1, name: 'Me' } }),
+      'GET /api/splitwise/links': () => ({ links: [link], repayments: [] }),
+      'POST /api/splitwise/refresh': () => ({ friends: [], links: [link] }),
+      'POST /api/splitwise/repayment': () => ({ links: [paidLink], repayments: [repayment] }),
+    });
+    const { result } = renderHook(() => useSplitwise());
+    await waitFor(() => expect(result.current.connected).toBe(true));
+    await act(async () => { await result.current.markRepayment('r1', 2, 'Roomie'); });
+    expect(result.current.linkByTxnId.get('e1')?.paidState).toBe('paid');
+    expect(result.current.repaymentByTxnId.get('r1')?.counterpartyName).toBe('Roomie');
+  });
 });

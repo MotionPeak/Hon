@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError } from '../api';
 import type {
-  SplitwiseFriendBalance, SplitwiseLink, SplitwisePickList, SplitwiseShare, SplitwiseUser,
+  SplitwiseFriendBalance, SplitwiseLink, SplitwisePickList, SplitwiseRepayment,
+  SplitwiseShare, SplitwiseUser,
 } from './types';
 
 // Module-level cache so the Settings, Activity, and Overview consumers share
@@ -16,16 +17,17 @@ interface CacheShape {
   user: SplitwiseUser | null;
   links: SplitwiseLink[];
   friends: SplitwiseFriendBalance[];
+  repayments: SplitwiseRepayment[];
 }
 
 let cache: CacheShape = {
-  loaded: false, connected: false, user: null, links: [], friends: [],
+  loaded: false, connected: false, user: null, links: [], friends: [], repayments: [],
 };
 let inFlight: Promise<void> | null = null;
 
 /** Test-only: wipe the module cache between cases. */
 export function __resetSplitwiseCache(): void {
-  cache = { loaded: false, connected: false, user: null, links: [], friends: [] };
+  cache = { loaded: false, connected: false, user: null, links: [], friends: [], repayments: [] };
   inFlight = null;
 }
 
@@ -40,7 +42,7 @@ function isLocked(err: unknown): boolean {
 async function fetchAll(): Promise<void> {
   const [status, links] = await Promise.all([
     api<{ connected: boolean; user: SplitwiseUser | null }>('/splitwise/status'),
-    api<{ links: SplitwiseLink[] }>('/splitwise/links'),
+    api<{ links: SplitwiseLink[]; repayments: SplitwiseRepayment[] }>('/splitwise/links'),
   ]);
   cache = {
     loaded: true,
@@ -48,6 +50,7 @@ async function fetchAll(): Promise<void> {
     user: status.user ?? null,
     links: links.links ?? [],
     friends: cache.friends,
+    repayments: links.repayments ?? [],
   };
   broadcast();
   if (!cache.connected) return;
@@ -71,7 +74,9 @@ export interface UseSplitwise {
   user: SplitwiseUser | null;
   links: SplitwiseLink[];
   friends: SplitwiseFriendBalance[];
+  repayments: SplitwiseRepayment[];
   linkByTxnId: Map<string, SplitwiseLink>;
+  repaymentByTxnId: Map<string, SplitwiseRepayment>;
   vaultLocked: boolean;
   reload: () => Promise<void>;
   connect: (apiKey: string) => Promise<void>;
@@ -81,6 +86,8 @@ export interface UseSplitwise {
     transactionId: string, groupId: number | null, shares: SplitwiseShare[],
   ) => Promise<void>;
   deleteExpense: (transactionId: string) => Promise<void>;
+  markRepayment: (transactionId: string, counterpartyId: number, counterpartyName: string) => Promise<void>;
+  unmarkRepayment: (transactionId: string) => Promise<void>;
 }
 
 export function useSplitwise(): UseSplitwise {
@@ -113,7 +120,7 @@ export function useSplitwise(): UseSplitwise {
 
   const disconnect = useCallback(() => guard(async () => {
     await api('/splitwise/disconnect', 'POST');
-    cache = { loaded: true, connected: false, user: null, links: [], friends: [] };
+    cache = { loaded: true, connected: false, user: null, links: [], friends: [], repayments: [] };
     broadcast();
   }), [guard]);
 
@@ -144,7 +151,26 @@ export function useSplitwise(): UseSplitwise {
     broadcast();
   }), [guard]);
 
+  const markRepayment = useCallback((
+    transactionId: string, counterpartyId: number, counterpartyName: string,
+  ) => guard(async () => {
+    const r = await api<{ links: SplitwiseLink[]; repayments: SplitwiseRepayment[] }>(
+      '/splitwise/repayment', 'POST', { transactionId, counterpartyId, counterpartyName },
+    );
+    cache = { ...cache, links: r.links ?? cache.links, repayments: r.repayments ?? cache.repayments };
+    broadcast();
+  }), [guard]);
+
+  const unmarkRepayment = useCallback((transactionId: string) => guard(async () => {
+    const r = await api<{ links: SplitwiseLink[]; repayments: SplitwiseRepayment[] }>(
+      `/splitwise/repayment/${encodeURIComponent(transactionId)}`, 'DELETE',
+    );
+    cache = { ...cache, links: r.links ?? cache.links, repayments: r.repayments ?? cache.repayments };
+    broadcast();
+  }), [guard]);
+
   const linkByTxnId = new Map(cache.links.map((l) => [l.transactionId, l]));
+  const repaymentByTxnId = new Map(cache.repayments.map((r) => [r.transactionId, r]));
 
   return {
     loading: !cache.loaded,
@@ -152,7 +178,9 @@ export function useSplitwise(): UseSplitwise {
     user: cache.user,
     links: cache.links,
     friends: cache.friends,
+    repayments: cache.repayments,
     linkByTxnId,
+    repaymentByTxnId,
     vaultLocked,
     reload,
     connect,
@@ -160,5 +188,7 @@ export function useSplitwise(): UseSplitwise {
     loadPickList,
     createExpense,
     deleteExpense,
+    markRepayment,
+    unmarkRepayment,
   };
 }

@@ -6,6 +6,8 @@ export interface SplitwiseCounterparty {
   id: number;
   name: string;
   owed: number;
+  /** Amount of `owed` covered by linked repayments (server-computed). */
+  paid?: number;
 }
 
 export interface SplitwiseLink {
@@ -60,4 +62,14 @@ export interface SplitwiseShare {
   userId: number;
   name: string;
   owed: number;
+}
+
+/** An incoming transaction the user marked as a friend repaying them. */
+export interface SplitwiseRepayment {
+  transactionId: string;
+  counterpartyId: number;
+  counterpartyName: string;
+  currency: string;
+  amount: number;
+  createdAt: string;
 }
