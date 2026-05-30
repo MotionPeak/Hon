@@ -125,8 +125,8 @@ export function OverviewView() {
       api<{ categories: Category[] }>('/categories'),
       api<{ frequencies: Record<string, FreqOrIgnore> }>('/merchant-frequencies'),
       api<{ splits: Record<string, number> }>('/category-splits'),
-      api<{ cancelled: Record<string, boolean> }>('/subscriptions/cancelled')
-        .catch(() => ({ cancelled: {} as Record<string, boolean> })),
+      api<{ cancelled: Record<string, string> }>('/subscriptions/cancelled')
+        .catch(() => ({ cancelled: {} as Record<string, string> })),
     ]).then(([t, c, f, s, sub]) => {
       setRecurring({
         transactions: t.transactions, categories: c.categories,

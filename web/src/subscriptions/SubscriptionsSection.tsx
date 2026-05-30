@@ -1,7 +1,4 @@
-import { useEffect, useState } from 'react';
-import { api } from '../api';
 import { money } from '../format';
-import { DelayedLoader } from '../ui/DelayedLoader';
 import {
   merchantKey, merchantName, monthlyEquivalent,
   RECURRENCE_ACTIVE_DAYS, type Frequency,
@@ -19,23 +16,19 @@ interface SubRow {
   last: Transaction;
   daysSinceLast: number;
   count: number;
-  /** Last reported charge amount, absolute. */
   charge: number;
   freq: Frequency;
   currency: string;
-  /** Monthly-equivalent cost. */
   monthly: number;
-  /** True when the most recent charge is within the active window for the freq. */
   active: boolean;
 }
 
-interface SubData {
+interface SubInput {
   transactions: Transaction[];
   frequencies: Record<string, FreqOrIgnore>;
-  cancelled: Record<string, string>; // merchantKey → ISO timestamp
 }
 
-function detect(data: SubData): SubRow[] {
+function detect(data: SubInput): SubRow[] {
   const subs = data.transactions.filter(
     (t) => t.category === 'Subscriptions' && t.amount < 0,
   );
@@ -119,43 +112,40 @@ function fmtDate(dateStr: string): string {
   return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
 }
 
-export function SubscriptionsView() {
-  const [data, setData] = useState<SubData | null>(null);
+interface SubscriptionsSectionProps {
+  transactions: Transaction[];
+  frequencies: Record<string, FreqOrIgnore>;
+  /** merchantKey → ISO cancellation timestamp. */
+  cancelled: Record<string, string>;
+}
 
-  useEffect(() => {
-    Promise.all([
-      api<{ transactions: Transaction[] }>('/transactions'),
-      api<{ frequencies: Record<string, FreqOrIgnore> }>('/merchant-frequencies'),
-      api<{ cancelled: Record<string, string> }>('/subscriptions/cancelled'),
-    ]).then(([t, f, c]) => setData({
-      transactions: t.transactions,
-      frequencies: f.frequencies ?? {},
-      cancelled: c.cancelled ?? {},
-    })).catch(() => setData({ transactions: [], frequencies: {}, cancelled: {} }));
-  }, []);
+/**
+ * The Subscriptions area of the Fixed bills page. Detects 'Subscriptions'-
+ * category charges and groups them into active / cancelled / flagged / lapsed
+ * buckets. Presentational — fed by RecurringView's existing data fetch.
+ */
+export function SubscriptionsSection({ transactions, frequencies, cancelled }: SubscriptionsSectionProps) {
+  const rows = detect({ transactions, frequencies });
 
-  if (!data) return <DelayedLoader />;
-
-  const rows = detect(data);
   if (rows.length === 0) {
     return (
-      <div className="subscriptions-view">
-        <h1>Subscriptions</h1>
+      <section className="subs-section">
+        <h2 className="subs-section-title">🔁 Subscriptions</h2>
         <p className="blank">
           🔁 No subscription charges found yet — categorize transactions as
           Subscriptions in Activity to track them here.
         </p>
-      </div>
+      </section>
     );
   }
 
-  const { flagged, active, userCancelled, autoLapsed } = bucket(rows, data.cancelled);
+  const { flagged, active, userCancelled, autoLapsed } = bucket(rows, cancelled);
   const monthly = active.reduce((s, r) => s + r.monthly, 0);
   const currency = rows[0]?.currency ?? 'ILS';
 
   return (
-    <div className="subscriptions-view">
-      <h1>Subscriptions</h1>
+    <section className="subs-section">
+      <h2 className="subs-section-title">🔁 Subscriptions</h2>
       <div data-testid="sub-summary" className="sub-summary">
         <div className="sub-big">
           {money(monthly, currency)}<span className="sub-per"> / month</span>
@@ -204,7 +194,7 @@ export function SubscriptionsView() {
           {autoLapsed.map((r) => <SubRowCard key={r.key} row={r} faded />)}
         </section>
       )}
-    </div>
+    </section>
   );
 }
 
