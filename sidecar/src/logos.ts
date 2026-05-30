@@ -56,6 +56,8 @@ export function isPublicLogoDomain(domain: string): boolean {
   if (host === 'localhost' || host === 'localhost.localdomain') return false;
   if (host.endsWith('.local') || host.endsWith('.localdomain')) return false;
   if (host.endsWith('.localhost')) return false;
+  // Private/cloud internal TLD (e.g. metadata.google.internal).
+  if (host.endsWith('.internal')) return false;
   return true;
 }
 
