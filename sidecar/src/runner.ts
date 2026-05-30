@@ -121,7 +121,42 @@ export class ScrapeRunner {
       monthsBack: args.monthsBack,
       credentialFields: Object.keys(args.credentials),
     });
-    void this.execute(status, args);
+    // execute() routes every normal and caught-error path through finish(),
+    // which is what clears the per-connection lock (H-7). But finish() only
+    // runs if control reaches execute()'s internal try/catch. If execute()
+    // (or execute_inner setup before that try — e.g. the child-logger /
+    // chooseStartDate calls) throws or rejects BEFORE the try block, finish()
+    // never fires and the connection stays locked until a process restart.
+    // This catch is the backstop: it releases the lock and marks the run
+    // errored so the UI doesn't hang on "running". Set.delete + finish()'s
+    // own delete are idempotent, so the normal path double-delete is harmless.
+    void this.execute(status, args).catch((err) => {
+      runnerLog.error('execute.unhandled', {
+        runId: status.runId,
+        connectionId: args.connectionId,
+        message: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined,
+      });
+      this.otpResolvers.delete(status.runId);
+      this.active.delete(args.connectionId);
+      // Mirror finish()'s minimal terminal state so the connection/run don't
+      // appear stuck running. Wrapped because this runs outside execute()'s
+      // try — a repo throw here must not produce a second unhandled rejection.
+      try {
+        if (this.runs.has(status.runId)) {
+          status.status = 'error';
+          status.message = err instanceof Error ? err.message : String(err);
+          status.finishedAt = new Date().toISOString();
+        }
+        this.repo.setConnectionStatus(args.connectionId, 'error');
+      } catch (cleanupErr) {
+        runnerLog.error('execute.unhandled.cleanup-failed', {
+          runId: status.runId,
+          connectionId: args.connectionId,
+          message: cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr),
+        });
+      }
+    });
     return run.id;
   }
 
