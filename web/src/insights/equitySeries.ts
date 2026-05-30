@@ -29,6 +29,9 @@ export interface BrokerageRangeStats {
 
 export interface PerformanceEntry {
   connectionId: string;
+  /** When the engine last fetched this — already on the wire from
+   *  repo.listBrokeragePerformance(); now typed for client use. */
+  fetchedAt?: string;
   data: {
     totalEquity: { date: string; value: number; currency?: string }[];
     currency?: string;
@@ -196,6 +199,22 @@ export function buildEquitySeries(input: BuildEquityInput): SeriesPoint[] {
   return [...byDate.entries()]
     .sort((a, b) => a[0].localeCompare(b[0]))
     .map(([date, value]) => ({ date, value }));
+}
+
+/** Stitches a broker-reported equity series with Hon's own snapshot-derived
+ *  series: broker points up to (and including) the broker's last date, then
+ *  snapshot points strictly after it. Keeps the deep broker history while the
+ *  live tail comes from Hon's per-sync snapshots — so a revoked/frozen broker
+ *  performance feed no longer freezes the chart. Either side empty → the other
+ *  side as-is. Both empty → []. */
+export function stitchSeries(
+  broker: SeriesPoint[],
+  snapshot: SeriesPoint[],
+): SeriesPoint[] {
+  if (!broker.length) return snapshot;
+  const lastBrokerDate = broker[broker.length - 1]!.date;
+  const tail = snapshot.filter((p) => p.date > lastBrokerDate);
+  return tail.length ? [...broker, ...tail] : broker;
 }
 
 export type Range = '1M' | '3M' | 'YTD' | '1Y' | 'ALL';

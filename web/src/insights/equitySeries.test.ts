@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildEquitySeries,
   sliceRange,
+  stitchSeries,
   type BuildEquityInput,
   type SeriesPoint,
 } from './equitySeries';
@@ -187,5 +188,36 @@ describe('sliceRange', () => {
 
   it('empty series stays empty', () => {
     expect(sliceRange([], '1Y', NOW)).toEqual([]);
+  });
+});
+
+describe('stitchSeries', () => {
+  const P = (date: string, value: number) => ({ date, value });
+
+  it('uses broker points up to its last date, then snapshot points after', () => {
+    const broker = [P('2024-01-01', 100), P('2024-06-01', 120)];
+    const snap = [P('2024-05-01', 999), P('2024-07-01', 130), P('2024-08-01', 140)];
+    expect(stitchSeries(broker, snap)).toEqual([
+      P('2024-01-01', 100),
+      P('2024-06-01', 120),
+      P('2024-07-01', 130),
+      P('2024-08-01', 140),
+    ]);
+  });
+
+  it('returns the snapshot series unchanged when broker is empty', () => {
+    const snap = [P('2024-07-01', 130)];
+    expect(stitchSeries([], snap)).toEqual(snap);
+  });
+
+  it('returns the broker series unchanged when there is nothing newer', () => {
+    const broker = [P('2024-01-01', 100), P('2024-06-01', 120)];
+    const snap = [P('2024-03-01', 110)];
+    expect(stitchSeries(broker, snap)).toEqual(broker);
+  });
+
+  it('returns broker as-is when snapshot is empty', () => {
+    const broker = [P('2024-01-01', 100)];
+    expect(stitchSeries(broker, [])).toEqual(broker);
   });
 });
