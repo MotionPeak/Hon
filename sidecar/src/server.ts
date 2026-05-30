@@ -40,6 +40,7 @@ import {
   createExpense,
   deleteExpense,
   refreshSplitwise,
+  recomputePaidStates,
 } from './splitwise.js';
 import { getLogo } from './logos.js';
 import { Vault } from './vault.js';
@@ -909,7 +910,7 @@ app.get('/splitwise/groups', async (_req, reply) => {
 // from the local database, so it needs no Splitwise round-trip.
 app.get('/splitwise/links', async (_req, reply) => {
   if (!repo) return reply.code(503).send({ error: 'database unavailable' });
-  return { links: repo.listSplitwiseLinks() };
+  return { links: repo.listSplitwiseLinks(), repayments: repo.listRepayments() };
 });
 
 // Re-pulls balances from Splitwise and recomputes every link's paid state.
@@ -919,7 +920,7 @@ app.post('/splitwise/refresh', async (_req, reply) => {
   const acct = loadSplitwiseAccount();
   if (!acct) return reply.code(400).send({ error: 'Splitwise is not connected' });
   try {
-    return await refreshSplitwise(acct.apiKey, acct.userId, repo);
+    return await refreshSplitwise(acct.apiKey, repo);
   } catch (err) {
     return reply.code(502).send({ error: err instanceof Error ? err.message : String(err) });
   }
@@ -1010,6 +1011,43 @@ app.delete('/splitwise/expense/:transactionId', async (req, reply) => {
   }
   repo.deleteSplitwiseLink(transactionId);
   return { ok: true };
+});
+
+// Marks an incoming transaction as a Splitwise repayment from a counterparty.
+app.post('/splitwise/repayment', async (req, reply) => {
+  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+  const body = (req.body ?? {}) as {
+    transactionId?: string; counterpartyId?: number; counterpartyName?: string;
+  };
+  const txn = body.transactionId ? repo.getTransaction(body.transactionId) : undefined;
+  if (!txn) return reply.code(404).send({ error: 'transaction not found' });
+  if (!(txn.amount > 0)) {
+    return reply.code(400).send({ error: 'only an incoming transaction can be a repayment' });
+  }
+  if (typeof body.counterpartyId !== 'number') {
+    return reply.code(400).send({ error: 'a counterparty is required' });
+  }
+  repo.createRepayment({
+    transactionId: txn.id,
+    counterpartyId: body.counterpartyId,
+    counterpartyName: (body.counterpartyName ?? '').trim() || `User ${body.counterpartyId}`,
+    currency: txn.currency,
+    amount: txn.amount,
+  });
+  recomputePaidStates(repo);
+  return { links: repo.listSplitwiseLinks(), repayments: repo.listRepayments() };
+});
+
+// Removes a repayment mark from a transaction.
+app.delete('/splitwise/repayment/:transactionId', async (req, reply) => {
+  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+  const { transactionId } = req.params as { transactionId: string };
+  if (!repo.getRepayment(transactionId)) {
+    return reply.code(404).send({ error: 'repayment not found' });
+  }
+  repo.deleteRepayment(transactionId);
+  recomputePaidStates(repo);
+  return { links: repo.listSplitwiseLinks(), repayments: repo.listRepayments() };
 });
 
 // --- Manual assets ----------------------------------------------------------

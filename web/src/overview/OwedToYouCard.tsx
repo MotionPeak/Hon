@@ -1,15 +1,16 @@
 import { money } from '../format';
+import { owedByFriend } from '../splitwise/owed';
 import { useSplitwise } from '../splitwise/useSplitwise';
 
-// Overview card: Splitwise friends who currently owe the user money. Hidden
-// until Splitwise is connected; "all settled up" when no one owes anything.
+// Overview card: friends who currently owe the user money, from Hon's own
+// tracked splits (owed − linked repayments). Hidden until Splitwise is
+// connected; "all settled up" when nothing is owed. Splitwise's own settle-up
+// flag is intentionally not consulted — only real linked repayments reduce this.
 export function OwedToYouCard() {
   const sw = useSplitwise();
   if (!sw.connected) return null;
 
-  const owing = sw.friends
-    .map((f) => ({ name: f.name, owed: f.balances.filter((b) => b.amount > 0) }))
-    .filter((f) => f.owed.length > 0);
+  const owing = owedByFriend(sw.links);
 
   return (
     <section className="card">
@@ -21,11 +22,9 @@ export function OwedToYouCard() {
       {owing.length > 0 ? (
         <div className="list">
           {owing.map((f) => (
-            <div key={f.name} className="row">
+            <div key={`${f.id}-${f.currency}`} className="row">
               <div className="name">{f.name}</div>
-              <span className="amount pos">
-                {f.owed.map((b) => money(b.amount, b.currency)).join(' · ')}
-              </span>
+              <span className="amount pos">{money(f.owed, f.currency)}</span>
             </div>
           ))}
         </div>

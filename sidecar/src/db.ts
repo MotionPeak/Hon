@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-export const SCHEMA_VERSION = 36;
+export const SCHEMA_VERSION = 37;
 
 export interface DbHandle {
   db: Database.Database;
@@ -675,6 +675,23 @@ const MIGRATIONS: { version: number; sql: string }[] = [
     // based incremental shortcut was removed in the same change.
     version: 36,
     sql: `ALTER TABLE connections ADD COLUMN history_months INTEGER NOT NULL DEFAULT 12;`,
+  },
+  {
+    // Splitwise repayments — incoming transactions the user marks as a
+    // friend paying them back. Replaces trusting Splitwise's settle-up flag:
+    // paid_amount/paid_state are recomputed from these rows, not from
+    // Splitwise payment records. `amount` is captured from the txn at mark
+    // time (incoming bank credits don't change). ON DELETE CASCADE mirrors
+    // splitwise_links so removing a txn cleans up.
+    version: 37,
+    sql: `CREATE TABLE splitwise_repayments (
+      transaction_id    TEXT PRIMARY KEY REFERENCES transactions(id) ON DELETE CASCADE,
+      counterparty_id   TEXT NOT NULL,
+      counterparty_name TEXT NOT NULL,
+      currency          TEXT NOT NULL,
+      amount            REAL NOT NULL,
+      created_at        TEXT NOT NULL
+    );`,
   },
 ];
 
