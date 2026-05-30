@@ -626,6 +626,7 @@ export class LlmManager {
     // locked or absent we still persist everything else, and the keys stay in
     // memory for this session — they get written to the vault on next unlock
     // via migrateProviderKeysToVault().
+    const haveKeys = Boolean(this.ollama.apiKey || this.api.apiKey);
     if (this.vault?.unlocked) {
       try {
         const keys: ProviderKeys = {
@@ -634,7 +635,12 @@ export class LlmManager {
         };
         this.vault.saveSecret(PROVIDER_KEYS_SECRET, JSON.stringify(keys));
       } catch {
-        // best-effort: a vault write failure must not lose the provider choice
+        // The vault write failed. If we hold real keys, DON'T rewrite the file
+        // now — a legacy plaintext key may still live there, and rewriting it
+        // keyless would destroy the only surviving copy before it's encrypted.
+        // Bail so the file is left intact for the next unlock/migration retry.
+        // (With no keys to protect there's nothing to lose — fall through.)
+        if (haveKeys) return;
       }
     }
     try {

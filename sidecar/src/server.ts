@@ -121,7 +121,8 @@ try {
 }
 
 // On-device LLM (model download + load). Independent of the database.
-const llm = new LlmManager(dataDir);
+// Pass the vault so provider API keys persist encrypted (H-2), not plaintext.
+const llm = new LlmManager(dataDir, vault ?? undefined);
 
 // Transaction categorization (rules + LLM). Needs the database.
 const categorizer: Categorizer | null = repo ? new Categorizer(repo, llm) : null;
@@ -249,6 +250,12 @@ app.get('/logo/:companyId', async (req, reply) => {
   // fallback when no override is supplied.
   let domain = q.domain;
   if (domain && !/^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(domain)) {
+    return reply.code(400).send({ error: 'bad domain' });
+  }
+  // SSRF guard: a supplied ?domain= must be a public brand hostname — never a
+  // raw IP / loopback / link-local / *.local / *.internal (H-1). Otherwise a
+  // local tab could make the engine fetch internal hosts (e.g. 169.254.169.254).
+  if (domain && !isPublicLogoDomain(domain)) {
     return reply.code(400).send({ error: 'bad domain' });
   }
   if (!domain) {
