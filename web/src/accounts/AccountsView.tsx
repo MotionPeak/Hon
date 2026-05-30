@@ -19,6 +19,10 @@ const InteractiveSignInModal = lazy(() =>
   import('./InteractiveSignInModal').then((m) => ({ default: m.InteractiveSignInModal })),
 );
 
+const CarAssetForm = lazy(() =>
+  import('./CarAssetForm').then((m) => ({ default: m.CarAssetForm })),
+);
+
 // Polling interval while a scrape is in-flight. Short enough that tests
 // resolve quickly via waitFor; long enough that production polling isn't
 // a CPU/network drag.
@@ -147,7 +151,7 @@ export function AccountsView() {
   //   Company         — credential form for a bank/card provider
   //   'manual-asset'  — form for a hand-entered asset (car/property/cash/…)
   //   'manual-loan'   — form for a hand-entered loan (Spitzer amortisation)
-  type AddFlow = null | 'picker' | 'manual-asset' | 'manual-loan' | 'manual-pension' | Company;
+  type AddFlow = null | 'picker' | 'manual-asset' | 'manual-loan' | 'manual-pension' | 'car' | Company;
   const [addFlow, setAddFlow] = useState<AddFlow>(null);
   // When set, render <SnapTradeLinkFlow> in its own modal portal. Holds the
   // connectionId of the newly-created (or existing) SnapTrade connection,
@@ -503,6 +507,7 @@ export function AccountsView() {
           onPickManualAsset={() => setAddFlow('manual-asset')}
           onPickManualLoan={() => setAddFlow('manual-loan')}
           onPickManualPension={() => setAddFlow('manual-pension')}
+          onPickCar={() => setAddFlow('car')}
           onPickBrokerage={(connectionId, brokerSlug, brokerName) => {
             setAddFlow(null);
             setLinkSnapTradeFor({ connectionId, brokerSlug, brokerName });
@@ -528,6 +533,14 @@ export function AccountsView() {
           onClose={() => setAddFlow(null)}
           onSaved={async () => { setAddFlow(null); await refresh(); }}
         />
+      )}
+      {addFlow === 'car' && (
+        <Suspense fallback={null}>
+          <CarAssetForm
+            onClose={() => setAddFlow(null)}
+            onSaved={async () => { setAddFlow(null); await refresh(); }}
+          />
+        </Suspense>
       )}
       {typeof addFlow === 'object' && addFlow !== null && (
         <AddConnectionForm
@@ -1275,6 +1288,8 @@ interface AddConnectionPickerProps {
    *  setAddFlow('manual-pension'), which renders <AddManualAssetForm
    *  initialKind='pension' …/>. */
   onPickManualPension: () => void;
+  /** Picked the Car tile → caller opens CarAssetForm. */
+  onPickCar: () => void;
   /** Fired when the user picks a brokerage in the inline brokerage list.
    *  The parent closes the picker and opens SnapTradeLinkFlow with the
    *  broker pre-selected. */
@@ -1300,11 +1315,10 @@ const PICKER_TILES: CategoryTile[] = [
   { key: 'bank', label: 'Banks', emoji: '🏦' },
   { key: 'card', label: 'Credit cards', emoji: '💳' },
   { key: 'brokerage', label: 'Brokerages', emoji: '📈', subOverride: 'via SnapTrade' },
-  // Car + Pension are intentionally shown but disabled — the flows
-  // still live in the legacy SPA; the tiles keep the React picker visually
-  // aligned with the legacy design until those flows are ported.
-  { key: 'car', label: 'Car', emoji: '🚗', subOverride: 'looked up by plate',
-    comingSoon: true },
+  { key: 'car', label: 'Car', emoji: '🚗', subOverride: 'looked up by plate' },
+  // Pension is intentionally shown but disabled — its flow still lives in
+  // the legacy SPA; the tile keeps the React picker visually aligned with
+  // the legacy design until that flow is ported.
   { key: 'pension', label: 'Pension & savings', emoji: '🪺',
     subOverride: 'pension, gemel & study fund' },
   { key: 'loan', label: 'Loan', emoji: '📉', leaf: 'manual-loan',
@@ -1322,7 +1336,7 @@ type PickerStep =
 
 function AddConnectionPicker(
   { companies, connections, onPickCompany, onPickManualAsset, onPickManualLoan,
-    onPickManualPension, onPickBrokerage, onClose }:
+    onPickManualPension, onPickCar, onPickBrokerage, onClose }:
     AddConnectionPickerProps,
 ) {
   const [step, setStep] = useState<PickerStep>({ kind: 'category' });
@@ -1351,6 +1365,7 @@ function AddConnectionPicker(
           const onClick = () => {
             if (tile.leaf === 'manual-asset') { onPickManualAsset(); return; }
             if (tile.leaf === 'manual-loan')  { onPickManualLoan();  return; }
+            if (tile.key === 'car') { onPickCar(); return; }
             if (tile.key === 'pension') { setStep({ kind: 'pension' }); return; }
             if (tile.key === 'brokerage') { openBrokerageStep(); return; }
             if (tile.key === 'bank' || tile.key === 'card') {

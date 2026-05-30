@@ -783,16 +783,28 @@ describe('AccountsView — add connection (picker + bank/card form)', () => {
     expect(within(dialog).getByRole('button', { name: /other asset/i })).toBeInTheDocument();
   });
 
-  it('the brokerage drilldown shows SnapTrade; Car tile renders disabled (flow lives in legacy)', async () => {
+  it('the brokerage drilldown shows SnapTrade; Car tile is enabled (flow ported to React)', async () => {
     const user = userEvent.setup();
     installFetchMock({ ...FULL, 'GET /api/companies': () => COMPANIES_FULL });
     render(<AccountsView />);
     await user.click(await screen.findByRole('button', { name: /add asset/i }));
     const dialog = screen.getByRole('dialog', { name: /add an asset/i });
     const car = within(dialog).getByRole('button', { name: /^car$/i });
-    expect(car).toBeDisabled();
+    expect(car).not.toBeDisabled();
     await user.click(within(dialog).getByRole('button', { name: /brokerages/i }));
     expect(within(dialog).getByText(/SnapTrade/i)).toBeInTheDocument();
+  });
+
+  it('car tile is enabled and opens the car form', async () => {
+    const user = userEvent.setup();
+    installFetchMock({ ...FULL, 'GET /api/companies': () => COMPANIES_FULL });
+    render(<AccountsView />);
+    await user.click(await screen.findByRole('button', { name: /add asset/i }));
+    const carTile = await screen.findByRole('button', { name: 'Car' });
+    expect(carTile).not.toBeDisabled();
+    await user.click(carTile);
+    // CarAssetForm is lazy → assert async
+    expect(await screen.findByRole('dialog', { name: /add a car/i })).toBeInTheDocument();
   });
 
   it('clicking the Pension tile opens the PensionPickerStep with providers and a custom row', async () => {
