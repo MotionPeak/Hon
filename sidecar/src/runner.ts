@@ -70,6 +70,12 @@ export class ScrapeRunner {
 
   private readonly runs = new Map<string, RunStatus>();
   private readonly otpResolvers = new Map<string, (code: string) => void>();
+  // Connection ids with a scrape currently in flight. Guards against a second
+  // sync stomping on the same connection's browser/session while the first is
+  // still running. Added in start(), cleared in finish() — the single terminal
+  // chokepoint, so a failed run can never leave a connection permanently
+  // locked (H-7).
+  private readonly active = new Set<string>();
   private readonly debugDir: string;
 
   constructor(
@@ -78,6 +84,11 @@ export class ScrapeRunner {
     private readonly vault: Vault,
   ) {
     this.debugDir = join(dataDir, 'debug');
+  }
+
+  /** True while a scrape for this connection is in flight. */
+  isActive(connectionId: string): boolean {
+    return this.active.has(connectionId);
   }
 
   /** Kicks off a scrape and returns its run id immediately. */
@@ -93,6 +104,7 @@ export class ScrapeRunner {
       startedAt: run.startedAt,
     };
     this.runs.set(run.id, status);
+    this.active.add(args.connectionId);
     this.repo.setConnectionStatus(args.connectionId, 'running');
     // One log line per scrape kick-off so the lifecycle for a connection
     // is greppable end-to-end. Credentials are logged by field NAME only —
@@ -458,6 +470,10 @@ export class ScrapeRunner {
     message: string,
   ): void {
     this.otpResolvers.delete(status.runId);
+    // finish() is the single terminal transition for every run (success and
+    // every error/exception path routes here), so clearing the per-connection
+    // lock here guarantees it is always released — even on failure (H-7).
+    this.active.delete(connectionId);
     status.status = result;
     status.message = message;
     status.finishedAt = new Date().toISOString();

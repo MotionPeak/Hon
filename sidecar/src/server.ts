@@ -313,6 +313,13 @@ app.post('/connections/:id/scrape', async (req, reply) => {
       ? Math.max(1, Math.min(24, Math.round(body.monthsBack)))
       : connection.historyMonths;
 
+  // Reject a second sync for a connection that already has one in flight —
+  // two concurrent scrapes would fight over the same browser/session and
+  // double-write transactions (H-7).
+  if (runner.isActive(connection.id)) {
+    return reply.code(409).send({ error: 'a sync is already running for this connection' });
+  }
+
   const runId = runner.start({
     connectionId: connection.id,
     companyId: connection.companyId,
