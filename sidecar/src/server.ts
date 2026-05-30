@@ -497,11 +497,17 @@ app.get('/brokerage', async (_req, reply) => {
   // equivalents for USD/EUR holdings without hard-coding rates; null when
   // the Frankfurter fetch fails — the UI falls back to native amounts.
   const ilsRates = await getIlsRates();
+  const performanceDisabled: Record<string, string> = {};
+  for (const c of repo.listConnections()) {
+    const at = repo.getPerformanceDisabledAt(c.id);
+    if (at) performanceDisabled[c.id] = at;
+  }
   return {
     holdings: repo.listHoldings(),
     snapshots: repo.listValueSnapshots(),
     holdingSnapshots: repo.listHoldingSnapshots(),
     performance: repo.listBrokeragePerformance(),
+    performanceDisabled,
     ilsRates,
   };
 });

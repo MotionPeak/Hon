@@ -6,7 +6,8 @@
 //
 //   1. performance.totalEquity — the broker's own reported equity timeline
 //      (SnapTrade reports, Meitav GetTsuot). Connection-scoped; the bulk of
-//      real long-range history. If ANY performance points exist, they win.
+//      real long-range history. Provides the historical spine; extended by the
+//      snapshot tiers for dates after the broker's last reported point.
 //   2. holdingSnapshots — per-(account,symbol) price-history backfill
 //      (Yahoo/Maya), forward-filled so a missing day doesn't tank the total.
 //   3. snapshots — Hon's per-sync account-level fallback.
@@ -29,6 +30,9 @@ export interface BrokerageRangeStats {
 
 export interface PerformanceEntry {
   connectionId: string;
+  /** When the engine last fetched this — already on the wire from
+   *  repo.listBrokeragePerformance(); now typed for client use. */
+  fetchedAt?: string;
   data: {
     totalEquity: { date: string; value: number; currency?: string }[];
     currency?: string;
@@ -113,10 +117,8 @@ export function buildEquitySeries(input: BuildEquityInput): SeriesPoint[] {
 
   // --- Tier 1: broker-reported performance timeline ----------------------
   const fromPerf = new Map<string, number>();
-  let havePerformance = false;
   for (const p of scopedPerf) {
     const pts = p.data?.totalEquity ?? [];
-    if (pts.length) havePerformance = true;
     const pcur = p.data?.currency ?? 'USD';
     const inception = inceptionFor(p.connectionId);
     for (const pt of pts) {
@@ -126,13 +128,12 @@ export function buildEquitySeries(input: BuildEquityInput): SeriesPoint[] {
       fromPerf.set(pt.date, (fromPerf.get(pt.date) ?? 0) + v);
     }
   }
-  if (havePerformance) {
-    return [...fromPerf.entries()]
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([date, value]) => ({ date, value }));
-  }
+  const brokerSeries: SeriesPoint[] = [...fromPerf.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([date, value]) => ({ date, value }));
 
   // --- Tier 2: per-holding snapshots, forward-filled ---------------------
+  let snapshotSeries: SeriesPoint[] = [];
   if (scopedHoldSnaps.length) {
     const acctIdsInSeries = new Set(scopedHoldSnaps.map((s) => s.accountId));
     const inceptionDates = accounts
@@ -173,29 +174,49 @@ export function buildEquitySeries(input: BuildEquityInput): SeriesPoint[] {
       }
       if (any) out.push({ date: d, value: sum });
     }
-    if (out.length) return out;
+    if (out.length) snapshotSeries = out;
   }
 
   // --- Tier 3: account-level snapshots (Hon's per-sync fallback) ---------
-  const acctInception = new Map<string, string | null>();
-  for (const a of accounts) {
-    if (focusedAcctId) {
-      acctInception.set(a.id, a.id === focusedAcctId ? focusedInception : null);
-    } else if (a.inceptionDate) {
-      acctInception.set(a.id, a.inceptionDate);
+  if (!snapshotSeries.length) {
+    const acctInception = new Map<string, string | null>();
+    for (const a of accounts) {
+      if (focusedAcctId) {
+        acctInception.set(a.id, a.id === focusedAcctId ? focusedInception : null);
+      } else if (a.inceptionDate) {
+        acctInception.set(a.id, a.inceptionDate);
+      }
     }
+    const byDate = new Map<string, number>();
+    for (const s of scopedSnaps) {
+      const inception = acctInception.get(s.accountId);
+      if (inception && s.date < inception) continue;
+      const v = convert(s.value, s.currency);
+      if (v == null) continue;
+      byDate.set(s.date, (byDate.get(s.date) ?? 0) + v);
+    }
+    snapshotSeries = [...byDate.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([date, value]) => ({ date, value }));
   }
-  const byDate = new Map<string, number>();
-  for (const s of scopedSnaps) {
-    const inception = acctInception.get(s.accountId);
-    if (inception && s.date < inception) continue;
-    const v = convert(s.value, s.currency);
-    if (v == null) continue;
-    byDate.set(s.date, (byDate.get(s.date) ?? 0) + v);
-  }
-  return [...byDate.entries()]
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([date, value]) => ({ date, value }));
+
+  return stitchSeries(brokerSeries, snapshotSeries);
+}
+
+/** Stitches a broker-reported equity series with Hon's own snapshot-derived
+ *  series: broker points up to (and including) the broker's last date, then
+ *  snapshot points strictly after it. Keeps the deep broker history while the
+ *  live tail comes from Hon's per-sync snapshots — so a revoked/frozen broker
+ *  performance feed no longer freezes the chart. Either side empty → the other
+ *  side as-is. Both empty → []. */
+export function stitchSeries(
+  broker: SeriesPoint[],
+  snapshot: SeriesPoint[],
+): SeriesPoint[] {
+  if (!broker.length) return snapshot;
+  const lastBrokerDate = broker[broker.length - 1]!.date;
+  const tail = snapshot.filter((p) => p.date > lastBrokerDate);
+  return tail.length ? [...broker, ...tail] : broker;
 }
 
 export type Range = '1M' | '3M' | 'YTD' | '1Y' | 'ALL';

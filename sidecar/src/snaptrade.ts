@@ -142,6 +142,16 @@ function isOneUserLimit(err: unknown): boolean {
   return body?.code === '1012' || /only register one user/i.test(body?.detail ?? '');
 }
 
+/** True when SnapTrade reports the reporting/performance feature is not
+ *  enabled for this plan/connection (HTTP 403, code 1141). Distinct from a
+ *  transient failure so the caller can persist the disabled state and stop
+ *  calling the dead endpoint. */
+export function isFeatureDisabled(err: unknown): boolean {
+  const body = snapErrorBody(err);
+  return body?.code === '1141'
+    || /feature is not enabled/i.test(body?.detail ?? '');
+}
+
 async function registerOnce(
   snaptrade: Snaptrade,
 ): Promise<{ userId: string; userSecret: string }> {
@@ -282,6 +292,7 @@ export async function createPortalLink(
 export async function runSnapTradeSync(
   creds: Record<string, string>,
   vault: Vault,
+  opts: { skipPerformance?: boolean; skipActivities?: boolean } = {},
   onProgress?: (message: string) => void,
 ): Promise<ScrapeOutcome> {
   const user = getStoredUser(creds, vault);
@@ -320,7 +331,9 @@ export async function runSnapTradeSync(
       onProgress?.(`Fetching holdings for ${accountLabel(account)}…`);
       const [holdings, inceptionDate] = await Promise.all([
         fetchHoldings(snaptrade, userId, userSecret, accountId),
-        fetchEarliestActivityDate(snaptrade, userId, userSecret, accountId),
+        opts.skipActivities
+          ? Promise.resolve(undefined)
+          : fetchEarliestActivityDate(snaptrade, userId, userSecret, accountId),
       ]);
       accounts.push({
         accountNumber: account.number || account.id,
@@ -343,13 +356,15 @@ export async function runSnapTradeSync(
       };
     }
 
-    onProgress?.('Fetching historical performance from SnapTrade…');
-    const brokeragePerformance = await fetchPerformanceHistory(
-      snaptrade,
-      userId,
-      userSecret,
-    );
-    return { success: true, accounts, brokeragePerformance };
+    let brokeragePerformance: BrokeragePerformanceData | undefined;
+    let performanceDisabled = false;
+    if (!opts.skipPerformance) {
+      onProgress?.('Fetching historical performance from SnapTrade…');
+      const perf = await fetchPerformanceHistory(snaptrade, userId, userSecret);
+      brokeragePerformance = perf.data;
+      performanceDisabled = perf.disabled;
+    }
+    return { success: true, accounts, brokeragePerformance, performanceDisabled };
   } catch (err) {
     return {
       success: false,
@@ -403,7 +418,7 @@ async function fetchRangeReport(
   userSecret: string,
   range: RangeKey,
   end: Date,
-): Promise<unknown | null> {
+): Promise<{ raw: unknown | null; disabled: boolean }> {
   const start = rangeStartDate(range, end);
   const fmt = (d: Date) => d.toISOString().slice(0, 10);
   try {
@@ -417,12 +432,14 @@ async function fetchRangeReport(
       // shorter windows keeps the parallel fetch fast.
       detailed: range === 'ALL',
     });
-    return res.data ?? {};
+    return { raw: res.data ?? {}, disabled: false };
   } catch (err) {
+    const disabled = isFeatureDisabled(err);
     process.stdout.write(
-      `snaptrade performance ${range} failed: ${describeSnapError(err)}\n`,
+      `snaptrade performance ${range} failed: ${describeSnapError(err)}` +
+        (disabled ? ' [feature disabled]' : '') + '\n',
     );
-    return null;
+    return { raw: null, disabled };
   }
 }
 
@@ -456,19 +473,24 @@ async function fetchPerformanceHistory(
   snaptrade: Snaptrade,
   userId: string,
   userSecret: string,
-): Promise<BrokeragePerformanceData | undefined> {
+): Promise<{ data?: BrokeragePerformanceData; disabled: boolean }> {
   const end = new Date();
   const fmt = (d: Date) => d.toISOString().slice(0, 10);
 
   const fetched = await Promise.all(
-    RANGE_KEYS.map(async (r) => [r, await fetchRangeReport(snaptrade, userId, userSecret, r, end)] as const),
+    RANGE_KEYS.map(async (r) =>
+      [r, await fetchRangeReport(snaptrade, userId, userSecret, r, end)] as const),
   );
+
+  // The feature is reported disabled only when every range hit the 403/1141
+  // wall — a single transient failure shouldn't suppress future calls.
+  const disabled = fetched.every(([, res]) => res.disabled);
 
   // ALL anchors the equity series; if it failed, the chart has nothing to
   // draw and we report the whole fetch as a miss. Yahoo backfill will pick
   // up the slack downstream.
   const allEntry = fetched.find(([r]) => r === 'ALL');
-  const allData = allEntry ? (allEntry[1] as
+  const allData = allEntry ? (allEntry[1].raw as
     {
       totalEquityTimeframe?: unknown;
       contributionTimeframeCumulative?: unknown;
@@ -476,11 +498,11 @@ async function fetchPerformanceHistory(
       dividendIncome?: number | null;
       contributions?: { total?: number | null } | number | null;
     } | null) : null;
-  if (!allData) return undefined;
+  if (!allData) return { data: undefined, disabled };
 
   const byRange: Record<string, BrokerageRangeStats> = {};
-  for (const [r, raw] of fetched) {
-    if (raw) byRange[r] = extractRangeStats(raw);
+  for (const [r, res] of fetched) {
+    if (res.raw) byRange[r] = extractRangeStats(res.raw);
   }
 
   const totalEquity = mapPoints(allData.totalEquityTimeframe);
@@ -494,15 +516,18 @@ async function fetchPerformanceHistory(
   }
 
   return {
-    totalEquity,
-    contributionsCumulative: mapPoints(allData.contributionTimeframeCumulative),
-    rateOfReturn: allRange.rateOfReturn,
-    dividendIncome: allRange.dividendIncome,
-    contributions: allRange.contributions,
-    currency: totalEquity[0]?.currency,
-    rangeStart: startDate,
-    rangeEnd: endDate,
-    byRange,
+    data: {
+      totalEquity,
+      contributionsCumulative: mapPoints(allData.contributionTimeframeCumulative),
+      rateOfReturn: allRange.rateOfReturn,
+      dividendIncome: allRange.dividendIncome,
+      contributions: allRange.contributions,
+      currency: totalEquity[0]?.currency,
+      rangeStart: startDate,
+      rangeEnd: endDate,
+      byRange,
+    },
+    disabled,
   };
 }
 

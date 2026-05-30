@@ -30,6 +30,11 @@ const BANK_SESSION_DENYLIST = new Set<string>([
   'max',
 ]);
 
+// Once SnapTrade reports its performance feature disabled (code 1141), stop
+// calling the dead endpoint — but re-probe this often so a re-enabled plan
+// recovers on its own.
+const PERF_REPROBE_MS = 24 * 60 * 60 * 1000;
+
 
 export interface StartArgs {
   connectionId: string;
@@ -190,11 +195,19 @@ export class ScrapeRunner {
         log.info('library.progress', { type: progress, message: humanized });
       };
       if (isSnapTrade(args.companyId)) {
-        log.info('dispatch', { runner: 'snaptrade' });
-        outcome = await runSnapTradeSync(args.credentials, this.vault, (message) => {
-          status.message = message;
-          log.info('snaptrade.progress', { message });
-        });
+        const disabledAt = this.repo.getPerformanceDisabledAt(args.connectionId);
+        const skip = disabledAt != null
+          && Date.now() - new Date(disabledAt).getTime() < PERF_REPROBE_MS;
+        log.info('dispatch', { runner: 'snaptrade', skipPerformance: skip });
+        outcome = await runSnapTradeSync(
+          args.credentials,
+          this.vault,
+          { skipPerformance: skip, skipActivities: skip },
+          (message) => {
+            status.message = message;
+            log.info('snaptrade.progress', { message });
+          },
+        );
       } else if (isPensionCompany(args.companyId)) {
         // Pension funds have no scraper library, so a custom Puppeteer routine
         // drives the portal login (and any SMS one-time code) itself.
@@ -284,6 +297,14 @@ export class ScrapeRunner {
         saved: saved.transactions,
         skipped: txnsFetched - saved.transactions,
       });
+      if (isSnapTrade(args.companyId)) {
+        if (outcome.performanceDisabled) {
+          this.repo.setPerformanceDisabled(args.connectionId, new Date().toISOString());
+          log.info('brokerage.performance.disabled');
+        } else if (outcome.brokeragePerformance) {
+          this.repo.setPerformanceDisabled(args.connectionId, null);
+        }
+      }
       if (outcome.brokeragePerformance) {
         this.repo.saveBrokeragePerformance(args.connectionId, outcome.brokeragePerformance);
         log.info('brokerage.performance.saved');

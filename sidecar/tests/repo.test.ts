@@ -131,3 +131,19 @@ describe('analytics exclude patterns', () => {
     expect(repo.expenseStats('2026-05-01', '2026-06-01', ['מקס איט']).count).toBe(1);
   });
 });
+
+describe('snaptrade performance-disabled marker', () => {
+  it('round-trips and clears', () => {
+    const { repo } = makeRepo();
+    expect(repo.getPerformanceDisabledAt('conn1')).toBeNull();
+    repo.setPerformanceDisabled('conn1', '2026-05-30T10:00:00.000Z');
+    expect(repo.getPerformanceDisabledAt('conn1')).toBe('2026-05-30T10:00:00.000Z');
+    repo.setPerformanceDisabled('conn1', null);
+    expect(repo.getPerformanceDisabledAt('conn1')).toBeNull();
+  });
+  it('is scoped per connection', () => {
+    const { repo } = makeRepo();
+    repo.setPerformanceDisabled('connA', '2026-05-30T10:00:00.000Z');
+    expect(repo.getPerformanceDisabledAt('connB')).toBeNull();
+  });
+});
