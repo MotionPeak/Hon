@@ -3165,3 +3165,22 @@ button.bh-row:active { transform: none; }        /* suppress global scale(.97) *
   }
   .app-nav .nav-pill { transition-duration: .08s; }
 }
+
+/* Car asset form */
+.car-plate-row { display: flex; gap: 8px; align-items: stretch; }
+.car-plate-row input { flex: 1 1 auto; min-width: 0; }
+.car-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.car-yad2 { width: 100%; margin: 4px 0 2px; }
+.car-spec-card {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 4px 16px;
+  padding: 10px 12px; margin: 4px 0 10px;
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-radius: 10px; font-size: 0.85rem;
+}
+.car-spec-row { display: flex; justify-content: space-between; gap: 8px; }
+.car-spec-label { color: var(--muted); }
+.car-spec-value { font-weight: 600; }
+@media (max-width: 420px) {
+  .car-grid2, .car-spec-card { grid-template-columns: 1fr; }
+}
