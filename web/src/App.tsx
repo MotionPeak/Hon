@@ -9,11 +9,10 @@ import { PiggyView } from './piggy/PiggyView';
 import { RecurringView } from './recurring/RecurringView';
 import { SettingsProvider } from './settings/useSettings';
 import { SettingsView } from './settings/SettingsView';
-import { SubscriptionsView } from './subscriptions/SubscriptionsView';
 import { VouchersView } from './vouchers/VouchersView';
 
 type Tab =
-  | 'overview' | 'accounts' | 'activity' | 'recurring' | 'subscriptions'
+  | 'overview' | 'accounts' | 'activity' | 'recurring'
   | 'piggy' | 'vouchers' | 'loans' | 'insights' | 'settings';
 
 interface TabDef {
@@ -27,8 +26,7 @@ const TABS: TabDef[] = [
   { id: 'accounts',  label: 'Assets',      emoji: '🏦' },
   { id: 'activity',  label: 'Activity',    emoji: '🧾' },
   { id: 'recurring',     label: 'Fixed bills',   emoji: '📆' },
-  { id: 'subscriptions', label: 'Subscriptions', emoji: '🔁' },
-  { id: 'piggy',         label: 'Piggy banks',   emoji: '🐷' },
+{ id: 'piggy',         label: 'Piggy banks',   emoji: '🐷' },
   { id: 'loans',     label: 'Loans',       emoji: '📉' },
   { id: 'vouchers',  label: 'Vouchers',    emoji: '🎟️' },
   { id: 'insights',  label: 'Insights',    emoji: '💡' },
@@ -200,8 +198,7 @@ export function App() {
               {tab === 'accounts' && <AccountsView />}
               {tab === 'activity' && <ActivityView />}
               {tab === 'recurring' && <RecurringView />}
-              {tab === 'subscriptions' && <SubscriptionsView />}
-              {tab === 'piggy' && <PiggyView />}
+{tab === 'piggy' && <PiggyView />}
               {tab === 'vouchers' && <VouchersView />}
               {tab === 'loans' && <LoansView />}
               {tab === 'insights' && <InsightsView />}
