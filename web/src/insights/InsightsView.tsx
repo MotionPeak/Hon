@@ -271,6 +271,7 @@ interface BrokerageResp {
   snapshots: ValueSnapshot[];
   holdingSnapshots: HoldingSnapshot[];
   performance: PerformanceEntry[];
+  performanceDisabled?: Record<string, string>;
   ilsRates: Record<string, number> | null;
 }
 
@@ -470,7 +471,7 @@ function BrokerageSubTab() {
     } catch {
       setData({
         holdings: [], snapshots: [], holdingSnapshots: [],
-        performance: [], ilsRates: null,
+        performance: [], performanceDisabled: {}, ilsRates: null,
       });
     }
   }, []);
@@ -620,9 +621,11 @@ function BrokerageSubTab() {
   // display currency). Fall back to the top-level fields for caches predating
   // the per-range fetch.
   const scopedConnIds = new Set(scopedBrkAccounts.map((a) => a.connectionId));
+  const perfDisabled = data.performanceDisabled ?? {};
   let rateSum = 0, rateCount = 0, dividend = 0, haveDividend = false;
   for (const p of data.performance) {
     if (!scopedConnIds.has(p.connectionId)) continue;
+    if (perfDisabled[p.connectionId]) continue; // frozen feed → byRange stats are stale
     const w = p.data.byRange?.[range] ?? {
       rateOfReturn: p.data.rateOfReturn ?? null,
       dividendIncome: p.data.dividendIncome ?? null,

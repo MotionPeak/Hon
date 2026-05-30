@@ -1285,4 +1285,76 @@ describe('InsightsView — per-range stat tiles', () => {
     expect(screen.queryByText(/Rate of return/)).toBeNull();
     expect(screen.queryByText(/Dividends ·/)).toBeNull();
   });
+
+  it('hides Rate-of-return + Dividend tiles when the connection performance is disabled', async () => {
+    const user = userEvent.setup();
+    installFetchMock({
+      ...EMPTY_TXNS,
+      'GET /api/accounts': () => rangeAccountsResp,
+      'GET /api/brokerage': () => ({
+        holdings: rangeHoldings,
+        snapshots: rangeSnapshots,
+        holdingSnapshots: [],
+        performance: [
+          {
+            connectionId: 'conn1',
+            data: {
+              currency: 'USD',
+              totalEquity: [
+                { date: today.toISOString().slice(0, 10), value: 5000, currency: 'USD' },
+              ],
+              byRange: {
+                '1Y': { rateOfReturn: 0.085, dividendIncome: 42, contributions: 0 },
+              },
+            },
+          },
+        ],
+        // The byRange still carries live-looking numbers — the ONLY reason the
+        // tiles should hide is this disabled flag (frozen feed → stale stats).
+        performanceDisabled: { conn1: '2026-05-30T10:00:00.000Z' },
+        ilsRates: { USD: 3.7 },
+      }),
+    });
+    renderView();
+    await user.click(await screen.findByRole('tab', { name: /brokerage/i }));
+    await screen.findByTestId('brokerage-stats');
+    expect(screen.queryByText(/Rate of return/)).toBeNull();
+    expect(screen.queryByText(/Dividends ·/)).toBeNull();
+    // live, position-derived tiles still present:
+    expect(screen.getByText('Portfolio value')).toBeInTheDocument();
+  });
+
+  it('still shows the tiles when performanceDisabled is empty', async () => {
+    const user = userEvent.setup();
+    installFetchMock({
+      ...EMPTY_TXNS,
+      'GET /api/accounts': () => rangeAccountsResp,
+      'GET /api/brokerage': () => ({
+        holdings: rangeHoldings,
+        snapshots: rangeSnapshots,
+        holdingSnapshots: [],
+        performance: [
+          {
+            connectionId: 'conn1',
+            data: {
+              currency: 'USD',
+              totalEquity: [
+                { date: today.toISOString().slice(0, 10), value: 5000, currency: 'USD' },
+              ],
+              byRange: {
+                '1Y': { rateOfReturn: 0.085, dividendIncome: 42, contributions: 0 },
+              },
+            },
+          },
+        ],
+        performanceDisabled: {},
+        ilsRates: { USD: 3.7 },
+      }),
+    });
+    renderView();
+    await user.click(await screen.findByRole('tab', { name: /brokerage/i }));
+    await screen.findByTestId('brokerage-stats');
+    expect(screen.getByText('Rate of return · 1Y')).toBeInTheDocument();
+    expect(screen.getByText('Dividends · 1Y')).toBeInTheDocument();
+  });
 });
