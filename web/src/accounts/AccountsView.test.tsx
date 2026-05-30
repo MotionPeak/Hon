@@ -745,6 +745,31 @@ describe('AccountsView — assets', () => {
     expect(screen.queryByText('Mortgage')).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: /loans/i })).not.toBeInTheDocument();
   });
+
+  it('car asset card shows a spec sub-line and a Re-check value button', async () => {
+    const user = userEvent.setup();
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    installFetchMock({
+      ...FULL,
+      'GET /api/assets': () => ({
+        assets: [{
+          id: 'c1', kind: 'car', name: 'Toyota Corolla', value: 55000,
+          currency: 'ILS', excluded: false,
+          details: { plate: '12345678', year: 2020, km: 60000, color: 'Blue' },
+          createdAt: '2025-01-01', updatedAt: '2026-05-25',
+        }],
+      }),
+    });
+    render(<AccountsView />);
+    expect(await screen.findByText('2020 · 60,000 km · Blue')).toBeInTheDocument();
+    const recheck = screen.getByRole('button', { name: /re-check value/i });
+    await user.click(recheck);
+    expect(open).toHaveBeenCalledWith('https://www.yad2.co.il/price-list', '_blank');
+    // Clicking Re-check also opens the existing edit modal (value-focused).
+    // AssetEditModal's aria-label is `Edit ${asset.name}`.
+    expect(await screen.findByRole('dialog', { name: /edit toyota corolla/i }))
+      .toBeInTheDocument();
+  });
 });
 
 describe('AccountsView — add connection (picker + bank/card form)', () => {
@@ -783,16 +808,28 @@ describe('AccountsView — add connection (picker + bank/card form)', () => {
     expect(within(dialog).getByRole('button', { name: /other asset/i })).toBeInTheDocument();
   });
 
-  it('the brokerage drilldown shows SnapTrade; Car tile renders disabled (flow lives in legacy)', async () => {
+  it('the brokerage drilldown shows SnapTrade; Car tile is enabled (flow ported to React)', async () => {
     const user = userEvent.setup();
     installFetchMock({ ...FULL, 'GET /api/companies': () => COMPANIES_FULL });
     render(<AccountsView />);
     await user.click(await screen.findByRole('button', { name: /add asset/i }));
     const dialog = screen.getByRole('dialog', { name: /add an asset/i });
     const car = within(dialog).getByRole('button', { name: /^car$/i });
-    expect(car).toBeDisabled();
+    expect(car).not.toBeDisabled();
     await user.click(within(dialog).getByRole('button', { name: /brokerages/i }));
     expect(within(dialog).getByText(/SnapTrade/i)).toBeInTheDocument();
+  });
+
+  it('car tile is enabled and opens the car form', async () => {
+    const user = userEvent.setup();
+    installFetchMock({ ...FULL, 'GET /api/companies': () => COMPANIES_FULL });
+    render(<AccountsView />);
+    await user.click(await screen.findByRole('button', { name: /add asset/i }));
+    const carTile = await screen.findByRole('button', { name: 'Car' });
+    expect(carTile).not.toBeDisabled();
+    await user.click(carTile);
+    // CarAssetForm is lazy → assert async
+    expect(await screen.findByRole('dialog', { name: /add a car/i })).toBeInTheDocument();
   });
 
   it('clicking the Pension tile opens the PensionPickerStep with providers and a custom row', async () => {

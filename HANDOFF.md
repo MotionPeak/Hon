@@ -33,6 +33,34 @@
 
 ## TL;DR — state of the world (2026-05-30)
 
+- **Car flow ported to React (2026-05-30).** The `🚗 Car` Add-asset tile is now
+  live (was `comingSoon`). New `web/src/accounts/CarAssetForm.tsx` (lazy-loaded):
+  plate **Look up** → `GET /vehicle/:plate` → a polished spec card
+  (make·model·trim·year·fuel·colour) that prefills editable fields; a failed
+  lookup just leaves the fields editable (manual fallback, no dead end); value
+  entry + **Look up the price on Yad2 ↗** handoff; saves via `POST /assets`
+  `kind:'car'` with the **full spec** in `details`
+  (plate/year/km/ownership/make/model/trim/fuel/colour). Pure helpers in
+  `web/src/accounts/vehicle.ts` (`cleanPlate`/`isValidPlate`/`vehicleName`/
+  `ownershipKey` ported from legacy/`carSubline`/`YAD2_PRICE_LIST`). The car
+  `AssetCard` gained a spec sub-line (`2020 · 60,000 km · Blue`) + a **Re-check
+  value ↗** button (opens Yad2 + the value editor; plate is stored). **No engine
+  changes** — `/vehicle/:plate`, `POST /assets`, `PUT /assets/:id` all pre-existed.
+  Built brainstorm → writing-plans → subagent-driven-development; final code
+  review clean + review fixes applied (dead `comingSoon` machinery removed, Yad2
+  URL DRY'd, `details` typed, `carSubline` guards tightened). Web suite **511**
+  pass, both typechecks clean. Visually verified by Shahar against the live engine
+  (worktree vite — tile enabled, real plate lookup → spec card, save → card spec
+  line + Re-check). Spec/plan: `docs/superpowers/{specs,plans}/2026-05-30-car-react-port*`.
+  Merged to `main` (`session/car-react-port-2026-05-30`). **Still deferred:** live
+  hand-test edge cases aside, the only remaining React asset port was Car — done.
+
+- **SnapTrade portal flow confirmed working end-to-end (2026-05-30).**
+  Shahar hand-tested the full Add Account → Brokerages → broker pick →
+  OAuth handshake → 3s poll → accounts-appear flow against a real
+  broker; it works. The long-standing "never completed a real OAuth
+  handshake" caveat is now closed. No code change — just verification.
+
 - **Assets History picker — scoped + restyled (2026-05-30).** The per-connection
   **History** sync-window control now renders **only on Banks + Credit-cards** cards;
   Pension and Investments (SnapTrade/IBKR) cards no longer show it. The mechanism is
@@ -81,8 +109,9 @@
   Verified live via chrome-devtools against the connected dev DB: Overview
   card, Settings connected card, sidebar linked section + Delete, and the row
   note all render (split *sheet* covered by unit tests — the headless click
-  harness wouldn't reliably reopen the sidebar to drive it). Branch:
-  `session/splitwise-react-2026-05-29` (not yet merged).
+  harness wouldn't reliably reopen the sidebar to drive it). Branch
+  `session/splitwise-react-2026-05-29` — **merged to `main`** (commit
+  `2944fdb`).
 - **Activity 2-month cap fixed (2026-05-29).** `GET /transactions` defaulted
   to `limit=200` (hard-capped 1000), so the four bare-fetch React tabs
   (Activity, Insights, Recurring, Subscriptions) only received the newest
@@ -756,16 +785,14 @@ All 10 tabs render with rich, near-legacy parity. Highlights:
 - **Fix HIGH security findings from CODE-REVIEW** — H-1 (`/logo`
   path traversal), H-2 (plaintext LLM keys → vault), H-6 (scrypt
   cost) are real exposure that wouldn't be hard to ship.
-- **Manual smoke of SnapTrade portal end-to-end** — visually
-  verified through to the brokerage picker but never actually
-  completed an OAuth handshake with a real broker. Pick IBKR, walk
-  through, confirm accounts appear + 3s poll detects the link.
-- **Car flow port to React** — tile is visible-but-disabled today.
-  Legacy `renderCarStep` in `sidecar/public/app.html` is the
-  reference: plate-lookup via data.gov.il, deep-link to Yad2 for
-  price (CAPTCHA-walled per memory). **Next React port to do** — and
-  it should follow the same dedicated-PickerStep pattern the pension
-  port just established (see `PensionPickerStep`).
+- ~~**Manual smoke of SnapTrade portal end-to-end**~~ — **CONFIRMED
+  WORKING by Shahar 2026-05-30.** The full portal flow (Add Account →
+  Brokerages → broker pick → OAuth handshake → 3s poll detects link →
+  accounts appear) was exercised against a real broker and works
+  end-to-end. No code change needed.
+- ~~**Car flow port to React**~~ — **SHIPPED 2026-05-30**, merged to `main`
+  (branch `session/car-react-port-2026-05-30`). See § "Car flow ported to
+  React (2026-05-30)".
 - ~~**Pension flow port to React**~~ — **DONE 2026-05-28**, merged to
   `main` (branch `session/pension-react-port-2026-05-27`). See
   § "What shipped this session (2026-05-28)".
