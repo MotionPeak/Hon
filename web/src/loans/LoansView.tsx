@@ -49,10 +49,22 @@ export function LoansView() {
       <div className="loans-view">
         <h1>Loans</h1>
         <p className="blank">
-          📉 No loans yet. Add one from the Accounts tab — Hon computes the
-          Spitzer schedule, monthly payment, and payoff date from the
-          principal, term, and rate.
+          📉 No loans yet. Hon computes the Spitzer schedule, monthly payment,
+          and payoff date from the principal, term, and rate.
         </p>
+        <button
+          type="button"
+          className="mini"
+          onClick={() => {
+            // Loans are added through the Assets picker; flag the intent and
+            // ask the shell to flip to the Assets tab, where AccountsView opens
+            // the loan form on mount (see its hon.pendingAddLoan effect).
+            window.localStorage.setItem('hon.pendingAddLoan', '1');
+            window.dispatchEvent(new Event('hon.go-to-assets'));
+          }}
+        >
+          + Add a loan
+        </button>
       </div>
     );
   }
