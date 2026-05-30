@@ -4,7 +4,7 @@ import { money } from '../format';
 import type { Account, Company } from '../accounts/types';
 import { DelayedLoader } from '../ui/DelayedLoader';
 import { useSettings } from '../settings/useSettings';
-import { currentCycleRange } from '../cycle';
+import { currentCycleRange, currentCycleKey, prevCycleKey } from '../cycle';
 import type { Transaction } from '../activity/types';
 import type { Category } from '../settings/CategoriesPanel';
 import {
@@ -13,6 +13,10 @@ import {
 } from '../recurring/helpers';
 import { useSplitwise } from '../splitwise/useSplitwise';
 import { OwedToYouCard } from './OwedToYouCard';
+import { isExcludedFromCycle } from '../activity/excluded';
+import { buildPieCats } from './spend';
+import { SpendingCard } from './SpendingCard';
+import { BudgetCard } from './BudgetCard';
 
 /**
  * Builds the `/budget` query path, scoping it to the user's billing-cycle
@@ -155,6 +159,25 @@ export function OverviewView() {
     ? predictedFixed + (v.essentialSpent ?? 0)
     : (v?.committed ?? 0);
 
+  // This cycle's spend, grouped by category, for the donut + the budget card's
+  // "Spent this month" total. Same card-bill / refund filter the Activity and
+  // Insights tabs use, so the donut total reconciles with both. Falls back to
+  // empty when the transactions fetch hasn't landed (or failed).
+  const isExcluded = (t: Transaction): boolean => isExcludedFromCycle(t, {
+    hideCardTotals: settings.hideCardTotals,
+    cardProviders: settings.cardProviders,
+  });
+  const curKey = currentCycleKey(settings.monthStartDay);
+  const spend = recurring
+    ? buildPieCats(
+        recurring.transactions, recurring.categories, settings.monthStartDay,
+        isExcluded, curKey, prevCycleKey(curKey),
+      )
+    : { cats: [], total: 0, prevTotal: 0 };
+  const spendChangePct = spend.prevTotal > 0
+    ? ((spend.total - spend.prevTotal) / spend.prevTotal) * 100
+    : null;
+
   return (
     <div className="overview-view">
       <h1>Overview</h1>
@@ -168,10 +191,21 @@ export function OverviewView() {
             accounts={accounts}
           />
         )}
-        {essentials.length > 0 && (
-          <EssentialsCard essentials={essentials} currency={budget!.currency} />
-        )}
         <NetWorthCard summary={summary} />
+        {v && (
+          <div className="ov-grid">
+            <SpendingCard cats={spend.cats} total={spend.total} changePct={spendChangePct} />
+            <BudgetCard
+              variable={v}
+              essentials={essentials}
+              categories={recurring?.categories ?? []}
+              predictedFixed={predictedFixed}
+              totalSpent={spend.total}
+              currency={budget!.currency}
+              monthStartDay={settings.monthStartDay}
+            />
+          </div>
+        )}
         <OwedToYouCard />
       </div>
     </div>
@@ -302,48 +336,6 @@ function BankProjection({
         <Detail label="Set asides (piggies)" amount={cyclePiggy} tone="bad" />
       </div>
     </div>
-  );
-}
-
-function EssentialsCard({
-  essentials, currency,
-}: {
-  essentials: BudgetLine[];
-  currency: string;
-}) {
-  const sorted = essentials.slice().sort((a, b) => b.spent - a.spent);
-  return (
-    <section className="card essentials-card" data-testid="essentials-card">
-      <div className="ess-head">Essentials</div>
-      <ul className="ess-list">
-        {sorted.map((l) => {
-          const budget = l.budget ?? 0;
-          const over = budget > 0 && l.spent > budget;
-          const pct = budget > 0
-            ? Math.min(100, Math.round((l.spent / budget) * 100))
-            : 0;
-          return (
-            <li key={l.category} className={`ess-row${over ? ' over' : ''}`}>
-              <div className="ess-row-head">
-                <span className="ess-cat">{l.category}</span>
-                <span className="ess-nums">
-                  <b>{money(l.spent, currency)}</b>
-                  {budget > 0 && <span className="ess-budget"> / {money(budget, currency)}</span>}
-                </span>
-              </div>
-              {budget > 0 && (
-                <div className="ess-bar">
-                  <div
-                    className={`ess-bar-fill${over ? ' over' : ''}`}
-                    style={{ width: `${pct}%` }}
-                  />
-                </div>
-              )}
-            </li>
-          );
-        })}
-      </ul>
-    </section>
   );
 }
 
