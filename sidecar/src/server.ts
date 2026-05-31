@@ -1805,6 +1805,26 @@ app.patch('/transactions/:id/excluded', async (req, reply) => {
   return { ok: true, excluded };
 });
 
+/**
+ * Mark/unmark a transaction as a savings transfer. Body `{ savings: boolean }`.
+ * A savings row drops out of spend totals AND is tallied as "saved this cycle";
+ * it is mutually exclusive with the manual exclude (the repo clears one when
+ * setting the other).
+ */
+app.patch('/transactions/:id/savings', async (req, reply) => {
+  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+  const { id } = req.params as { id: string };
+  const body = (req.body ?? {}) as { savings?: boolean };
+  if (typeof body.savings !== 'boolean') {
+    return reply.code(400).send({ error: 'savings must be a boolean' });
+  }
+  if (!repo.getTransaction(id)) {
+    return reply.code(404).send({ error: 'transaction not found' });
+  }
+  repo.setTransactionSavings(id, body.savings);
+  return { ok: true, savings: body.savings };
+});
+
 app.post('/loans', async (req, reply) => {
   if (!repo) return reply.code(503).send({ error: 'database unavailable' });
   const body = (req.body ?? {}) as {
