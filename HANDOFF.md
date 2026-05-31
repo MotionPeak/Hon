@@ -35,6 +35,10 @@
 
 - **Legacy SPA retired (2026-05-31)** — engine serves the React build
   from `web/dist` (built on launch by web.mjs); `app.html` deleted.
+  **Gotcha:** this added the `@fastify/static` dependency, but `web.mjs` only
+  auto-runs `npm install` when `sidecar/node_modules` is *absent* — so an
+  existing checkout crashes on start with `ERR_MODULE_NOT_FOUND: @fastify/static`
+  until you run `cd sidecar && npm install` once. (Done on this machine.)
 - **All 9 remaining HIGH security findings fixed (2026-05-30).** Branch
   `session/security-high-fixes-2026-05-30`, 15 commits (plan + 10 fixes + 4
   adversarial-review follow-ups). Plan:
