@@ -15,3 +15,6 @@ data/
 # Secrets — the deployment token. Commit .env.example, never .env.
 .env
 .env.local
+
+# Local Claude Code session scratch (worktrees, memory) — never track
+.claude/
