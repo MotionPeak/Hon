@@ -15,7 +15,7 @@ import { useSplitwise } from '../splitwise/useSplitwise';
 import { owedByFriend } from '../splitwise/owed';
 import { OwedToYouCard } from './OwedToYouCard';
 import { isExcludedFromCycle } from '../activity/excluded';
-import { buildPieCats } from './spend';
+import { buildPieCats, savedThisCycle } from './spend';
 import { SpendingCard } from './SpendingCard';
 import { BudgetCard } from './BudgetCard';
 
@@ -188,6 +188,9 @@ export function OverviewView() {
   const spendChangePct = spend.prevTotal > 0
     ? ((spend.total - spend.prevTotal) / spend.prevTotal) * 100
     : null;
+  const saved = recurring
+    ? savedThisCycle(recurring.transactions, curKey, settings.monthStartDay)
+    : 0;
 
   return (
     <div className="overview-view">
@@ -224,6 +227,13 @@ export function OverviewView() {
               monthStartDay={settings.monthStartDay}
               onSaved={() => setRefreshKey((k) => k + 1)}
             />
+          </div>
+        )}
+        {saved > 0 && (
+          <div className="ov-saved" data-testid="saved-this-cycle">
+            <span className="ov-saved-ico">💰</span>
+            <span className="ov-saved-label">Saved this cycle</span>
+            <span className="ov-saved-amt">{money(saved, 'ILS')}</span>
           </div>
         )}
         <OwedToYouCard />

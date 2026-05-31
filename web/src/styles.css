@@ -2143,6 +2143,37 @@ button.bh-row:active { transform: none; }        /* suppress global scale(.97) *
 .act-excluded-row { opacity: 0.78; }
 .act-excluded-row:hover { opacity: 1; }
 
+/* Activity "Savings" bucket — mirrors .act-excluded, money-tinted. */
+.act-savings {
+  margin-top: 24px;
+  border-top: 1px dashed var(--hairline);
+  padding-top: 14px;
+}
+.act-savings-head {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  background: transparent; border: 0; padding: 4px 2px;
+  color: var(--muted); font-size: 12px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.07em;
+  cursor: pointer;
+}
+.act-savings-head:hover { color: var(--text); }
+.act-savings-caret {
+  display: inline-flex; width: 12px; justify-content: center;
+  font-size: 10px;
+}
+.act-savings-name { flex: 0 0 auto; color: var(--green); }
+.act-savings-line {
+  flex: 1; height: 1px; background: var(--hairline);
+}
+.act-savings-total {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums; color: var(--green); font-weight: 700;
+}
+.act-savings .txn-list { margin-top: 8px; }
+.act-savings-row { opacity: 0.78; }
+.act-savings-row:hover { opacity: 1; }
+.act-savings-row .txn-amt { color: var(--green); }
+
 /* Delayed loader — appears only when a request runs longer than the
    250ms threshold the component holds for. Centred in the content area
    instead of clinging to the top-left, so when it does appear it reads
@@ -3437,4 +3468,17 @@ button.bh-row:active { transform: none; }        /* suppress global scale(.97) *
 .subs-section-title {
   font: 800 18px/1 ui-rounded, "SF Pro Rounded", system-ui;
   color: var(--text); letter-spacing: -.2px; margin-bottom: 10px;
+}
+
+/* Overview "saved this cycle" line. */
+.ov-saved {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--card); border: 1px solid var(--hairline);
+  border-radius: 14px; padding: 13px 16px; box-shadow: var(--shadow-sm);
+}
+.ov-saved-ico { font-size: 16px; }
+.ov-saved-label { color: var(--muted); font-size: 13px; font-weight: 600; }
+.ov-saved-amt {
+  margin-left: auto; color: var(--green); font-weight: 800;
+  font-variant-numeric: tabular-nums;
 }

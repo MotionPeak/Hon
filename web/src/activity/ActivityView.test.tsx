@@ -789,3 +789,34 @@ describe('ActivityView — Splitwise note', () => {
     expect(await screen.findByText(/owed to you/i)).toBeInTheDocument();
   });
 });
+
+describe('ActivityView — savings bucket', () => {
+  const WITH_SAVINGS = {
+    ...FULL,
+    'GET /api/transactions': () => ({
+      transactions: [
+        ...TXNS.transactions,
+        {
+          id: 't-sv', accountId: 'a-1', externalId: 'xsv',
+          date: `${thisMonth}-12`, processedDate: null, amount: -1000,
+          currency: 'ILS', description: 'Transfer to savings', memo: null,
+          kind: null, status: null, category: 'Other', createdAt: `${thisMonth}-12`,
+          savings: true,
+        },
+      ],
+    }),
+  };
+
+  it('files savings rows in a Savings bucket, not the counted spend list', async () => {
+    const user = userEvent.setup();
+    installFetchMock(WITH_SAVINGS);
+    renderView();
+    // The Savings bucket header shows the count; the row is collapsed (and so
+    // never appears in the counted category groups above).
+    const head = await screen.findByText(/Savings \(1\)/);
+    expect(screen.queryByText('Transfer to savings')).not.toBeInTheDocument();
+    // Expanding reveals the row.
+    await user.click(head);
+    expect(await screen.findByText('Transfer to savings')).toBeInTheDocument();
+  });
+});

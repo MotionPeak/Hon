@@ -100,6 +100,24 @@
     abandoned bank OTP — only the automated runner half is covered), H-1
     DNS-rebind hardening, H-7 runId-aware lock, plus the ~25 MEDIUM findings.
 
+- **Savings transaction mark shipped (2026-05-31).** A transaction can be marked
+  **Savings** (Activity → tap a txn → sidebar "Savings" toggle, beside "Exclude
+  from cycle"; mutually exclusive with it). A savings row is pulled out of every
+  spend/"minus" calculation AND tallied separately: its own green **"Savings"
+  bucket** in Activity + a **"Saved this cycle"** line on the Overview. Net worth
+  untouched (balance-based). New `transactions.savings` column (**migration 38 —
+  engine restart needed**), `PATCH /transactions/:id/savings`,
+  `repo.setTransactionSavings` (clears `excluded_manual`;
+  `setTransactionExcluded(true)` clears savings). Backend `repo.monthlySpending`
+  drops savings rows via a subquery; React's shared `isExcludedFromCycle` returns
+  true for `savings` (truthy — SQLite INTEGER, not coerced) so pie/Insights/
+  Activity inherit it. **Legacy SPA UI not updated** (React is the active UI).
+  Spec/plan: `docs/superpowers/{specs,plans}/2026-05-31-savings-transaction-mark*`.
+  Verified live in chrome-devtools against a DB copy (worktree engine :4100):
+  marking the ₪3,750 "משיכת שיק" transfer moved it to the Savings bucket, dropped
+  the spend pie ₪15,202.42 → ₪11,452.42, and showed "Saved this cycle ₪3,750".
+  Web 556 + sidecar 110 tests pass, both typechecks clean.
+
 - **Car flow ported to React (2026-05-30).** The `🚗 Car` Add-asset tile is now
   live (was `comingSoon`). New `web/src/accounts/CarAssetForm.tsx` (lazy-loaded):
   plate **Look up** → `GET /vehicle/:plate` → a polished spec card

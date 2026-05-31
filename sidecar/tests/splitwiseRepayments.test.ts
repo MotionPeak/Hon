@@ -13,8 +13,8 @@ function makeRepo() {
 }
 
 describe('migration 37 — splitwise_repayments', () => {
-  it('bumps SCHEMA_VERSION to 37', () => {
-    expect(SCHEMA_VERSION).toBe(37);
+  it('bumps SCHEMA_VERSION to at least 37', () => {
+    expect(SCHEMA_VERSION).toBeGreaterThanOrEqual(37);
   });
 
   it('creates the splitwise_repayments table', () => {

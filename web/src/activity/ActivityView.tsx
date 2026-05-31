@@ -165,17 +165,21 @@ export function ActivityView() {
     !t.refundForId && cycleKey(t.date, settings.monthStartDay) === activeMonth,
   );
 
-  // Split into "counted toward the cycle" and "excluded" buckets. Excluded
-  // rows skip the regular category grouping and render in a dedicated
-  // section at the bottom — visible, manageable, but out of the totals.
+  // Split into "counted toward the cycle", "excluded", and "savings" buckets.
+  // Savings is checked FIRST so savings rows never land in the excluded bucket
+  // (isExcludedFromCycle returns true for savings rows). Excluded rows skip the
+  // regular category grouping and render in a dedicated section at the bottom —
+  // visible, manageable, but out of the totals.
   const exclusionSettings = {
     hideCardTotals: settings.hideCardTotals,
     cardProviders: settings.cardProviders,
   };
   const monthTxns: Transaction[] = [];
   const excludedTxns: Transaction[] = [];
+  const savingsTxns: Transaction[] = [];
   for (const t of monthTxnsAll) {
-    if (isExcludedFromCycle(t, exclusionSettings)) excludedTxns.push(t);
+    if (t.savings) savingsTxns.push(t);
+    else if (isExcludedFromCycle(t, exclusionSettings)) excludedTxns.push(t);
     else monthTxns.push(t);
   }
 
@@ -359,7 +363,7 @@ export function ActivityView() {
             </ul>
           </section>
         )
-      ) : monthTxns.length === 0 && excludedTxns.length === 0 ? (
+      ) : monthTxns.length === 0 && excludedTxns.length === 0 && savingsTxns.length === 0 ? (
         <p className="blank">
           No transactions in {activeMonth ? cycleLabel(activeMonth) : 'this period'}.
         </p>
@@ -372,6 +376,14 @@ export function ActivityView() {
               categoryByName={categoryByName}
               accountById={accountById}
               loans={loans}
+              onPickTxn={pickTxn}
+              selectedIds={selectedIds}
+            />
+          )}
+          {savingsTxns.length > 0 && (
+            <SavingsSection
+              transactions={savingsTxns}
+              accountById={accountById}
               onPickTxn={pickTxn}
               selectedIds={selectedIds}
             />
@@ -423,6 +435,15 @@ export function ActivityView() {
               `/transactions/${encodeURIComponent(moving.id)}/excluded`,
               'PATCH',
               { excluded: value },
+            );
+            await refresh();
+          }}
+          savings={!!moving.savings}
+          onSetSavings={async (next: boolean) => {
+            await api(
+              `/transactions/${encodeURIComponent(moving.id)}/savings`,
+              'PATCH',
+              { savings: next },
             );
             await refresh();
           }}
@@ -639,6 +660,86 @@ function ExcludedSection({
   );
 }
 
+interface SavingsSectionProps {
+  transactions: Transaction[];
+  accountById: Map<string, Account>;
+  onPickTxn: (t: Transaction) => void;
+  selectedIds: Set<string>;
+}
+
+/** Bottom-of-page collapsible holding every transaction marked as a savings
+ *  transfer — kept out of spend totals and tallied separately. Clicking any
+ *  row re-opens the sidebar so the user can unmark it. */
+function SavingsSection({
+  transactions, accountById, onPickTxn, selectedIds,
+}: SavingsSectionProps) {
+  const [open, setOpen] = useState(false);
+  const total = transactions.reduce((s, t) => s + Math.abs(t.amount), 0);
+  const cur = transactions[0]?.currency ?? 'ILS';
+  return (
+    <section className="act-savings">
+      <button
+        type="button"
+        className="act-savings-head"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="act-savings-caret">{open ? '▾' : '▸'}</span>
+        <span className="act-savings-name">
+          Savings ({transactions.length})
+        </span>
+        <span className="act-savings-line" />
+        <span className="act-savings-total">{money(total, cur)}</span>
+      </button>
+      {open && (
+        <ul className="txn-list">
+          {transactions
+            .slice()
+            .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+            .map((t) => {
+              const acct = accountById.get(t.accountId);
+              const pos = t.amount > 0;
+              const selected = selectedIds.has(t.id);
+              return (
+                <li
+                  key={t.id}
+                  className={`txn act-savings-row${selected ? ' selected' : ''}`}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => onPickTxn(t)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      onPickTxn(t);
+                    }
+                  }}
+                >
+                  <span className="txn-icon">💰</span>
+                  <div className="txn-main">
+                    <div className="txn-name">{t.description}</div>
+                    <div className="txn-sub">
+                      {fmtDate(t.date)}
+                      {acct && (
+                        <>
+                          <span className="sep"> · </span>
+                          {acct.label || acct.connectionName}
+                        </>
+                      )}
+                      <SplitwiseNote txnId={t.id} />
+                    </div>
+                  </div>
+                  <div className={`txn-amt${pos ? ' pos' : ''}`}>
+                    {money(t.amount, t.currency)}
+                  </div>
+                </li>
+              );
+            })}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 interface CatCardProps {
   catName: string;
   cat: Category | undefined;
@@ -766,6 +867,9 @@ interface CategoryPickerProps {
    *  caller why it's excluded by default. */
   ruleMatched: boolean;
   onSetExcluded: (next: boolean) => void | Promise<void>;
+  /** Whether this txn is marked as a savings transfer. */
+  savings: boolean;
+  onSetSavings: (next: boolean) => void | Promise<void>;
   onClose: () => void;
   onSaved: (
     category: string,
@@ -780,7 +884,7 @@ interface CategoryPickerProps {
 function CategoryPickerSidebar(
   {
     transaction, allTransactions, categories, loans, currentFreq,
-    excluded, ruleMatched, onSetExcluded,
+    excluded, ruleMatched, onSetExcluded, savings, onSetSavings,
     onClose, onSaved,
     onLinkRefund, onUnlinkRefund, onLinkLoan, onUnlinkLoan,
   }: CategoryPickerProps,
@@ -976,6 +1080,23 @@ function CategoryPickerSidebar(
                   disabled={busy}
                   onChange={(e) => { void onSetExcluded(e.target.checked); }}
                   aria-label="Exclude from cycle calculations"
+                />
+              </label>
+              <label className="txn-sidebar-toggle">
+                <span className="txn-sidebar-toggle-main">
+                  <span className="txn-sidebar-toggle-name">Savings</span>
+                  <span className="txn-sidebar-toggle-sub">
+                    {savings
+                      ? 'Money moved to savings — kept out of spend, tallied separately.'
+                      : 'Counts as regular spend. Turn on for transfers to savings.'}
+                  </span>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={savings}
+                  disabled={busy}
+                  onChange={(e) => { void onSetSavings(e.target.checked); }}
+                  aria-label="Mark as savings transfer"
                 />
               </label>
             </div>

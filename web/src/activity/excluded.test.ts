@@ -84,3 +84,12 @@ describe('isExcludedFromCycle', () => {
     )).toBe(true);
   });
 });
+
+describe('isExcludedFromCycle — savings', () => {
+  it('treats a savings row as out of cycle', () => {
+    expect(isExcludedFromCycle({ ...txn({}), savings: true }, { hideCardTotals: true, cardProviders: [] })).toBe(true);
+  });
+  it('a normal row is not out of cycle', () => {
+    expect(isExcludedFromCycle({ ...txn({}), savings: false }, { hideCardTotals: true, cardProviders: [] })).toBe(false);
+  });
+});

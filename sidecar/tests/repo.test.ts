@@ -179,3 +179,84 @@ describe('applyMerchantRule', () => {
     expect(unc?.category).toBe('Dining');
   });
 });
+
+describe('savings mark', () => {
+  /** Seed one transaction and return its id. */
+  function seedTxn(
+    repo: Repo,
+    opts: { externalId: string; date: string; amount: number; description: string },
+  ): string {
+    const conn = repo.createConnection('hapoalim', 'Hapoalim');
+    repo.saveScrapeResult(conn.id, [
+      {
+        accountNumber: '9999',
+        currency: 'ILS',
+        balance: 0,
+        transactions: [
+          {
+            externalId: opts.externalId,
+            date: opts.date,
+            amount: opts.amount,
+            currency: 'ILS',
+            description: opts.description,
+          },
+        ],
+      },
+    ]);
+    const rows = repo.listTransactions({});
+    const row = rows.find((r) => r.externalId === opts.externalId);
+    if (!row) throw new Error('seeded txn not found');
+    return row.id;
+  }
+
+  it('setTransactionSavings(true) sets savings=1 and clears excluded_manual even if it was set', () => {
+    const { repo } = makeRepo();
+    const id = seedTxn(repo, { externalId: 'sv-1', date: '2026-05-10', amount: -1000, description: 'Transfer to savings' });
+    // Pre-mark as excluded
+    repo.setTransactionExcluded(id, true);
+    // Now mark as savings — should flip savings=1 and clear excluded_manual
+    repo.setTransactionSavings(id, true);
+    const row = repo.getTransaction(id);
+    expect(row?.savings).toBe(1);
+    expect(row?.excludedManual).toBeNull();
+  });
+
+  it('setTransactionExcluded(true) clears a prior savings mark', () => {
+    const { repo } = makeRepo();
+    const id = seedTxn(repo, { externalId: 'sv-2', date: '2026-05-11', amount: -500, description: 'Transfer again' });
+    repo.setTransactionSavings(id, true);
+    // Now exclude — should flip excludedManual=1 and clear savings=0
+    repo.setTransactionExcluded(id, true);
+    const row = repo.getTransaction(id);
+    expect(row?.savings).toBe(0);
+    expect(row?.excludedManual).toBe(1);
+  });
+
+  it('monthlySpending excludes savings-marked rows', () => {
+    const { repo } = makeRepo();
+    const conn = repo.createConnection('beinleumi', 'Beinleumi');
+    repo.saveScrapeResult(conn.id, [
+      {
+        accountNumber: '5555',
+        currency: 'ILS',
+        balance: 0,
+        transactions: [
+          { externalId: 'ms-1', date: '2026-05-15', amount: -500, currency: 'ILS', description: 'Shopping trip' },
+          { externalId: 'ms-2', date: '2026-05-20', amount: -1000, currency: 'ILS', description: 'Savings transfer' },
+        ],
+      },
+    ]);
+    // Assign categories so monthlySpending picks them up
+    repo.updateTransactionCategory(
+      repo.listTransactions({}).find((r) => r.externalId === 'ms-1')!.id,
+      'Shopping',
+    );
+    const savingsId = repo.listTransactions({}).find((r) => r.externalId === 'ms-2')!.id;
+    repo.updateTransactionCategory(savingsId, 'Transfers');
+    repo.setTransactionSavings(savingsId, true);
+
+    const rows = repo.monthlySpending('2026-05-01', '2026-06-01');
+    const total = rows.reduce((s, r) => s + r.total, 0);
+    expect(total).toBe(500);
+  });
+});

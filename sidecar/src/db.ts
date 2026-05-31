@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-export const SCHEMA_VERSION = 37;
+export const SCHEMA_VERSION = 38;
 
 export interface DbHandle {
   db: Database.Database;
@@ -692,6 +692,14 @@ const MIGRATIONS: { version: number; sql: string }[] = [
       amount            REAL NOT NULL,
       created_at        TEXT NOT NULL
     );`,
+  },
+  {
+    // Per-transaction "Savings" mark. 1 = money the user moved to savings;
+    // such rows are pulled OUT of spend / "minus" calculations (like
+    // excluded_manual) AND tallied as "saved this cycle". Mutually exclusive
+    // with excluded_manual (the repo setters enforce that).
+    version: 38,
+    sql: `ALTER TABLE transactions ADD COLUMN savings INTEGER;`,
   },
 ];
 

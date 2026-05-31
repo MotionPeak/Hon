@@ -107,6 +107,9 @@ export interface TxnRow {
   refundId?: string | null;
   /** When set, the id of the expense this transaction is a refund for. */
   refundForId?: string | null;
+  /** "Savings" mark: 1 = money moved to savings — out of spend, tallied as
+   *  saved. Mutually exclusive with excluded_manual. */
+  savings?: number | null;
 }
 
 export interface ScrapeRunRow {
@@ -313,7 +316,7 @@ const TXN_COLS =
   'id, account_id AS accountId, external_id AS externalId, date, ' +
   'processed_date AS processedDate, amount, currency, description, memo, ' +
   'kind, status, category, created_at AS createdAt, loan_id AS loanId, ' +
-  'excluded_manual AS excludedManual';
+  'excluded_manual AS excludedManual, savings';
 
 /** All database reads/writes go through this typed repository. */
 export class Repo {
@@ -1713,6 +1716,7 @@ export class Repo {
          FROM txn_effective
          WHERE category IS NOT NULL AND amount < 0 AND currency = 'ILS'
            AND date >= @start AND date < @end ${exclude}
+           AND id NOT IN (SELECT id FROM transactions WHERE savings = 1)
          GROUP BY category`,
       )
       .all(params) as { category: string; total: number }[];
@@ -2042,10 +2046,33 @@ export class Repo {
    *  even when the client's card-bill rule would have matched; `null`
    *  clears the override and lets the rule decide. */
   setTransactionExcluded(txnId: string, excluded: boolean | null): void {
-    const value = excluded === null ? null : excluded ? 1 : 0;
+    if (excluded === true) {
+      // Excluding manually and the Savings mark are mutually exclusive.
+      this.db
+        .prepare('UPDATE transactions SET excluded_manual = 1, savings = 0 WHERE id = ?')
+        .run(txnId);
+      return;
+    }
+    const value = excluded === null ? null : 0;
     this.db
       .prepare('UPDATE transactions SET excluded_manual = ? WHERE id = ?')
       .run(value, txnId);
+  }
+
+  /** Mark/unmark a transaction as a savings transfer. A savings row is pulled
+   *  out of spend (like an excluded row) AND tallied as "saved this cycle".
+   *  Marking savings clears any manual exclude — the two are mutually
+   *  exclusive. */
+  setTransactionSavings(txnId: string, savings: boolean): void {
+    if (savings) {
+      this.db
+        .prepare('UPDATE transactions SET savings = 1, excluded_manual = NULL WHERE id = ?')
+        .run(txnId);
+    } else {
+      this.db
+        .prepare('UPDATE transactions SET savings = 0 WHERE id = ?')
+        .run(txnId);
+    }
   }
 
   /** Every transaction linked to this loan, newest-first. */
