@@ -4,6 +4,7 @@ import { OverviewView } from './OverviewView';
 import { installFetchMock } from '../test/mockFetch';
 import { __resetSplitwiseCache } from '../splitwise/useSplitwise';
 import { SettingsProvider } from '../settings/useSettings';
+import { currentCycleKey } from '../cycle';
 
 afterEach(() => { __resetSplitwiseCache(); localStorage.clear(); });
 
@@ -427,5 +428,18 @@ describe('OverviewView', () => {
     const card = await screen.findByTestId('budget-card');
     expect(card.querySelector('.bgt-line')).toBeNull();
     expect(within(card).queryByText('Essentials')).not.toBeInTheDocument();
+  });
+
+  it('shows "Saved this cycle" from savings-marked transactions', async () => {
+    installFetchMock(mocks({
+      'GET /api/transactions': () => ({ transactions: [
+        ...RECURRING_DEFAULT.transactions,
+        { id: 'sv1', date: `${currentCycleKey(1)}-12`, amount: -1500, currency: 'ILS',
+          description: 'To savings', category: 'Transfers', refundForId: null, savings: true },
+      ] }),
+    }));
+    renderOverview();
+    const line = await screen.findByTestId('saved-this-cycle');
+    expect(within(line).getByText(/1,?500/)).toBeInTheDocument();
   });
 });

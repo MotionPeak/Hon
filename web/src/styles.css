@@ -3469,3 +3469,16 @@ button.bh-row:active { transform: none; }        /* suppress global scale(.97) *
   font: 800 18px/1 ui-rounded, "SF Pro Rounded", system-ui;
   color: var(--text); letter-spacing: -.2px; margin-bottom: 10px;
 }
+
+/* Overview "saved this cycle" line. */
+.ov-saved {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--card); border: 1px solid var(--hairline);
+  border-radius: 14px; padding: 13px 16px; box-shadow: var(--shadow-sm);
+}
+.ov-saved-ico { font-size: 16px; }
+.ov-saved-label { color: var(--muted); font-size: 13px; font-weight: 600; }
+.ov-saved-amt {
+  margin-left: auto; color: var(--green); font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
