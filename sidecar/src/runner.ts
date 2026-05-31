@@ -68,10 +68,13 @@ export class ScrapeRunner {
   // browser and tears the run down.
   // 5 minutes by default; overridable via HON_OTP_TIMEOUT_MS for testing the
   // abandoned-OTP cleanup path without a full 5-minute wait.
-  private static readonly OTP_TIMEOUT_MS =
-    Number(process.env.HON_OTP_TIMEOUT_MS) > 0
-      ? Number(process.env.HON_OTP_TIMEOUT_MS)
-      : 5 * 60_000;
+  /** OTP wait timeout. Read per-call (not a static const) so HON_OTP_TIMEOUT_MS
+   *  takes effect at runtime and tests can drive a short timeout. Defaults to
+   *  5 minutes. */
+  private otpTimeoutMs(): number {
+    const override = Number(process.env.HON_OTP_TIMEOUT_MS);
+    return override > 0 ? override : 5 * 60_000;
+  }
 
   private readonly runs = new Map<string, RunStatus>();
   private readonly otpResolvers = new Map<string, (code: string) => void>();
@@ -205,6 +208,7 @@ export class ScrapeRunner {
    */
   private requestOtp(status: RunStatus): Promise<string> {
     runnerLog.info('otp.requested', { runId: status.runId, connectionId: status.connectionId });
+    const timeoutMs = this.otpTimeoutMs();
     return new Promise<string>((resolve, reject) => {
       status.status = 'needs-otp';
       status.message = 'Waiting for the verification code…';
@@ -213,10 +217,10 @@ export class ScrapeRunner {
         runnerLog.warn('otp.timeout', {
           runId: status.runId,
           connectionId: status.connectionId,
-          waitedMs: ScrapeRunner.OTP_TIMEOUT_MS,
+          waitedMs: timeoutMs,
         });
         reject(new Error('otp.timeout'));
-      }, ScrapeRunner.OTP_TIMEOUT_MS);
+      }, timeoutMs);
       this.otpResolvers.set(status.runId, (code) => {
         clearTimeout(timer);
         status.status = 'running';
