@@ -89,8 +89,16 @@
   - **H-11** token exemptions centralized into `PUBLIC_ROUTE_PREFIXES` +
     `isPublicRoute()` (behavior identical). H-3 shipped earlier; H-12 was a no-op
     (Max stays denylisted — verified).
-  - **Not pushed; merge decision pending.** Open follow-ups: H-5 live smoke,
-    H-1 DNS-rebind hardening, H-7 runId-aware lock, plus the ~25 MEDIUM findings.
+  - **Merged to `main` and pushed** (merge `0eef4af`). H-5 also got a real
+    automated runner test (`sidecar/tests/runnerOtpTimeout.test.ts`, drives the
+    timeout→error→lock-release path with the scraper mocked) + an env-overridable
+    `HON_OTP_TIMEOUT_MS`; sidecar now **128** tests. **H-8 was NOT applied** —
+    the OverviewView hoist conflicted with main's SpendingCard/BudgetCard refactor
+    and was dropped (took main's version) to avoid a risky blind edit; `Detail` is
+    still defined inline in `BankProjection` (pure rerender-perf nit, re-do later).
+    Open follow-ups: H-8 redo, H-5 live Puppeteer smoke (browser-close on a real
+    abandoned bank OTP — only the automated runner half is covered), H-1
+    DNS-rebind hardening, H-7 runId-aware lock, plus the ~25 MEDIUM findings.
 
 - **Car flow ported to React (2026-05-30).** The `🚗 Car` Add-asset tile is now
   live (was `comingSoon`). New `web/src/accounts/CarAssetForm.tsx` (lazy-loaded):
