@@ -5,6 +5,7 @@ import { CategoryAveragesCard } from './CategoryAveragesCard';
 import { CreditCardBillsCard } from './CreditCardBillsCard';
 import { SpendingProjectionCard } from './SpendingProjectionCard';
 import { SplitwiseCard } from './SplitwiseCard';
+import { VaultCard } from './VaultCard';
 
 // No own SettingsProvider — Hon mounts a single app-level provider (App.tsx),
 // so settings changes made here propagate live to every other tab. A nested
@@ -17,6 +18,7 @@ export function SettingsView() {
         Pick your AI engine and tune how Hon reads your money. Changes save as you make them.
       </p>
       <div className="set-grid">
+        <VaultCard />
         <AiEngineCard />
         <BillingCycleCard />
         <SpendingProjectionCard />

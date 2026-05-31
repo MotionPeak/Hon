@@ -3482,3 +3482,39 @@ button.bh-row:active { transform: none; }        /* suppress global scale(.97) *
   margin-left: auto; color: var(--green); font-weight: 800;
   font-variant-numeric: tabular-nums;
 }
+
+/* --- Vault: Settings card + app banner -------------------------------- */
+.vault-status {
+  margin-left: auto; font-size: 11px; font-weight: 700; letter-spacing: .04em;
+  text-transform: uppercase; padding: 3px 9px; border-radius: 999px;
+}
+.vault-status.off { color: var(--amber); background: rgba(245,159,36,0.14); }
+.vault-status.on { color: var(--green); background: rgba(61,220,132,0.15); }
+.vault-input {
+  width: 100%; margin: 10px 0 12px; padding: 9px 12px;
+  background: var(--card-hi); border: 1px solid var(--hairline);
+  border-radius: 10px; color: var(--text); font-size: 14px;
+}
+.vault-input:focus { outline: none; border-color: var(--accent); }
+.vault-card form .primary { width: 100%; }
+
+/* Slim full-width banner under the header when the vault is locked. */
+.vault-banner {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 16px; font-size: 13px;
+  background: rgba(245,159,36,0.12); color: var(--text);
+  border-bottom: 1px solid var(--hairline);
+}
+.vault-banner-ico { font-size: 14px; }
+.vault-banner-text { color: var(--muted); }
+.vault-banner-btn {
+  margin-left: auto; padding: 5px 14px; border-radius: 8px;
+  background: var(--accent); color: #1a1612; border: 0;
+  font-size: 12.5px; font-weight: 700; cursor: pointer;
+}
+.vault-banner-btn:hover { filter: brightness(1.05); }
+.vault-banner-x {
+  background: none; border: 0; color: var(--faint); cursor: pointer;
+  font-size: 18px; line-height: 1; padding: 0 4px;
+}
+.vault-banner-x:hover { color: var(--text); }

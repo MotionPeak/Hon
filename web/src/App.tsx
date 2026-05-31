@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AccountsView } from './accounts/AccountsView';
+import { VaultBanner } from './vault/VaultBanner';
 import { ActivityView } from './activity/ActivityView';
 import { api, ApiError, hasToken } from './api';
 import { InsightsView } from './insights/InsightsView';
@@ -158,6 +159,7 @@ export function App() {
             aria-label="Toggle theme"
           >☀</button>
         </header>
+        <VaultBanner onUnlockClick={() => setTab('settings')} />
         <div className="shell">
           <nav
             ref={navRef}
