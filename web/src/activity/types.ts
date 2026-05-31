@@ -24,4 +24,7 @@ export interface Transaction {
    *  to the live card-bill rule (settings.cardProviders +
    *  settings.hideCardTotals). Set via PATCH /transactions/:id/excluded. */
   excludedManual?: boolean | null;
+  /** "Savings" mark — money moved to savings. Out of spend, tallied as saved.
+   *  Number at runtime (SQLite INTEGER); use truthy checks. */
+  savings?: boolean | null;
 }

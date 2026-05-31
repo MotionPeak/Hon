@@ -51,6 +51,7 @@ export function isExcludedFromCycle(
   t: Transaction,
   settings: ExclusionSettings,
 ): boolean {
+  if (t.savings) return true; // savings transfers are never counted as spend
   if (t.excludedManual === true) return true;
   if (t.excludedManual === false) return false;
   return ruleMatches(t, settings);
