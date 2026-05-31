@@ -33,6 +33,8 @@
 
 ## TL;DR — state of the world (2026-05-30)
 
+- **Legacy SPA retired (2026-05-31)** — engine serves the React build
+  from `web/dist` (built on launch by web.mjs); `app.html` deleted.
 - **All 9 remaining HIGH security findings fixed (2026-05-30).** Branch
   `session/security-high-fixes-2026-05-30`, 15 commits (plan + 10 fixes + 4
   adversarial-review follow-ups). Plan:
@@ -215,10 +217,9 @@
   pill rendered `✓ Done — 1116 transactions`, re-sync left the row count flat
   (0 duplicate `(account_id, external_id)` groups — DB dedup proven).
   Branch `session/sync-window-12mo-2026-05-27` — merged to `main`.
-- **React migration done, structurally.** All 10 tabs ship from
-  `web/` at near-legacy parity. The legacy SPA at
-  `sidecar/public/app.html` is still served by the engine and is the
-  production UI; the React app is at `cd web && npm run dev`.
+- **React migration done.** All 10 tabs ship from `web/` at near-legacy
+  parity. The legacy SPA was retired (2026-05-31); the engine now serves
+  the React build from `web/dist` at `/`. Dev is `cd web && npm run dev`.
 - **SnapTrade portal flow shipped this session.** Add Account →
   Brokerages tile → if no SnapTrade conn, inline credentials form;
   if conn exists, inline brokerage list → click broker →
