@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   isExcludedFromCycle,
+  isManuallyExcluded,
   matchesCardProviderRule,
   ruleMatches,
 } from './excluded';
@@ -91,5 +92,24 @@ describe('isExcludedFromCycle — savings', () => {
   });
   it('a normal row is not out of cycle', () => {
     expect(isExcludedFromCycle({ ...txn({}), savings: false }, { hideCardTotals: true, cardProviders: [] })).toBe(false);
+  });
+});
+
+describe('isManuallyExcluded — savings-agnostic (drives the Exclude checkbox)', () => {
+  const settings = { hideCardTotals: true, cardProviders: [] };
+
+  it('is FALSE for a savings row (so the Exclude checkbox is not co-lit)', () => {
+    expect(isManuallyExcluded({ ...txn({}), savings: true }, settings)).toBe(false);
+  });
+
+  it('is TRUE when excludedManual is true (boolean from the coerced repo read)', () => {
+    expect(isManuallyExcluded(txn({ excludedManual: true }), settings)).toBe(true);
+  });
+
+  it('defers to the card-bill rule when excludedManual is null', () => {
+    expect(isManuallyExcluded(
+      txn({ description: 'מקס איט', excludedManual: null }),
+      { hideCardTotals: true, cardProviders: ['מקס'] },
+    )).toBe(true);
   });
 });

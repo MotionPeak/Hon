@@ -217,7 +217,7 @@ describe('savings mark', () => {
     // Now mark as savings — should flip savings=1 and clear excluded_manual
     repo.setTransactionSavings(id, true);
     const row = repo.getTransaction(id);
-    expect(row?.savings).toBe(1);
+    expect(row?.savings).toBe(true);
     expect(row?.excludedManual).toBeNull();
   });
 
@@ -228,8 +228,8 @@ describe('savings mark', () => {
     // Now exclude — should flip excludedManual=1 and clear savings=0
     repo.setTransactionExcluded(id, true);
     const row = repo.getTransaction(id);
-    expect(row?.savings).toBe(0);
-    expect(row?.excludedManual).toBe(1);
+    expect(row?.savings).toBe(false);
+    expect(row?.excludedManual).toBe(true);
   });
 
   it('monthlySpending excludes savings-marked rows', () => {
