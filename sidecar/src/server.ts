@@ -1,8 +1,10 @@
 import Fastify from 'fastify';
+import fastifyStatic from '@fastify/static';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { rewriteApiPrefix } from './httpRewrite.js';
 import { openDatabase, type DbHandle } from './db.js';
 import { Repo } from './repo.js';
 import { ScrapeRunner } from './runner.js';
@@ -133,19 +135,29 @@ const insights: InsightsGenerator | null = repo ? new InsightsGenerator(repo, ll
 // Detects renamed subscriptions (LLM). Works off names sent by the web app.
 const subscriptionMatcher = new SubscriptionMatcher(llm);
 
-// The interactive web app (served at `/`). It carries no data of its own —
-// its JavaScript fetches the API with the token taken from the URL.
+// The built React app's entry HTML, read once at startup. web/dist is produced
+// by `cd web && npm run build` (the launcher builds it when missing/stale).
 const webAppHtml = (() => {
   try {
     const here = dirname(fileURLToPath(import.meta.url));
-    return readFileSync(join(here, '..', 'public', 'app.html'), 'utf8');
+    return readFileSync(join(here, '..', '..', 'web', 'dist', 'index.html'), 'utf8');
   } catch {
-    return '<!doctype html><title>Hon</title><p>Web app page not found.</p>';
+    return '<!doctype html><meta charset="utf-8"><title>Hon</title>'
+      + '<p style="font-family:system-ui;max-width:30rem;margin:4rem auto">'
+      + 'Hon web app not built. Run <code>cd web &amp;&amp; npm run build</code>, '
+      + 'then reload.</p>';
   }
 })();
 
 // --- HTTP server ------------------------------------------------------------
-const app = Fastify({ logger: false });
+const app = Fastify({
+  logger: false,
+  // The React client calls /api/<route>; strip the prefix so it reaches the
+  // engine's /<route> handlers (prod equivalent of vite's dev proxy). Runs
+  // before routing AND before the onRequest auth hook, so a rewritten
+  // /api/loans → /loans is token-gated exactly as before.
+  rewriteUrl: (req) => rewriteApiPrefix(req.url ?? '/'),
+});
 
 // GET-only URL prefixes exempt from the bearer token, alongside the exact
 // path `/` (the web app shell). All three carry no private data:
@@ -165,7 +177,7 @@ const app = Fastify({ logger: false });
 //                      leaving it token-exempt is low risk in the interim.
 //  - `/snaptrade/done` the post-connection landing page SnapTrade opens in
 //                      a browser, which carries no token.
-const PUBLIC_ROUTE_PREFIXES = ['/logo/', '/snaptrade/done'];
+const PUBLIC_ROUTE_PREFIXES = ['/logo/', '/snaptrade/done', '/assets/'];
 
 /** True for the small set of GET routes that are exempt from the token. */
 function isPublicRoute(method: string, url: string): boolean {
@@ -181,6 +193,20 @@ app.addHook('onRequest', async (req, reply) => {
   if (token && req.headers.authorization !== `Bearer ${token}`) {
     return reply.code(401).send({ error: 'unauthorized' });
   }
+});
+
+// Serve the React build's hashed assets. Tight scoping (root = web/dist/assets,
+// prefix = /assets/) means a request for /assets/<hash>.js maps straight into
+// the build dir and can never shadow `/` or any API route. No await — plugins
+// registered at top level are picked up at app.listen().
+const webAssetsDir = join(
+  dirname(fileURLToPath(import.meta.url)), '..', '..', 'web', 'dist', 'assets',
+);
+app.register(fastifyStatic, {
+  root: webAssetsDir,
+  prefix: '/assets/',
+  cacheControl: true,
+  maxAge: '7d',
 });
 
 app.get('/', async (_req, reply) => reply.type('text/html; charset=utf-8').send(webAppHtml));
