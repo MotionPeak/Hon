@@ -10,15 +10,19 @@
 
 ---
 
-## Authoritative current state (verified in worktree)
+## Authoritative current state (verified in worktree — exact line numbers)
 
-- `sidecar/src/server.ts:29` — `const app = Fastify({ bodyLimit: 10 * 1024 * 1024 });`
-- `sidecar/src/server.ts:131-138` — `webAppHtml` IIFE reads `../public/app.html`.
-- `sidecar/src/server.ts:149` — `const PUBLIC_ROUTE_PREFIXES = ['/logo/', '/snaptrade/done'];`
-- `sidecar/src/server.ts:151-155` — `isPublicRoute(method, url)` (GET-only; `/` is public).
-- `sidecar/src/server.ts:157-162` — `app.addHook('onRequest', …)` token gate.
-- `sidecar/src/server.ts:601` — `app.get('/', … send(webAppHtml))`.
-- `sidecar/src/server.ts:603` — `app.listen({ port: PORT, host: HOST }, …)`. **server.ts runs `listen` at module load and exports nothing** — not cleanly importable in a test.
+- `sidecar/src/server.ts:1` — `import Fastify from 'fastify';`
+- `sidecar/src/server.ts:2` — `import { mkdirSync, readFileSync } from 'node:fs';` (fold new fs imports here).
+- `sidecar/src/server.ts:4-5` — `import { dirname, join } from 'node:path';` + `import { fileURLToPath } from 'node:url';` (already present — reuse).
+- `sidecar/src/server.ts:138-145` — `webAppHtml` IIFE reads `../public/app.html` (`dirname(fileURLToPath(import.meta.url))` → `join(here, '..', 'public', 'app.html')`).
+- `sidecar/src/server.ts:148` — `const app = Fastify({ logger: false });` ← **THE Fastify ctor to replace with `rewriteUrl`.**
+- `sidecar/src/server.ts:168` — `const PUBLIC_ROUTE_PREFIXES = ['/logo/', '/snaptrade/done'];`
+- `sidecar/src/server.ts:171-175` — `isPublicRoute(method, url)` (GET-only; `/` is public via `if (url === '/') return true`).
+- `sidecar/src/server.ts:179-184` — `app.addHook('onRequest', …)` token gate.
+- `sidecar/src/server.ts:186` — `app.get('/', async (_req, reply) => reply.type('text/html; charset=utf-8').send(webAppHtml));`
+- `sidecar/src/server.ts:2474` — `await app.listen({ host, port });` (inside an async start block). **server.ts runs `listen` and exports nothing** — not cleanly importable in a test.
+- `web/dist/` is **currently absent** (cleaned); `npm run build` regenerates it. Output is `index.html` + `assets/index-<hash>.{js,css,js.map}` ONLY (verified from a prior build; `web/index.html` source references only `/src/main.tsx`, which vite rewrites to a hashed `/assets/*.js` at build).
 - `web/src/api.ts:39` — every call becomes `/api/<path>`.
 - `web/dist/` — `index.html` + `assets/index-<hash>.{js,css,js.map}` ONLY (no root favicon/static beyond `/assets/`). `web/index.html` source has no extra static refs. `dist` is gitignored.
 - `@fastify/static` is **NOT** in `sidecar/package.json` or node_modules.
@@ -152,18 +156,18 @@ At the top of `server.ts`, add:
 import fastifyStatic from '@fastify/static';
 import { rewriteApiPrefix } from './httpRewrite.js';
 ```
-(`existsSync`, `readFileSync`, `dirname`, `join`, `fileURLToPath` are already imported — confirm; reuse them.)
+**Note:** `readFileSync` is already imported (line 2: `import { mkdirSync, readFileSync } from 'node:fs';`); `dirname, join` (line 4) and `fileURLToPath` (line 5) are present too — reuse them. `existsSync` is NOT currently imported — the new `webAppHtml` read uses a `try/catch` (not `existsSync`), so you don't need it; if Task 3 Step 4's static registration wants an existence check, add `existsSync` to the line-2 fs import.
 
-- [ ] **Step 2: Wire `rewriteUrl` into the Fastify ctor (line 29)**
+- [ ] **Step 2: Wire `rewriteUrl` into the Fastify ctor (line 148)**
 
 Replace:
 ```ts
-const app = Fastify({ bodyLimit: 10 * 1024 * 1024 });
+const app = Fastify({ logger: false });
 ```
 with:
 ```ts
 const app = Fastify({
-  bodyLimit: 10 * 1024 * 1024,
+  logger: false,
   // The React client calls /api/<route>; strip the prefix so it reaches the
   // engine's /<route> handlers (prod equivalent of vite's dev proxy). Runs
   // before routing AND before the onRequest auth hook, so a rewritten
@@ -174,7 +178,7 @@ const app = Fastify({
 
 > **VERIFY:** Fastify 5's `rewriteUrl` receives the raw `http.IncomingMessage` (has `.url`) and returns a string. Confirm the signature in the installed fastify types; if it passes `(req)` with `req.url` as `string | undefined`, the `?? '/'` guard covers it.
 
-- [ ] **Step 3: Replace `webAppHtml` (131-138) to read the built index**
+- [ ] **Step 3: Replace `webAppHtml` (138-145) to read the built index**
 
 Replace the `webAppHtml` IIFE with a read of the React build's `index.html`:
 ```ts
@@ -195,34 +199,35 @@ const webAppHtml = (() => {
 
 > **VERIFY:** path from `sidecar/src/server.ts` to `web/dist/index.html` is `../../web/dist/index.html` (src → sidecar → repo-root → web/dist). Double-check the depth: `dirname(import.meta.url)` is `sidecar/src`, so `..` = `sidecar`, `../..` = repo root, then `web/dist`. ✓
 
-- [ ] **Step 4: Register `@fastify/static` for `/assets/*`**
+- [ ] **Step 4: Register `@fastify/static` for `/assets/*` — use the TIGHT scoping**
 
-After the `app` is constructed and before `app.listen` (a natural spot: near the other top-level registrations, or just before the `/` route at ~601). Register static rooted at `web/dist`, serving only assets (we keep `/` explicit):
+Register static rooted at `web/dist/assets` under prefix `/assets/` — the tightest form, which cannot collide with `/` or any API route (the client only ever requests `/assets/<hash>.js|css`). Place the registration with the other top-level `app.*` setup (e.g. just after the `onRequest` hook at ~184, before the `/` route at 186). `server.ts` registers plugins at top level (not inside an async fn), so `app.register(...)` is queued until `listen` — do NOT `await` it:
 ```ts
-const webDist = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'web', 'dist');
-await app.register(fastifyStatic, {
-  root: webDist,
-  prefix: '/',
-  index: false,          // we serve '/' ourselves (controls the missing-build message)
-  wildcard: false,       // serve real files by path (no SPA catch-all; only '/' is HTML)
+const webAssetsDir = join(
+  dirname(fileURLToPath(import.meta.url)), '..', '..', 'web', 'dist', 'assets',
+);
+app.register(fastifyStatic, {
+  root: webAssetsDir,
+  prefix: '/assets/',
   cacheControl: true,
   maxAge: '7d',
 });
 ```
 
-> **VERIFY (important):**
-> 1. `await app.register(...)` — if the surrounding code is top-level and not in an async function, use `app.register(...)` without await (Fastify queues plugins until `listen`/`ready`). Check whether the registration site is inside an async IIFE or top-level; match the existing style. `@fastify/static` registration does not need to be awaited for `listen` to pick it up.
-> 2. `index: false` + `wildcard: false` means `@fastify/static` serves any existing file under `web/dist` by its exact path (so `/assets/index-<hash>.js` works) and does NOT install a `/*` catch-all that would shadow API routes. Confirm against the installed @fastify/static docs/types that this combination serves `/assets/x` while leaving `/` to our explicit handler. If `wildcard: false` behaves unexpectedly, the alternative is `prefix: '/assets/'` with `root: join(webDist, 'assets')` — serve ONLY the assets dir, which is cleaner and cannot collide with anything. PREFER the `prefix: '/assets/'` + `root: web/dist/assets` form if there's any doubt — it's the tightest scoping and matches what the client actually requests.
+> **VERIFY:**
+> 1. Top-level `app.register(...)` (no `await`) matches how the file is structured — plugins are picked up at `app.listen()` (line 2474). Confirm there's no other `app.register` already (there isn't today) that would change ordering assumptions.
+> 2. `prefix: '/assets/'` + `root: web/dist/assets` means a request for `/assets/index-<hash>.js` maps to `web/dist/assets/index-<hash>.js`. This NEVER shadows `/` (handled by the explicit route) or `/api/*` / `/loans` etc. No `wildcard`/`index` options needed with this scoping.
+> 3. Path depth: `sidecar/src` → `..`=`sidecar` → `../..`=repo root → `web/dist/assets`. ✓
 
 - [ ] **Step 5: Make `/assets/` public (auth)**
 
-Line 149 — add `/assets/` to the prefix list:
+Line 168 — add `/assets/` to the prefix list:
 ```ts
 const PUBLIC_ROUTE_PREFIXES = ['/logo/', '/snaptrade/done', '/assets/'];
 ```
 (`/` is already public via `isPublicRoute`. The static plugin's asset responses must not be 401'd — JS/CSS carry no secrets, same posture as the old SPA.)
 
-- [ ] **Step 6: The `/` handler (601) is unchanged** — it still does `reply.type('text/html; charset=utf-8').send(webAppHtml)`; `webAppHtml` now holds the React index. Leave the line as-is.
+- [ ] **Step 6: The `/` handler (186) is unchanged** — it still does `reply.type('text/html; charset=utf-8').send(webAppHtml)`; `webAppHtml` now holds the React index. Leave the line as-is.
 
 - [ ] **Step 7: Typecheck**
 
