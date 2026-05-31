@@ -10,6 +10,11 @@ import type { Repo } from './repo.js';
 // passphrase is correct without ever storing the passphrase itself.
 const VERIFIER_PLAINTEXT = 'hon-vault-ok';
 
+// OWASP-2024 scrypt parameters for NEW vaults (N=2^17). maxmem must be raised
+// above Node's default because the higher N exceeds the 32 MiB default budget.
+// New salts are persisted with a `v2:` prefix so deriveKey knows to apply these.
+const SCRYPT_V2 = { N: 1 << 17, r: 8, p: 1, maxmem: 256 * 1024 * 1024 };
+
 /**
  * Password-protected credential store. Connection credentials are encrypted
  * (AES-256-GCM, key derived from the user's passphrase via scrypt) and kept in
@@ -39,7 +44,9 @@ export class Vault {
 
     let salt = this.repo.getMeta('vault_salt');
     if (!salt) {
-      salt = randomBytes(16).toString('hex');
+      // New vault: tag the salt `v2:` so deriveKey applies OWASP-2024 cost.
+      const saltHex = randomBytes(16).toString('hex');
+      salt = `v2:${saltHex}`;
       const key = deriveKey(passphrase, salt);
       this.repo.setMeta('vault_salt', salt);
       this.repo.setMeta('vault_verifier', encryptWith(key, VERIFIER_PLAINTEXT));
@@ -110,11 +117,32 @@ export class Vault {
   }
 }
 
-function deriveKey(passphrase: string, saltHex: string): Buffer {
-  return scryptSync(passphrase, Buffer.from(saltHex, 'hex'), 32);
+/**
+ * Derives the 32-byte AES key from a passphrase and the RAW stored salt.
+ * A `v2:` prefix marks vaults created at OWASP-2024 cost (N=2^17); legacy
+ * bare-hex salts keep deriving at Node's default cost so existing vaults are
+ * never locked out. The branch is taken purely on the stored salt's format,
+ * so unlocking transparently handles both generations without a migration.
+ *
+ * Exported for tests: the cost branch is security-critical and is asserted
+ * directly (v2-prefixed vs bare-hex salts must yield different keys).
+ */
+export function deriveKey(passphrase: string, storedSalt: string): Buffer {
+  if (storedSalt.startsWith('v2:')) {
+    return scryptSync(
+      passphrase,
+      Buffer.from(storedSalt.slice(3), 'hex'),
+      32,
+      SCRYPT_V2,
+    );
+  }
+  // Legacy vaults: bare-hex salt, Node default scrypt cost. Keep as-is.
+  return scryptSync(passphrase, Buffer.from(storedSalt, 'hex'), 32);
 }
 
-function encryptWith(key: Buffer, plaintext: string): string {
+// Exported for tests: lets a legacy (bare-hex salt) vault be reconstructed
+// through the Repo so the back-compat unlock path can be exercised end-to-end.
+export function encryptWith(key: Buffer, plaintext: string): string {
   const iv = randomBytes(12);
   const cipher = createCipheriv('aes-256-gcm', key, iv);
   const encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);

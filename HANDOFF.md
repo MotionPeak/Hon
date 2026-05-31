@@ -33,6 +33,65 @@
 
 ## TL;DR — state of the world (2026-05-30)
 
+- **All 9 remaining HIGH security findings fixed (2026-05-30).** Branch
+  `session/security-high-fixes-2026-05-30`, 15 commits (plan + 10 fixes + 4
+  adversarial-review follow-ups). Plan:
+  `docs/superpowers/plans/2026-05-30-security-high-fixes.md`. TDD for pure logic,
+  manual+typecheck for route/Puppeteer code (project convention). Sidecar **126**
+  tests (was 107), web **547**, both typechecks clean. **Two rounds of adversarial
+  review caught real defects the implementers had claimed-but-not-made** — both
+  since fixed by hand:
+  - H-2's vault was never passed to `LlmManager` (whole fix was dead code) →
+    fixed (`8cf2af6`).
+  - H-1's `isPublicLogoDomain` SSRF guard was committed but never wired into the
+    `/logo` route (dead code) → wired in (`8cf2af6`).
+  - H-2 stripped the legacy plaintext key from disk before confirming the vault
+    write (data-loss path) → now bails the file rewrite on vault-write failure
+    when keys are held (`26e3ba6`).
+
+  Per-finding:
+  - **H-1** `/logo`: `isSafeCompanyId` blocks path traversal; `?domain=` kept
+    (brokerage/voucher logos need it) but gated by `isPublicLogoDomain` —
+    rejects raw-IP / loopback / link-local / `localhost` / `*.local` /
+    `*.internal` (closes SSRF to internal hosts). **Token-gate on `/logo/`
+    deferred** (both UIs build bare `<img>` URLs; layers 1+2 close the real
+    holes; `/logo/` serves only public favicons). Residual: hostname-only filter,
+    no DNS-rebind guard — acceptable (loopback-bound, single-user).
+  - **H-2** LLM keys → vault. `PersistedProvider` `Omit`s `apiKey` (compiler
+    forbids keys in `llm-provider.json`); keys via `vault.saveSecret`; migration
+    on `/vault/unlock` strips plaintext from the file. No-op for Shahar (local
+    mode, no keys) but closes it for API/Ollama users.
+  - **H-4** `applyMerchantRule` got `AND category IS NULL` — "apply to merchant"
+    only fills UNCATEGORIZED rows now (no longer re-flips hand-categorized rows;
+    intended, matches `applyCategory`).
+  - **H-5** OTP wait has a 5-min timeout (was unbounded → Puppeteer leak).
+    Pension path cleanup verified; interactive-bank path now rethrows →
+    `controller.abort()` → `browser.close()` via `finally`. **⚠️ Needs a live
+    smoke** (no automated Puppeteer coverage): start a real bank sync, never
+    enter the code, confirm Chrome exits after 5 min + no UnhandledРromiseRejection
+    in sidecar.log. Correct on static read; library does not observe the abort
+    signal, teardown is via browser.close().
+  - **H-6** scrypt → OWASP 2024 (N=2¹⁷) for NEW vaults via a `v2:` salt prefix.
+    **Existing vaults (Shahar has one) keep unlocking at legacy cost — no lockout,
+    no upgrade unless the vault is re-created.** Hex can't start with `v`, prefix
+    is unambiguous.
+  - **H-7** per-connection scrape lock (`active` Set) → 409 on concurrent sync.
+    Cleared on every terminal path incl. a pre-`finish` throw (the fire-and-forget
+    `.catch` reconciles). Minor residual: the backstop deletes by `connectionId`
+    unconditionally — only unsafe if per-connection concurrency is ever allowed
+    (currently route-gated). WARNING, not blocking.
+  - **H-8** hoisted `Detail` out of `BankProjection` (Vercel rerender rule);
+    `currency` now a prop, 5 call sites updated. Pure refactor.
+  - **H-9** LLM `load()` + FX `getIlsRates()` cache the in-flight promise so
+    concurrent callers don't double-allocate / double-fetch; `.finally` clears on
+    success+failure.
+  - **H-10** `/transactions/:id/loan` PATCH 404s for unknown txn.
+  - **H-11** token exemptions centralized into `PUBLIC_ROUTE_PREFIXES` +
+    `isPublicRoute()` (behavior identical). H-3 shipped earlier; H-12 was a no-op
+    (Max stays denylisted — verified).
+  - **Not pushed; merge decision pending.** Open follow-ups: H-5 live smoke,
+    H-1 DNS-rebind hardening, H-7 runId-aware lock, plus the ~25 MEDIUM findings.
+
 - **Car flow ported to React (2026-05-30).** The `🚗 Car` Add-asset tile is now
   live (was `comingSoon`). New `web/src/accounts/CarAssetForm.tsx` (lazy-loaded):
   plate **Look up** → `GET /vehicle/:plate` → a polished spec card

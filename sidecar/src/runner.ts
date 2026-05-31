@@ -60,8 +60,30 @@ export interface RunStatus {
  * starts a scrape, then polls getStatus() until it is done.
  */
 export class ScrapeRunner {
+  // How long to wait for the user to POST the OTP before giving up. Without
+  // this, requestOtp()'s promise never settles when the user walks away —
+  // the underlying Puppeteer browser stays open forever, leaking a Chrome
+  // process per abandoned 2FA prompt. On timeout we REJECT so the scraper's
+  // own error path (and execute()'s catch → finish('error', …)) closes the
+  // browser and tears the run down.
+  // 5 minutes by default; overridable via HON_OTP_TIMEOUT_MS for testing the
+  // abandoned-OTP cleanup path without a full 5-minute wait.
+  /** OTP wait timeout. Read per-call (not a static const) so HON_OTP_TIMEOUT_MS
+   *  takes effect at runtime and tests can drive a short timeout. Defaults to
+   *  5 minutes. */
+  private otpTimeoutMs(): number {
+    const override = Number(process.env.HON_OTP_TIMEOUT_MS);
+    return override > 0 ? override : 5 * 60_000;
+  }
+
   private readonly runs = new Map<string, RunStatus>();
   private readonly otpResolvers = new Map<string, (code: string) => void>();
+  // Connection ids with a scrape currently in flight. Guards against a second
+  // sync stomping on the same connection's browser/session while the first is
+  // still running. Added in start(), cleared in finish() — the single terminal
+  // chokepoint, so a failed run can never leave a connection permanently
+  // locked (H-7).
+  private readonly active = new Set<string>();
   private readonly debugDir: string;
 
   constructor(
@@ -70,6 +92,11 @@ export class ScrapeRunner {
     private readonly vault: Vault,
   ) {
     this.debugDir = join(dataDir, 'debug');
+  }
+
+  /** True while a scrape for this connection is in flight. */
+  isActive(connectionId: string): boolean {
+    return this.active.has(connectionId);
   }
 
   /** Kicks off a scrape and returns its run id immediately. */
@@ -85,6 +112,7 @@ export class ScrapeRunner {
       startedAt: run.startedAt,
     };
     this.runs.set(run.id, status);
+    this.active.add(args.connectionId);
     this.repo.setConnectionStatus(args.connectionId, 'running');
     // One log line per scrape kick-off so the lifecycle for a connection
     // is greppable end-to-end. Credentials are logged by field NAME only —
@@ -101,7 +129,42 @@ export class ScrapeRunner {
       monthsBack: args.monthsBack,
       credentialFields: Object.keys(args.credentials),
     });
-    void this.execute(status, args);
+    // execute() routes every normal and caught-error path through finish(),
+    // which is what clears the per-connection lock (H-7). But finish() only
+    // runs if control reaches execute()'s internal try/catch. If execute()
+    // (or execute_inner setup before that try — e.g. the child-logger /
+    // chooseStartDate calls) throws or rejects BEFORE the try block, finish()
+    // never fires and the connection stays locked until a process restart.
+    // This catch is the backstop: it releases the lock and marks the run
+    // errored so the UI doesn't hang on "running". Set.delete + finish()'s
+    // own delete are idempotent, so the normal path double-delete is harmless.
+    void this.execute(status, args).catch((err) => {
+      runnerLog.error('execute.unhandled', {
+        runId: status.runId,
+        connectionId: args.connectionId,
+        message: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined,
+      });
+      this.otpResolvers.delete(status.runId);
+      this.active.delete(args.connectionId);
+      // Mirror finish()'s minimal terminal state so the connection/run don't
+      // appear stuck running. Wrapped because this runs outside execute()'s
+      // try — a repo throw here must not produce a second unhandled rejection.
+      try {
+        if (this.runs.has(status.runId)) {
+          status.status = 'error';
+          status.message = err instanceof Error ? err.message : String(err);
+          status.finishedAt = new Date().toISOString();
+        }
+        this.repo.setConnectionStatus(args.connectionId, 'error');
+      } catch (cleanupErr) {
+        runnerLog.error('execute.unhandled.cleanup-failed', {
+          runId: status.runId,
+          connectionId: args.connectionId,
+          message: cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr),
+        });
+      }
+    });
     return run.id;
   }
 
@@ -134,13 +197,32 @@ export class ScrapeRunner {
     }
   }
 
-  /** Called by the scraper when it needs a 2FA code; resolves when one arrives. */
+  /**
+   * Called by the scraper when it needs a 2FA code; resolves when one arrives.
+   *
+   * Rejects with `otp.timeout` if the user never submits a code within
+   * OTP_TIMEOUT_MS. The rejection bubbles up through the scraper's
+   * `await getOtp()` and out to execute()'s catch, which calls
+   * finish('error', …) and lets the scraper close its Puppeteer browser —
+   * otherwise an abandoned prompt would pin an open Chrome forever.
+   */
   private requestOtp(status: RunStatus): Promise<string> {
     runnerLog.info('otp.requested', { runId: status.runId, connectionId: status.connectionId });
-    return new Promise<string>((resolve) => {
+    const timeoutMs = this.otpTimeoutMs();
+    return new Promise<string>((resolve, reject) => {
       status.status = 'needs-otp';
       status.message = 'Waiting for the verification code…';
+      const timer = setTimeout(() => {
+        this.otpResolvers.delete(status.runId);
+        runnerLog.warn('otp.timeout', {
+          runId: status.runId,
+          connectionId: status.connectionId,
+          waitedMs: timeoutMs,
+        });
+        reject(new Error('otp.timeout'));
+      }, timeoutMs);
       this.otpResolvers.set(status.runId, (code) => {
+        clearTimeout(timer);
         status.status = 'running';
         status.message = 'Submitting the verification code…';
         runnerLog.info('otp.submitted', {
@@ -432,6 +514,10 @@ export class ScrapeRunner {
     message: string,
   ): void {
     this.otpResolvers.delete(status.runId);
+    // finish() is the single terminal transition for every run (success and
+    // every error/exception path routes here), so clearing the per-connection
+    // lock here guarantees it is always released — even on failure (H-7).
+    this.active.delete(connectionId);
     status.status = result;
     status.message = message;
     status.finishedAt = new Date().toISOString();
