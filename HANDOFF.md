@@ -116,7 +116,13 @@
   Verified live in chrome-devtools against a DB copy (worktree engine :4100):
   marking the ₪3,750 "משיכת שיק" transfer moved it to the Savings bucket, dropped
   the spend pie ₪15,202.42 → ₪11,452.42, and showed "Saved this cycle ₪3,750".
-  Web 556 + sidecar 110 tests pass, both typechecks clean.
+  Web 556 + sidecar 131 tests pass (merged with the security session's), both
+  typechecks clean. Merged to `main` + pushed (merge `8646e29`) — resolved a
+  conflict with the concurrent `security-high-fixes` session in `repo.test.ts`
+  + this file (kept both sides). **Durable fix:** `.claude/` was NOT actually
+  gitignored (PROJECT-RULES claimed it was) — a stray worktree gitlink slipped
+  into the merge via `git add -A`; untracked it and added `.claude/` to
+  `.gitignore` (`d7aef75`). Use plain `git add <paths>` mid-merge, not `-A`.
 
 - **Car flow ported to React (2026-05-30).** The `🚗 Car` Add-asset tile is now
   live (was `comingSoon`). New `web/src/accounts/CarAssetForm.tsx` (lazy-loaded):
