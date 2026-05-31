@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { categorySpend, buildPieCats } from './spend';
+import { categorySpend, buildPieCats, savedThisCycle } from './spend';
 import type { Transaction } from '../activity/types';
 import type { Category } from '../settings/CategoriesPanel';
 
@@ -75,5 +75,18 @@ describe('buildPieCats', () => {
     );
     expect(out[0].color).toBe('#8C8FA8');
     expect(out[0].emoji).toBe('🏷️');
+  });
+});
+
+describe('savedThisCycle', () => {
+  it('sums |amount| of ILS savings rows in the cycle, ignores the rest', () => {
+    const txns = [
+      txn({ amount: -1000, savings: true, date: '2026-05-10' }),
+      txn({ amount: -250, savings: true, date: '2026-05-20' }),
+      txn({ amount: -999, savings: false, date: '2026-05-10' }), // not savings
+      txn({ amount: -500, savings: true, currency: 'USD', date: '2026-05-10' }), // non-ILS
+      txn({ amount: -700, savings: true, date: '2026-04-10' }), // prev cycle
+    ];
+    expect(savedThisCycle(txns, '2026-05', 1)).toBe(1250);
   });
 });

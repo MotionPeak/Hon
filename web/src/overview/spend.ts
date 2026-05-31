@@ -52,6 +52,26 @@ export function categorySpend(
 }
 
 /**
+ * Total money marked as "Savings" in the given cycle (ILS only). Sums the
+ * absolute amount of savings-flagged rows so the Overview can show "saved this
+ * cycle" — the counterpart to the donut's spend total.
+ */
+export function savedThisCycle(
+  transactions: Transaction[],
+  key: string,
+  monthStartDay: number,
+): number {
+  let total = 0;
+  for (const t of transactions) {
+    if (!t.savings) continue;
+    if (t.currency !== 'ILS') continue;
+    if (cycleKey(t.date, monthStartDay) !== key) continue;
+    total += Math.abs(t.amount);
+  }
+  return total;
+}
+
+/**
  * Sorted spend-by-category for the current cycle, each row carrying its colour,
  * emoji and month-over-month change — the exact shape the donut slices and the
  * legend rows render from. Biggest spender first (largest slice leads).
