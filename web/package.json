@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "description": "Hon's React UI — gradually replaces sidecar/public/app.html. The engine in ../sidecar is unchanged; this app talks to it via the same Bearer-token API the old SPA used. See ../HANDOFF.md for the migration plan.",
+  "description": "Hon's web UI (React + Vite), served from web/dist by the engine.",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",

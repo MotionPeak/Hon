@@ -11,15 +11,14 @@ import react from '@vitejs/plugin-react';
 //      Vite opens http://localhost:5173 with HMR for React code.
 //   3. Open Vite URL with the engine's token fragment appended:
 //      http://localhost:5173/#token=<T>
-//      The React app reads the fragment exactly like the old SPA did.
+//      The React app reads the fragment from the URL.
 //
 // Vite proxies every /api/* request to the engine, forwarding the
-// Bearer token header. That removes the CORS dance and means the
-// API surface stays identical to the old app.html.
+// Bearer token header. That removes the CORS dance.
 //
-// For production: `npm run build` outputs dist/ which the engine
-// serves in place of app.html (a follow-up commit replaces the
-// public/app.html line in server.ts).
+// For production: `npm run build` outputs web/dist, and the engine
+// serves this build from web/dist and rewrites /api/* to /<route>
+// (see sidecar/src/server.ts).
 export default defineConfig({
   plugins: [react()],
   server: {

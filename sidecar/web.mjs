@@ -5,7 +5,7 @@
 // fresh token generated for this run.
 import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, openSync, readFileSync, writeFileSync, chmodSync } from 'node:fs';
+import { existsSync, mkdirSync, openSync, readFileSync, writeFileSync, chmodSync, statSync, readdirSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -103,6 +103,47 @@ if (!existsSync(join(here, 'node_modules'))) {
     stdio: 'inherit',
   });
   if (result.status !== 0) process.exit(result.status || 1);
+}
+
+// Ensure the React build exists and is fresh before the engine serves it.
+// (web/dist is gitignored; built on demand so `npm run web` stays one command.)
+const webDir = join(here, '..', 'web');
+const distIndex = join(webDir, 'dist', 'index.html');
+
+function newestMtime(dir) {
+  let newest = 0;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name === 'node_modules' || entry.name === 'dist') continue;
+    const p = join(dir, entry.name);
+    const m = entry.isDirectory() ? newestMtime(p) : statSync(p).mtimeMs;
+    if (m > newest) newest = m;
+  }
+  return newest;
+}
+
+function buildIsStale() {
+  if (!existsSync(distIndex)) return true;
+  const builtAt = statSync(distIndex).mtimeMs;
+  const srcNewest = newestMtime(join(webDir, 'src'));
+  const cfgFiles = ['index.html', 'package.json', 'vite.config.ts']
+    .map((f) => join(webDir, f))
+    .filter((f) => existsSync(f))
+    .map((f) => statSync(f).mtimeMs);
+  const inputNewest = Math.max(srcNewest, ...cfgFiles);
+  return inputNewest > builtAt;
+}
+
+if (buildIsStale()) {
+  console.log('Building the web app (web/dist is missing or out of date)…');
+  const build = spawnSync(isWindows ? 'npm.cmd' : 'npm', ['run', 'build'], {
+    cwd: webDir,
+    stdio: 'inherit',
+    env: { ...process.env },
+  });
+  if (build.status !== 0) {
+    console.error('Web build failed — not starting the engine.');
+    process.exit(build.status || 1);
+  }
 }
 
 // Open the default browser once the engine has had a moment to bind.

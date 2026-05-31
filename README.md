@@ -175,7 +175,7 @@ the **web UI** it serves to your browser. Both ship from this repo.
 
 **Engine.** All of Hon's logic lives in `sidecar/` — TypeScript on Node 22,
 run directly with `tsx`. It binds [Fastify](https://fastify.dev) to
-`127.0.0.1` and serves both the REST API and the static `app.html` web UI.
+`127.0.0.1` and serves both the REST API and the React web UI built to `web/dist`.
 Bank/card scraping uses
 [`israeli-bank-scrapers`](https://github.com/eshaham/israeli-bank-scrapers)
 in a Puppeteer-controlled Chromium; pension portals use Hon's own Puppeteer
@@ -185,17 +185,19 @@ Categorisation and insights call the on-device LLM via
 Ollama). Everything persists in a single SQLite file via
 [`better-sqlite3`](https://github.com/WiseLibs/better-sqlite3).
 
-**Web UI.** A single self-contained `public/app.html` — vanilla JS, no build
-step. The engine serves it at `/`, and the API calls carry a per-launch
-bearer token the page reads from the URL fragment.
+**Web UI.** A React + Vite app (`web/`), built to `web/dist` and served by the
+engine at `/` (the launcher builds `web/dist` on start when missing or stale).
+The engine rewrites `/api/*` requests to `/<route>` — the production equivalent
+of Vite's dev proxy. The API calls carry a per-launch bearer token the page
+reads from the URL fragment.
 
 **Desktop wrapper (optional).** A thin Electron shell (`electron/`) that
 spawns the same engine and points a window at it. Same engine, same web UI,
 just packaged as a double-clickable app per OS.
 
-**Typical request.** Browser loads `/` → `app.html` reads the token from
-`location.hash` → fetches `/accounts`, `/transactions`, `/budget`, etc. with
-`Authorization: Bearer <token>` → the engine reads SQLite and answers JSON.
+**Typical request.** Browser loads `/` → React index.html → reads token from
+URL fragment → `/api/*` calls (engine strips the `/api` prefix and applies the
+bearer token) → the engine reads SQLite and answers JSON.
 
 **Typical sync.** User taps **↻ Sync** → `POST /connections/:id/scrape` →
 the runner launches a Puppeteer browser, replays any saved session cookies
@@ -659,7 +661,6 @@ re-enter credentials.
 ```
 sidecar/                Node engine — TypeScript, run via tsx
   src/                  every module is one concern; see table below
-  public/app.html       the entire web UI in a single self-contained file
   patches/              patch-package patches applied on npm install
   recover-creds.mjs     read-only vault decrypt utility
   web.mjs               launcher: starts engine, opens browser

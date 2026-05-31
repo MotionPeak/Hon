@@ -10,15 +10,20 @@ look strange. The README covers what Hon does and how to run it.
 
 ---
 
-## Two UIs coexist
+## The web app — React (`web/`), served from `web/dist`
 
-- **Legacy SPA** — `sidecar/public/app.html` (one ~10k-line file).
-  Served by the engine on `/`. Still the production UI.
 - **React app** — `web/` (Vite + React 19 + TS strict + Vitest).
-  Dev only: `cd web && npm run dev` → `http://localhost:5173/#token=…`.
-  Talks to the same engine via `vite.config.ts` proxy `/api → :4000`.
-  Tab-by-tab migration is structurally complete; will replace the
-  legacy SPA once `web/dist` is wired to the engine's `/` route.
+  Built to `web/dist` and served by the engine at `/`. The legacy
+  single-file SPA was retired (2026-05-31); `web/dist` is now the only UI.
+- **`/api/*` rewrite.** The React client calls `/api/<route>`; the engine
+  rewrites those to `/<route>` via Fastify's `rewriteUrl`
+  (`sidecar/src/httpRewrite.ts`), replicating vite's dev proxy. Static
+  assets are served from `web/dist/assets` under `/assets/`.
+- **Built on launch.** `web.mjs` builds `web/dist` when it's missing or
+  stale (sources newer than the last build) before starting the engine.
+- **Dev.** `cd web && npm run dev` → vite on `http://localhost:5173/#token=…`
+  with the `/api → :4000` proxy, OR the full launcher `npm run dev` (top-level
+  `package.json`, spawns engine + vite concurrently).
 
 ### One-command launcher (top-level `package.json`)
 
@@ -60,7 +65,7 @@ local browser tab and the user's finances — never remove it.**
 │   Browser (your default)                               │
 │   http://127.0.0.1:<port>/#token=<uuid>                │
 │   ↓ fetches single-page app                            │
-│   sidecar/public/app.html  (one HTML file, ~10k lines) │
+│   web/dist  (built React app, served by the engine)    │
 └────────────────────────────────────────────────────────┘
                        ↕  HTTP (Bearer <token>)
 ┌────────────────────────────────────────────────────────┐
@@ -191,28 +196,12 @@ before every launch. Removes orphan `DevToolsActivePort`,
 Without this, a hard engine restart left Meitav un-launchable until
 the user `rm`'d the lock files by hand.
 
-## The web app — `public/app.html` (one file, ~10k lines)
+## The budget model (domain knowledge)
 
-Single-page, no build step. Vanilla JS + inline CSS, served straight by
-the engine. Module split is on the TODO list.
-
-### State
-
-`window.state` is the source of truth — see `state = { … }` near line
-2000. Mutate state, then call `render()` to re-paint.
-
-Key shapes:
-
-- `transactions` — every txn ever fetched (joined via `txn_effective`
-  view that applies refund links + Splitwise offsets).
-- `connections` / `accounts` / `vouchers` / `loans` / `assets` — the
-  account graph.
-- `categorySplits` — `{ category: N }` where N is "I pay 1/N of every
-  charge in this category" (roommates).
-- `merchantFreq` — `{ merchantKey: "monthly"|"bimonthly"|"yearly" }`
-  user-set frequency for recurring detection.
-- `incomeOverride` — manual override for the cycle's expected income.
-- `monthlySavings` — `{ "YYYY-MM": { amount, transferred } }`.
+The React app (`web/`) is the UI; this section captures the budgeting
+domain concepts that are still real regardless of which component renders
+them. (The original prose lived in the now-retired `app.html`; the math
+below is unchanged.)
 
 ### The cycle model
 
@@ -220,9 +209,9 @@ A cycle is a calendar month (with custom `settings.monthStartDay` start
 day). `cycleKey(date)` returns `"YYYY-MM"`. `currentCycleKey()` is
 `today`. All budget math is per-cycle.
 
-### The budget projection (`budgetProjection()`)
+### The budget projection
 
-Computes:
+The budget projection computes:
 - `expectedIncome` — manual override or computed from recurring inflows
 - `expectedFixed` — smoothed monthly-equivalent of recurring fixed bills
 - `expectedFixedThisCycle` — full charges of bills predicted to bill in
@@ -234,8 +223,8 @@ checking the merchant frequencies in the Recurring tab.
 
 ### The projected-bank-balance card
 
-`bankProjectionBlock()` computes end-of-cycle bank balance using the
-USER'S mental model:
+The projected-bank-balance card computes end-of-cycle bank balance using
+the USER'S mental model:
 
 ```
 end = bankNow + income − fixed − essentials − varSpent − piggies
