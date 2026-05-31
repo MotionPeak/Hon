@@ -107,9 +107,14 @@ export interface TxnRow {
   refundId?: string | null;
   /** When set, the id of the expense this transaction is a refund for. */
   refundForId?: string | null;
-  /** "Savings" mark: 1 = money moved to savings — out of spend, tallied as
-   *  saved. Mutually exclusive with excluded_manual. */
-  savings?: number | null;
+  /** Manual "exclude from cycle" override. Tri-state: true forces excluded,
+   *  false forces included, null defers to the card-bill rule. Stored as an
+   *  INTEGER (1/0/null); coerced to boolean on read (see `coerceTxnRow`). */
+  excludedManual?: boolean | null;
+  /** "Savings" mark — money moved to savings; out of spend, tallied as saved.
+   *  Mutually exclusive with excludedManual. Stored as INTEGER (1/0/null);
+   *  coerced to boolean on read. */
+  savings?: boolean | null;
 }
 
 export interface ScrapeRunRow {
@@ -317,6 +322,21 @@ const TXN_COLS =
   'processed_date AS processedDate, amount, currency, description, memo, ' +
   'kind, status, category, created_at AS createdAt, loan_id AS loanId, ' +
   'excluded_manual AS excludedManual, savings';
+
+/** better-sqlite3 returns INTEGER columns as numbers, but `TxnRow` (and the
+ *  React client) treat `excludedManual` / `savings` as tri-state booleans.
+ *  Coerce at the read boundary so callers get real booleans, not 0/1 — without
+ *  this the client's `excludedManual === true` checks never match. */
+function coerceTxnFlag(v: unknown): boolean | null {
+  return v == null ? null : v === 1;
+}
+function coerceTxnRow(r: TxnRow): TxnRow {
+  return {
+    ...r,
+    excludedManual: coerceTxnFlag(r.excludedManual),
+    savings: coerceTxnFlag(r.savings),
+  };
+}
 
 /** All database reads/writes go through this typed repository. */
 export class Repo {
@@ -561,7 +581,8 @@ export class Repo {
       // SQLite treats a negative LIMIT as unbounded. The month-by-month UIs
       // (Activity/Insights/Recurring/Subscriptions) need every cycle, so an
       // omitted limit returns the full history rather than a recent page.
-      .all({ accountId: opts.accountId ?? null, limit: opts.limit ?? -1 }) as TxnRow[];
+      .all({ accountId: opts.accountId ?? null, limit: opts.limit ?? -1 })
+      .map((r) => coerceTxnRow(r as TxnRow));
   }
 
   /** Sets one account's balance by hand (scrapers do not report card balances). */
@@ -630,9 +651,10 @@ export class Repo {
   }
 
   getTransaction(id: string): TxnRow | undefined {
-    return this.db
+    const row = this.db
       .prepare(`SELECT ${TXN_COLS} FROM transactions WHERE id = ?`)
       .get(id) as TxnRow | undefined;
+    return row ? coerceTxnRow(row) : undefined;
   }
 
   /** Sets one transaction's category (used when the user moves it by hand). */

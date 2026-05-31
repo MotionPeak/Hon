@@ -10,7 +10,7 @@ import type { Account, Loan } from '../accounts/types';
 import type { Category } from '../settings/CategoriesPanel';
 import type { Transaction } from './types';
 import { merchantKey, recurrenceChoices, type Frequency } from '../recurring/helpers';
-import { isExcludedFromCycle, ruleMatches } from './excluded';
+import { isExcludedFromCycle, isManuallyExcluded, ruleMatches } from './excluded';
 import { SplitwiseSection } from './SplitwiseSection';
 import { SplitwiseRepaymentSection } from './SplitwiseRepaymentSection';
 import { useSplitwise } from '../splitwise/useSplitwise';
@@ -423,7 +423,7 @@ export function ActivityView() {
           currentFreq={
             (merchantFreqs[merchantKey(moving.description)] as Frequency | undefined) ?? null
           }
-          excluded={isExcludedFromCycle(moving, exclusionSettings)}
+          excluded={isManuallyExcluded(moving, exclusionSettings)}
           ruleMatched={ruleMatches(moving, exclusionSettings)}
           onSetExcluded={async (next: boolean) => {
             // When the user's choice already matches the rule, clear the
@@ -436,6 +436,10 @@ export function ActivityView() {
               'PATCH',
               { excluded: value },
             );
+            // Reflect the new state in the open sidebar immediately — refresh()
+            // updates the list but not `moving`. Excluding clears savings
+            // server-side (mutually exclusive), so mirror that here.
+            setMoving((m) => (m ? { ...m, excludedManual: value, savings: next ? false : m.savings } : m));
             await refresh();
           }}
           savings={!!moving.savings}
@@ -445,6 +449,9 @@ export function ActivityView() {
               'PATCH',
               { savings: next },
             );
+            // Marking savings clears the manual exclude server-side; mirror it
+            // so neither checkbox shows a stale state in the open sidebar.
+            setMoving((m) => (m ? { ...m, savings: next, excludedManual: next ? null : m.excludedManual } : m));
             await refresh();
           }}
           onClose={() => setMoving(null)}

@@ -46,13 +46,24 @@ export function ruleMatches(t: Transaction, settings: ExclusionSettings): boolea
   return matchesCardProviderRule(t.description ?? '', settings.cardProviders);
 }
 
-/** Effective excluded state combining manual override + live rule. */
+/** Excluded by the manual override or the card-bill rule — independent of the
+ *  savings mark. This is what the sidebar's "Exclude from cycle" toggle
+ *  reflects, so a savings transfer doesn't light up the Exclude checkbox too. */
+export function isManuallyExcluded(
+  t: Transaction,
+  settings: ExclusionSettings,
+): boolean {
+  if (t.excludedManual === true) return true;
+  if (t.excludedManual === false) return false;
+  return ruleMatches(t, settings);
+}
+
+/** Effective out-of-cycle state for spend totals: savings transfers OR the
+ *  manual/rule exclude. Drives the pie, Insights, and the Activity bucketing. */
 export function isExcludedFromCycle(
   t: Transaction,
   settings: ExclusionSettings,
 ): boolean {
   if (t.savings) return true; // savings transfers are never counted as spend
-  if (t.excludedManual === true) return true;
-  if (t.excludedManual === false) return false;
-  return ruleMatches(t, settings);
+  return isManuallyExcluded(t, settings);
 }
