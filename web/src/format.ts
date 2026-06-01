@@ -13,14 +13,17 @@ const SYMBOLS: Record<string, string> = {
  */
 export function money(amount: number | null | undefined, currency: string = 'ILS'): string {
   if (amount == null) return '—';
-  const abs = Math.abs(amount);
+  // Derive sign + magnitude from the rounded value so a sub-cent residual that
+  // rounds to 0 never renders as "−₪0".
+  const rounded = Math.round(amount * 100) / 100;
+  const abs = Math.abs(rounded);
   const fractional = Math.round(abs * 100) % 100 !== 0;
   const formatted = abs.toLocaleString('en-US', {
     minimumFractionDigits: fractional ? 2 : 0,
     maximumFractionDigits: fractional ? 2 : 0,
   });
-  const symbol = SYMBOLS[currency] || currency + ' ';
-  const sign = amount < 0 ? '−' : '';
+  const symbol = SYMBOLS[(currency || '').toUpperCase()] || currency + ' ';
+  const sign = rounded < 0 ? '−' : '';
   return `${sign}${symbol}${formatted}`;
 }
 

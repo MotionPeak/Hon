@@ -3,20 +3,37 @@
 // so multiple tabs can share the same boundary logic.
 
 /**
+ * Clamp a user-supplied start day to the 1..28 range so the derived bounds are
+ * valid in every month (no Feb-30) and so cycleKey + cycleRange agree on the
+ * boundary for any stored value.
+ */
+function clampStartDay(monthStartDay: number): number {
+  return Math.min(Math.max(1, Math.floor(monthStartDay) || 1), 28);
+}
+
+/**
  * The cycle (YYYY-MM) a date belongs to, given the user's monthStartDay.
  * A `monthStartDay > 1` shifts the boundary — a date earlier in its month
  * counts toward the previous cycle.
+ *
+ * Parses the YYYY-MM-DD components directly rather than via `new Date(str)`,
+ * which would parse as UTC midnight and then be read through local-time
+ * getters — drifting a full cycle in negative-UTC timezones. Transaction dates
+ * are stored as plain Israel-time calendar strings, so they must be treated as
+ * calendar dates with no timezone conversion.
  */
 export function cycleKey(dateStr: string, monthStartDay: number): string {
-  const d = new Date(dateStr);
-  if (Number.isNaN(d.getTime())) return (dateStr || '').slice(0, 7);
-  let y = d.getFullYear();
-  let m = d.getMonth();
-  if (monthStartDay > 1 && d.getDate() < monthStartDay) {
-    m -= 1;
-    if (m < 0) { m = 11; y -= 1; }
+  const m0 = /^(\d{4})-(\d{2})-(\d{2})/.exec(dateStr || '');
+  if (!m0) return (dateStr || '').slice(0, 7);
+  let y = Number(m0[1]);
+  let mon = Number(m0[2]); // 1-based
+  const day = Number(m0[3]);
+  const startDay = clampStartDay(monthStartDay);
+  if (startDay > 1 && day < startDay) {
+    mon -= 1;
+    if (mon < 1) { mon = 12; y -= 1; }
   }
-  return `${y}-${String(m + 1).padStart(2, '0')}`;
+  return `${y}-${String(mon).padStart(2, '0')}`;
 }
 
 /** "May 2026" / "December 2025" — long-month + year label of a YYYY-MM key. */
@@ -29,9 +46,13 @@ export function cycleLabel(key: string): string {
   });
 }
 
-/** The cycle key for today. */
+/** The cycle key for today (in the user's local time, matching stored dates). */
 export function currentCycleKey(monthStartDay: number): string {
-  return cycleKey(new Date().toISOString().slice(0, 10), monthStartDay);
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return cycleKey(`${y}-${m}-${d}`, monthStartDay);
 }
 
 /**
@@ -45,7 +66,7 @@ export function currentCycleKey(monthStartDay: number): string {
 export function cycleRange(
   key: string, monthStartDay: number,
 ): { start: string; end: string } {
-  const day = Math.min(Math.max(1, Math.floor(monthStartDay) || 1), 28);
+  const day = clampStartDay(monthStartDay);
   const [yStr, mStr] = key.split('-');
   const y = Number(yStr);
   const m = Number(mStr); // 1-based
@@ -65,10 +86,10 @@ export function currentCycleRange(monthStartDay: number): { start: string; end: 
 
 /** The cycle that comes one calendar month before this one. */
 export function prevCycleKey(key: string): string {
-  const [yStr, mStr] = key.split('-');
-  let y = Number(yStr);
-  let m = Number(mStr) - 1; // 0-based
-  m -= 1;
-  if (m < 0) { m = 11; y -= 1; }
-  return `${y}-${String(m + 1).padStart(2, '0')}`;
+  const m0 = /^(\d{4})-(\d{2})/.exec(key || '');
+  if (!m0) return key;
+  let y = Number(m0[1]);
+  let m = Number(m0[2]) - 1; // step back one month (1-based)
+  if (m < 1) { m = 12; y -= 1; }
+  return `${y}-${String(m).padStart(2, '0')}`;
 }
