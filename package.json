@@ -13,5 +13,8 @@
   },
   "devDependencies": {
     "concurrently": "^9.0.0"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
   }
 }

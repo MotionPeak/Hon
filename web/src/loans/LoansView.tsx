@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
+import { uiActions } from '../store/uiStore';
 import { money } from '../format';
 import type { Loan, RateType } from '../accounts/types';
 import { DelayedLoader } from '../ui/DelayedLoader';
@@ -35,11 +36,11 @@ export function LoansView() {
   }, []);
 
   // Clear the "unseen loan ids" queue the moment the user opens this tab.
-  // The Loans-nav dot in App.tsx reads the same key + the custom event;
-  // emitting it drops the dot immediately even though it polls localStorage.
+  // The durable queue lives in localStorage (AccountsView's detector writes it);
+  // clearing it + nudging the Zustand store drops the Loans-nav dot immediately.
   useEffect(() => {
     window.localStorage.setItem('hon.unseenLoanIds', JSON.stringify([]));
-    window.dispatchEvent(new Event('hon.loan-ids-changed'));
+    uiActions.refreshUnseenLoans();
   }, []);
 
   if (data === null) return <DelayedLoader />;
@@ -56,11 +57,12 @@ export function LoansView() {
           type="button"
           className="mini"
           onClick={() => {
-            // Loans are added through the Assets picker; flag the intent and
-            // ask the shell to flip to the Assets tab, where AccountsView opens
-            // the loan form on mount (see its hon.pendingAddLoan effect).
+            // Loans are added through the Assets picker. The durable
+            // `hon.pendingAddLoan` flag is read by AccountsView on mount; the
+            // Zustand store flips the active tab to Assets (replacing the old
+            // `hon.go-to-assets` window event).
             window.localStorage.setItem('hon.pendingAddLoan', '1');
-            window.dispatchEvent(new Event('hon.go-to-assets'));
+            uiActions.goToAssetsAddLoan();
           }}
         >
           + Add a loan

@@ -1,5 +1,7 @@
 import type Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
+import { and, asc, desc, eq, gte, isNull, sql } from 'drizzle-orm';
+import type { SQLiteTable } from 'drizzle-orm/sqlite-core';
 import type {
   BrokeragePerformanceData,
   NormalizedAccount,
@@ -7,6 +9,42 @@ import type {
 } from './scrapers.js';
 import type { Loan } from './loans.js';
 import { matchPaymentToLoan } from './loanMatcher.js';
+import { makeDb, schema, type HonDb } from './db/client.js';
+
+// Typed table handles from the Drizzle schema. Aliased to short names so the
+// query bodies below read close to SQL. The schema is the typed query layer
+// over the database db.ts migrates — see src/db/schema.ts.
+const {
+  meta: metaT,
+  connections: connectionsT,
+  accounts: accountsT,
+  transactions: transactionsT,
+  scrapeRuns: scrapeRunsT,
+  categoryCache: categoryCacheT,
+  budgets: budgetsT,
+  credentials: credentialsT,
+  merchantRules: merchantRulesT,
+  manualAssets: manualAssetsT,
+  transactionLinks: transactionLinksT,
+  merchantRecurrence: merchantRecurrenceT,
+  splitwiseLinks: splitwiseLinksT,
+  piggyBanks: piggyBanksT,
+  piggyContributions: piggyContributionsT,
+  holdings: holdingsT,
+  accountValueSnapshots: accountValueSnapshotsT,
+  brokeragePerformance: brokeragePerformanceT,
+  cancelledSubscriptions: cancelledSubscriptionsT,
+  holdingValueSnapshots: holdingValueSnapshotsT,
+  loans: loansT,
+  rateCache: rateCacheT,
+  categories: categoriesT,
+  monthlySavings: monthlySavingsT,
+  merchantSplits: merchantSplitsT,
+  categorySplits: categorySplitsT,
+  vouchers: vouchersT,
+  splitwiseRepayments: splitwiseRepaymentsT,
+  txnEffective: txnEffectiveV,
+} = schema;
 
 /** Tracks Israeli retail loans recognise: a fixed-rate loan, a prime-linked
  *  loan (prime + margin, no index linkage), and the CPI-linked variants of
@@ -30,12 +68,8 @@ export interface Connection {
   historyMonths: number;
 }
 
-// SQLite has no boolean type, so `hasCredentials` arrives as 0 | 1.
-type ConnectionRow = Omit<Connection, 'hasCredentials'> & { hasCredentials: number };
-
-function toConnection(row: ConnectionRow): Connection {
-  return { ...row, hasCredentials: row.hasCredentials !== 0 };
-}
+// (Connection rows now come back from Drizzle; `hasCredentials` is coerced from
+// the computed-column 0/1 inline in connectionSelect's callers.)
 
 export interface AccountRow {
   id: string;
@@ -55,8 +89,7 @@ export interface AccountRow {
   inceptionDate: string | null;
 }
 
-// SQLite has no boolean type, so `excluded` arrives as 0 | 1.
-type AccountRowDb = Omit<AccountRow, 'excluded'> & { excluded: number };
+// (Account rows now come back from Drizzle with `excluded` as a real boolean.)
 
 export interface HoldingRow {
   accountId: string;
@@ -165,18 +198,8 @@ export interface Voucher {
   updatedAt: string;
 }
 
-type VoucherRow = Omit<Voucher, 'excluded' | 'nameOverridden'> & {
-  excluded: number;
-  nameOverridden: number;
-};
-
-function toVoucher(row: VoucherRow): Voucher {
-  return {
-    ...row,
-    excluded: row.excluded !== 0,
-    nameOverridden: row.nameOverridden !== 0,
-  };
-}
+// (Vouchers now come back from Drizzle; `excluded`/`nameOverridden` are
+// boolean-mode columns so no 0/1 coercion is needed.)
 
 export interface ManualAsset {
   id: string;
@@ -191,10 +214,10 @@ export interface ManualAsset {
   excluded: boolean;
 }
 
-// SQLite stores `details` as JSON text and `excluded` as 0 | 1.
-type ManualAssetRow = Omit<ManualAsset, 'details' | 'excluded'> & {
+// SQLite stores `details` as JSON text; `excluded` is a boolean-mode column so
+// Drizzle reads it back as a real boolean (no 0/1 coercion needed).
+type ManualAssetRow = Omit<ManualAsset, 'details'> & {
   details: string | null;
-  excluded: number;
 };
 
 function toManualAsset(row: ManualAssetRow): ManualAsset {
@@ -209,7 +232,7 @@ function toManualAsset(row: ManualAssetRow): ManualAsset {
       details = null;
     }
   }
-  return { ...row, details, excluded: row.excluded !== 0 };
+  return { ...row, details };
 }
 
 /** A savings goal. `kind` decides how the budget engine funds it:
@@ -233,19 +256,8 @@ export interface PiggyBank {
   updatedAt: string;
 }
 
-// SQLite has no boolean type, so `onHold` arrives as 0 | 1.
-type PiggyBankRow = Omit<PiggyBank, 'onHold' | 'kind'> & {
-  onHold: number;
-  kind: string;
-};
-
-function toPiggyBank(row: PiggyBankRow): PiggyBank {
-  return {
-    ...row,
-    onHold: row.onHold !== 0,
-    kind: row.kind === 'lump' ? 'lump' : 'monthly',
-  };
-}
+// (Piggy banks now come back from Drizzle; `onHold` is boolean-mode and `kind`
+// is narrowed to the PiggyKind union by Repo.narrowPiggy.)
 
 /** A single month's set-aside for one piggy bank. */
 export interface PiggyContribution {
@@ -323,12 +335,16 @@ const TXN_COLS =
   'kind, status, category, created_at AS createdAt, loan_id AS loanId, ' +
   'excluded_manual AS excludedManual, savings';
 
-/** better-sqlite3 returns INTEGER columns as numbers, but `TxnRow` (and the
- *  React client) treat `excludedManual` / `savings` as tri-state booleans.
- *  Coerce at the read boundary so callers get real booleans, not 0/1 — without
- *  this the client's `excludedManual === true` checks never match. */
+/** Normalises a tri-state flag to `boolean | null` at the read boundary.
+ *  `excludedManual` / `savings` are tri-state in `TxnRow` (and the React
+ *  client). Drizzle boolean-mode reads already return real booleans, so this is
+ *  a no-op for them; it still maps raw better-sqlite3 0/1 integers (the few
+ *  reads left on `this.db`) so callers always see booleans, never 0/1. Without
+ *  it the client's `excludedManual === true` checks never match. */
 function coerceTxnFlag(v: unknown): boolean | null {
-  return v == null ? null : v === 1;
+  if (v == null) return null;
+  if (typeof v === 'boolean') return v;
+  return v === 1;
 }
 function coerceTxnRow(r: TxnRow): TxnRow {
   return {
@@ -338,48 +354,83 @@ function coerceTxnRow(r: TxnRow): TxnRow {
   };
 }
 
-/** All database reads/writes go through this typed repository. */
+/** All database reads/writes go through this typed repository.
+ *
+ *  Queries are written with Drizzle ORM (`this.orm`, the typed query layer over
+ *  the schema in src/db/schema.ts). The raw better-sqlite3 handle (`this.db`)
+ *  is retained for the few genuinely set-based statements where hand-tuned SQL
+ *  is clearer than the builder — the analytics CTEs over `txn_effective` and
+ *  the hot `saveScrapeResult` upsert loop. Both views address the SAME single
+ *  connection; Drizzle is constructed over it, never a second handle. */
 export class Repo {
-  constructor(private readonly db: Database.Database) {}
+  private readonly orm: HonDb;
+
+  constructor(private readonly db: Database.Database) {
+    this.orm = makeDb(db);
+  }
+
+  /** `SELECT COUNT(*)` over a whole table — a small helper so the summary
+   *  counts read cleanly. `SQLiteTable` is the common supertype of every table
+   *  handle in the schema. */
+  private countRows(table: SQLiteTable): number {
+    return this.orm.select({ n: sql<number>`COUNT(*)` }).from(table).get()?.n ?? 0;
+  }
 
   // --- Connections ----------------------------------------------------------
 
+  /** SELECT ... plus the computed `hasCredentials` (does the vault hold creds
+   *  for this connection?) via a LEFT JOIN existence check, mirroring the old
+   *  CONNECTION_COLS/CONNECTION_FROM. Drizzle maps snake_case → camelCase from
+   *  the schema, and `historyMonths` is a real number. The existence check
+   *  comes back as SQLite 0/1, so it is coerced to a real boolean (what the old
+   *  `toConnection` did). */
+  private connectionSelect() {
+    return this.orm
+      .select({
+        id: connectionsT.id,
+        companyId: connectionsT.companyId,
+        displayName: connectionsT.displayName,
+        createdAt: connectionsT.createdAt,
+        lastScrapeAt: connectionsT.lastScrapeAt,
+        lastStatus: connectionsT.lastStatus,
+        historyMonths: connectionsT.historyMonths,
+        hasCredentials: sql<number>`(${credentialsT.connectionId} IS NOT NULL)`,
+      })
+      .from(connectionsT)
+      .leftJoin(credentialsT, eq(credentialsT.connectionId, connectionsT.id));
+  }
+
   listConnections(): Connection[] {
-    const rows = this.db
-      .prepare(`SELECT ${CONNECTION_COLS} ${CONNECTION_FROM} ORDER BY c.display_name`)
-      .all() as ConnectionRow[];
-    return rows.map(toConnection);
+    return this.connectionSelect()
+      .orderBy(connectionsT.displayName)
+      .all()
+      .map((r) => ({ ...r, hasCredentials: r.hasCredentials !== 0 }));
   }
 
   getConnection(id: string): Connection | undefined {
-    const row = this.db
-      .prepare(`SELECT ${CONNECTION_COLS} ${CONNECTION_FROM} WHERE c.id = ?`)
-      .get(id) as ConnectionRow | undefined;
-    return row ? toConnection(row) : undefined;
+    const row = this.connectionSelect().where(eq(connectionsT.id, id)).get();
+    return row ? { ...row, hasCredentials: row.hasCredentials !== 0 } : undefined;
   }
 
   createConnection(companyId: string, displayName: string): Connection {
     const id = randomUUID();
-    this.db
-      .prepare(
-        'INSERT INTO connections (id, company_id, display_name, created_at) VALUES (?, ?, ?, ?)',
-      )
-      .run(id, companyId, displayName, new Date().toISOString());
+    this.orm
+      .insert(connectionsT)
+      .values({ id, companyId, displayName, createdAt: new Date().toISOString() })
+      .run();
     return this.getConnection(id)!;
   }
 
   deleteConnection(id: string): void {
-    this.db.prepare('DELETE FROM connections WHERE id = ?').run(id);
+    this.orm.delete(connectionsT).where(eq(connectionsT.id, id)).run();
   }
 
   setConnectionStatus(id: string, status: string, scrapeAt?: string): void {
-    if (scrapeAt) {
-      this.db
-        .prepare('UPDATE connections SET last_status = ?, last_scrape_at = ? WHERE id = ?')
-        .run(status, scrapeAt, id);
-    } else {
-      this.db.prepare('UPDATE connections SET last_status = ? WHERE id = ?').run(status, id);
-    }
+    this.orm
+      .update(connectionsT)
+      .set(scrapeAt ? { lastStatus: status, lastScrapeAt: scrapeAt } : { lastStatus: status })
+      .where(eq(connectionsT.id, id))
+      .run();
   }
 
   /**
@@ -396,9 +447,11 @@ export class Repo {
     if (months < 1 || months > 24) {
       throw new Error(`historyMonths out of range [1, 24]: ${months}`);
     }
-    const result = this.db
-      .prepare('UPDATE connections SET history_months = ? WHERE id = ?')
-      .run(months, id);
+    const result = this.orm
+      .update(connectionsT)
+      .set({ historyMonths: months })
+      .where(eq(connectionsT.id, id))
+      .run();
     if (result.changes === 0) {
       throw new Error(`connection not found: ${id}`);
     }
@@ -407,41 +460,85 @@ export class Repo {
 
   // --- Accounts & transactions ---------------------------------------------
 
+  /** Drizzle column map mirroring the legacy `TXN_COLS` bare-SELECT, including
+   *  `loanId` (read by the UI even though it is not on `TxnRow`). Boolean-mode
+   *  columns (`excludedManual`, `savings`) read back as real booleans, so the
+   *  `coerceTxnRow` callers wrap with is effectively a no-op now — kept so the
+   *  read boundary stays explicit. */
+  private txnColumns() {
+    return {
+      id: transactionsT.id,
+      accountId: transactionsT.accountId,
+      externalId: transactionsT.externalId,
+      date: transactionsT.date,
+      processedDate: transactionsT.processedDate,
+      amount: transactionsT.amount,
+      currency: transactionsT.currency,
+      description: transactionsT.description,
+      memo: transactionsT.memo,
+      kind: transactionsT.kind,
+      status: transactionsT.status,
+      category: transactionsT.category,
+      createdAt: transactionsT.createdAt,
+      loanId: transactionsT.loanId,
+      excludedManual: transactionsT.excludedManual,
+      savings: transactionsT.savings,
+    };
+  }
+
   listAccounts(): AccountRow[] {
-    const rows = this.db
-      .prepare(
-        `SELECT a.id, a.connection_id AS connectionId, c.company_id AS companyId,
-                c.display_name AS connectionName, a.account_number AS accountNumber,
-                a.label, a.balance, a.currency, a.updated_at AS updatedAt,
-                a.excluded, a.inception_date AS inceptionDate
-         FROM accounts a
-         JOIN connections c ON c.id = a.connection_id
-         ORDER BY c.display_name, a.account_number`,
-      )
-      .all() as AccountRowDb[];
-    return rows.map((r) => ({ ...r, excluded: r.excluded !== 0 }));
+    // JOIN onto the connection for company id + display name. `excluded` is a
+    // boolean-mode column so Drizzle reads it back as a real boolean — the old
+    // `r.excluded !== 0` coercion is gone.
+    return this.orm
+      .select({
+        id: accountsT.id,
+        connectionId: accountsT.connectionId,
+        companyId: connectionsT.companyId,
+        connectionName: connectionsT.displayName,
+        accountNumber: accountsT.accountNumber,
+        label: accountsT.label,
+        balance: accountsT.balance,
+        currency: accountsT.currency,
+        updatedAt: accountsT.updatedAt,
+        excluded: accountsT.excluded,
+        inceptionDate: accountsT.inceptionDate,
+      })
+      .from(accountsT)
+      .innerJoin(connectionsT, eq(connectionsT.id, accountsT.connectionId))
+      .orderBy(connectionsT.displayName, accountsT.accountNumber)
+      .all();
   }
 
   /** Sets (or clears, when null) the user-defined inception date for an
    *  account — the "when I actually started investing here" boundary used by
    *  the brokerage chart to clip synthetic Yahoo/Maya pre-link history. */
   setAccountInceptionDate(id: string, inceptionDate: string | null): void {
-    this.db
-      .prepare('UPDATE accounts SET inception_date = ?, updated_at = ? WHERE id = ?')
-      .run(inceptionDate, new Date().toISOString(), id);
+    this.orm
+      .update(accountsT)
+      .set({ inceptionDate, updatedAt: new Date().toISOString() })
+      .where(eq(accountsT.id, id))
+      .run();
   }
 
   /** Every brokerage position across all accounts. */
   listHoldings(): HoldingRow[] {
-    return this.db
-      .prepare(
-        `SELECT account_id AS accountId, symbol, description, units, price,
-                currency, cost_basis AS costBasis, open_pnl AS openPnl,
-                value, updated_at AS updatedAt
-         FROM holdings
-         ORDER BY symbol`,
-      )
-      .all() as HoldingRow[];
+    return this.orm
+      .select({
+        accountId: holdingsT.accountId,
+        symbol: holdingsT.symbol,
+        description: holdingsT.description,
+        units: holdingsT.units,
+        price: holdingsT.price,
+        currency: holdingsT.currency,
+        costBasis: holdingsT.costBasis,
+        openPnl: holdingsT.openPnl,
+        value: holdingsT.value,
+        updatedAt: holdingsT.updatedAt,
+      })
+      .from(holdingsT)
+      .orderBy(holdingsT.symbol)
+      .all();
   }
 
   /** Brokerage accounts joined with their connection's company id. */
@@ -456,14 +553,20 @@ export class Repo {
    */
   holdingSnapshotBounds(accountId: string, symbol: string):
     { count: number; firstDate: string | null; lastDate: string | null } {
-    const row = this.db
-      .prepare(
-        `SELECT COUNT(*) AS count, MIN(date) AS firstDate, MAX(date) AS lastDate
-         FROM holding_value_snapshots
-         WHERE account_id = ? AND symbol = ?`,
+    const row = this.orm
+      .select({
+        count: sql<number>`COUNT(*)`,
+        firstDate: sql<string | null>`MIN(${holdingValueSnapshotsT.date})`,
+        lastDate: sql<string | null>`MAX(${holdingValueSnapshotsT.date})`,
+      })
+      .from(holdingValueSnapshotsT)
+      .where(
+        and(
+          eq(holdingValueSnapshotsT.accountId, accountId),
+          eq(holdingValueSnapshotsT.symbol, symbol),
+        ),
       )
-      .get(accountId, symbol) as
-        { count: number; firstDate: string | null; lastDate: string | null };
+      .get()!;
     return row;
   }
 
@@ -478,38 +581,40 @@ export class Repo {
     units: number,
     history: { date: string; price: number; currency: string }[],
   ): number {
-    const insert = this.db.prepare(
-      `INSERT OR IGNORE INTO holding_value_snapshots
-         (account_id, symbol, date, units, price, value, currency)
-       VALUES (@accountId, @symbol, @date, @units, @price, @value, @currency)`,
-    );
     let inserted = 0;
-    this.db.transaction(() => {
+    this.orm.transaction((tx) => {
       for (const point of history) {
-        const r = insert.run({
-          accountId,
-          symbol,
-          date: point.date,
-          units,
-          price: point.price,
-          value: units * point.price,
-          currency: point.currency,
-        });
+        // INSERT OR IGNORE: existing (account, symbol, date) rows are left
+        // alone — Hon's own daily syncs are the source of truth.
+        const r = tx
+          .insert(holdingValueSnapshotsT)
+          .values({
+            accountId,
+            symbol,
+            date: point.date,
+            units,
+            price: point.price,
+            value: units * point.price,
+            currency: point.currency,
+          })
+          .onConflictDoNothing()
+          .run();
         if (r.changes) inserted += 1;
       }
-    })();
+    });
     return inserted;
   }
 
   /** Cached SnapTrade performance reports, keyed by connection id. */
   listBrokeragePerformance(): { connectionId: string; data: BrokeragePerformanceData; fetchedAt: string }[] {
-    const rows = this.db
-      .prepare(
-        `SELECT connection_id AS connectionId, data_json AS dataJson,
-                fetched_at AS fetchedAt
-         FROM brokerage_performance`,
-      )
-      .all() as { connectionId: string; dataJson: string; fetchedAt: string }[];
+    const rows = this.orm
+      .select({
+        connectionId: brokeragePerformanceT.connectionId,
+        dataJson: brokeragePerformanceT.dataJson,
+        fetchedAt: brokeragePerformanceT.fetchedAt,
+      })
+      .from(brokeragePerformanceT)
+      .all();
     return rows
       .map((r) => {
         try {
@@ -526,36 +631,46 @@ export class Repo {
   }
 
   saveBrokeragePerformance(connectionId: string, data: BrokeragePerformanceData): void {
-    this.db
-      .prepare(
-        `INSERT INTO brokerage_performance (connection_id, data_json, fetched_at)
-         VALUES (?, ?, ?)
-         ON CONFLICT (connection_id) DO UPDATE SET
-           data_json = excluded.data_json, fetched_at = excluded.fetched_at`,
-      )
-      .run(connectionId, JSON.stringify(data), new Date().toISOString());
+    const fetchedAt = new Date().toISOString();
+    this.orm
+      .insert(brokeragePerformanceT)
+      .values({ connectionId, dataJson: JSON.stringify(data), fetchedAt })
+      .onConflictDoUpdate({
+        target: brokeragePerformanceT.connectionId,
+        set: { dataJson: JSON.stringify(data), fetchedAt },
+      })
+      .run();
   }
 
   /** Every per-holding price/value snapshot, oldest first. */
   listHoldingSnapshots(): HoldingSnapshotRow[] {
-    return this.db
-      .prepare(
-        `SELECT account_id AS accountId, symbol, date, units, price, value, currency
-         FROM holding_value_snapshots
-         ORDER BY date`,
-      )
-      .all() as HoldingSnapshotRow[];
+    return this.orm
+      .select({
+        accountId: holdingValueSnapshotsT.accountId,
+        symbol: holdingValueSnapshotsT.symbol,
+        date: holdingValueSnapshotsT.date,
+        units: holdingValueSnapshotsT.units,
+        price: holdingValueSnapshotsT.price,
+        value: holdingValueSnapshotsT.value,
+        currency: holdingValueSnapshotsT.currency,
+      })
+      .from(holdingValueSnapshotsT)
+      .orderBy(holdingValueSnapshotsT.date)
+      .all();
   }
 
   /** Every recorded brokerage value snapshot, oldest first. */
   listValueSnapshots(): ValueSnapshotRow[] {
-    return this.db
-      .prepare(
-        `SELECT account_id AS accountId, date, value, currency
-         FROM account_value_snapshots
-         ORDER BY date`,
-      )
-      .all() as ValueSnapshotRow[];
+    return this.orm
+      .select({
+        accountId: accountValueSnapshotsT.accountId,
+        date: accountValueSnapshotsT.date,
+        value: accountValueSnapshotsT.value,
+        currency: accountValueSnapshotsT.currency,
+      })
+      .from(accountValueSnapshotsT)
+      .orderBy(accountValueSnapshotsT.date)
+      .all();
   }
 
   listTransactions(opts: { accountId?: string; limit?: number }): TxnRow[] {
@@ -587,27 +702,30 @@ export class Repo {
 
   /** Sets one account's balance by hand (scrapers do not report card balances). */
   setAccountBalance(id: string, balance: number): void {
-    this.db
-      .prepare('UPDATE accounts SET balance = ?, updated_at = ? WHERE id = ?')
-      .run(balance, new Date().toISOString(), id);
+    this.orm
+      .update(accountsT)
+      .set({ balance, updatedAt: new Date().toISOString() })
+      .where(eq(accountsT.id, id))
+      .run();
   }
 
   /** Includes or excludes one account from the net-worth total. */
   setAccountExcluded(id: string, excluded: boolean): void {
-    this.db
-      .prepare('UPDATE accounts SET excluded = ? WHERE id = ?')
-      .run(excluded ? 1 : 0, id);
+    // `excluded` is a boolean-mode column — pass the real boolean.
+    this.orm.update(accountsT).set({ excluded }).where(eq(accountsT.id, id)).run();
   }
 
   // --- Refund / reimbursement links ----------------------------------------
 
   listTransactionLinks(): { expenseId: string; refundId: string; amount: number }[] {
-    return this.db
-      .prepare(
-        `SELECT expense_id AS expenseId, refund_id AS refundId, amount
-         FROM transaction_links`,
-      )
-      .all() as { expenseId: string; refundId: string; amount: number }[];
+    return this.orm
+      .select({
+        expenseId: transactionLinksT.expenseId,
+        refundId: transactionLinksT.refundId,
+        amount: transactionLinksT.amount,
+      })
+      .from(transactionLinksT)
+      .all();
   }
 
   /**
@@ -618,70 +736,99 @@ export class Repo {
    * refund), updating the amount when called again.
    */
   setTransactionLink(expenseId: string, refundId: string, amount: number): void {
-    this.db
-      .prepare(
-        `INSERT INTO transaction_links (id, expense_id, refund_id, amount, created_at)
-         VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT (expense_id, refund_id) DO UPDATE SET amount = excluded.amount`,
-      )
-      .run(randomUUID(), expenseId, refundId, amount, new Date().toISOString());
+    this.orm
+      .insert(transactionLinksT)
+      .values({ id: randomUUID(), expenseId, refundId, amount, createdAt: new Date().toISOString() })
+      .onConflictDoUpdate({
+        target: [transactionLinksT.expenseId, transactionLinksT.refundId],
+        set: { amount },
+      })
+      .run();
   }
 
   /** Removes one specific (expense, refund) allocation. */
   deleteTransactionLink(expenseId: string, refundId?: string): void {
     if (refundId) {
-      this.db
-        .prepare('DELETE FROM transaction_links WHERE expense_id = ? AND refund_id = ?')
-        .run(expenseId, refundId);
+      this.orm
+        .delete(transactionLinksT)
+        .where(
+          and(
+            eq(transactionLinksT.expenseId, expenseId),
+            eq(transactionLinksT.refundId, refundId),
+          ),
+        )
+        .run();
     } else {
-      this.db.prepare('DELETE FROM transaction_links WHERE expense_id = ?').run(expenseId);
+      this.orm.delete(transactionLinksT).where(eq(transactionLinksT.expenseId, expenseId)).run();
     }
   }
 
   /** Returns the unallocated portion of a refund — `ABS(amount) − Σ allocations`. */
   refundRemaining(refundId: string): number {
-    const refund = this.db
-      .prepare('SELECT amount FROM transactions WHERE id = ?')
-      .get(refundId) as { amount: number } | undefined;
+    const refund = this.orm
+      .select({ amount: transactionsT.amount })
+      .from(transactionsT)
+      .where(eq(transactionsT.id, refundId))
+      .get();
     if (!refund) return 0;
-    const used = (this.db
-      .prepare('SELECT COALESCE(SUM(amount), 0) AS used FROM transaction_links WHERE refund_id = ?')
-      .get(refundId) as { used: number }).used;
+    const used = this.orm
+      .select({ used: sql<number>`COALESCE(SUM(${transactionLinksT.amount}), 0)` })
+      .from(transactionLinksT)
+      .where(eq(transactionLinksT.refundId, refundId))
+      .get()!.used;
     return Math.max(0, Math.abs(refund.amount) - used);
   }
 
   getTransaction(id: string): TxnRow | undefined {
-    const row = this.db
-      .prepare(`SELECT ${TXN_COLS} FROM transactions WHERE id = ?`)
-      .get(id) as TxnRow | undefined;
-    return row ? coerceTxnRow(row) : undefined;
+    const row = this.orm
+      .select(this.txnColumns())
+      .from(transactionsT)
+      .where(eq(transactionsT.id, id))
+      .get();
+    return row ? coerceTxnRow(row as TxnRow) : undefined;
   }
 
   /** Sets one transaction's category (used when the user moves it by hand). */
   updateTransactionCategory(id: string, category: string): void {
-    this.db.prepare('UPDATE transactions SET category = ? WHERE id = ?').run(category, id);
+    this.orm.update(transactionsT).set({ category }).where(eq(transactionsT.id, id)).run();
   }
 
   // --- Splitwise links ------------------------------------------------------
   // Maps a Hon transaction to the Splitwise expense created from it. The paid
   // state is recomputed on each Splitwise refresh, not stored by the client.
 
-  private static readonly SW_COLS =
-    'transaction_id AS transactionId, expense_id AS expenseId, group_id AS groupId, ' +
-    'currency, owed_to_me AS owedToMe, counterparties, paid_amount AS paidAmount, ' +
-    'paid_state AS paidState, created_at AS createdAt, synced_at AS syncedAt';
+  /** Drizzle column map for splitwise_links; `counterparties` arrives as the raw
+   *  JSON string that `toSplitwiseLink` parses. */
+  private swColumns() {
+    return {
+      transactionId: splitwiseLinksT.transactionId,
+      expenseId: splitwiseLinksT.expenseId,
+      groupId: splitwiseLinksT.groupId,
+      currency: splitwiseLinksT.currency,
+      owedToMe: splitwiseLinksT.owedToMe,
+      counterparties: splitwiseLinksT.counterparties,
+      paidAmount: splitwiseLinksT.paidAmount,
+      paidState: splitwiseLinksT.paidState,
+      createdAt: splitwiseLinksT.createdAt,
+      syncedAt: splitwiseLinksT.syncedAt,
+    };
+  }
 
   listSplitwiseLinks(): SplitwiseLink[] {
-    const rows = this.db
-      .prepare(`SELECT ${Repo.SW_COLS} FROM splitwise_links ORDER BY created_at`)
-      .all() as SplitwiseLinkRow[];
+    const rows = this.orm
+      .select(this.swColumns())
+      .from(splitwiseLinksT)
+      .orderBy(splitwiseLinksT.createdAt)
+      .all();
     return rows.map(toSplitwiseLink);
   }
 
   getSplitwiseLink(transactionId: string): SplitwiseLink | undefined {
-    const row = this.db
-      .prepare(`SELECT ${Repo.SW_COLS} FROM splitwise_links WHERE transaction_id = ?`)
-      .get(transactionId) as SplitwiseLinkRow | undefined;
+    const row = this.orm
+      .select(this.swColumns())
+      .from(splitwiseLinksT)
+      .where(eq(splitwiseLinksT.transactionId, transactionId))
+      .get();
     return row ? toSplitwiseLink(row) : undefined;
   }
 
@@ -694,27 +841,34 @@ export class Repo {
     owedToMe: number;
     counterparties: SplitwiseCounterparty[];
   }): SplitwiseLink {
-    this.db
-      .prepare(
-        `INSERT INTO splitwise_links
-           (transaction_id, expense_id, group_id, currency, owed_to_me,
-            counterparties, paid_amount, paid_state, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, 0, 'open', ?)
-         ON CONFLICT (transaction_id) DO UPDATE SET
-           expense_id = excluded.expense_id, group_id = excluded.group_id,
-           currency = excluded.currency, owed_to_me = excluded.owed_to_me,
-           counterparties = excluded.counterparties,
-           paid_amount = 0, paid_state = 'open', synced_at = NULL`,
-      )
-      .run(
-        link.transactionId,
-        link.expenseId,
-        link.groupId,
-        link.currency,
-        link.owedToMe,
-        JSON.stringify(link.counterparties),
-        new Date().toISOString(),
-      );
+    const counterparties = JSON.stringify(link.counterparties);
+    this.orm
+      .insert(splitwiseLinksT)
+      .values({
+        transactionId: link.transactionId,
+        expenseId: link.expenseId,
+        groupId: link.groupId,
+        currency: link.currency,
+        owedToMe: link.owedToMe,
+        counterparties,
+        paidAmount: 0,
+        paidState: 'open',
+        createdAt: new Date().toISOString(),
+      })
+      .onConflictDoUpdate({
+        target: splitwiseLinksT.transactionId,
+        set: {
+          expenseId: link.expenseId,
+          groupId: link.groupId,
+          currency: link.currency,
+          owedToMe: link.owedToMe,
+          counterparties,
+          paidAmount: 0,
+          paidState: 'open',
+          syncedAt: null,
+        },
+      })
+      .run();
     return this.getSplitwiseLink(link.transactionId)!;
   }
 
@@ -725,33 +879,26 @@ export class Repo {
     paidState: string,
     counterparties: SplitwiseCounterparty[],
   ): void {
-    this.db
-      .prepare(
-        `UPDATE splitwise_links
-            SET paid_amount = ?, paid_state = ?, counterparties = ?, synced_at = ?
-          WHERE transaction_id = ?`,
-      )
-      .run(
+    this.orm
+      .update(splitwiseLinksT)
+      .set({
         paidAmount,
         paidState,
-        JSON.stringify(counterparties),
-        new Date().toISOString(),
-        transactionId,
-      );
+        counterparties: JSON.stringify(counterparties),
+        syncedAt: new Date().toISOString(),
+      })
+      .where(eq(splitwiseLinksT.transactionId, transactionId))
+      .run();
   }
 
   deleteSplitwiseLink(transactionId: string): void {
-    this.db.prepare('DELETE FROM splitwise_links WHERE transaction_id = ?').run(transactionId);
+    this.orm.delete(splitwiseLinksT).where(eq(splitwiseLinksT.transactionId, transactionId)).run();
   }
 
   // --- Splitwise repayments -------------------------------------------------
   // Incoming transactions the user marked as a friend paying them back. These
   // drive paid-state (via recomputePaidStates), replacing Splitwise's settle-up
   // flag. `amount` is captured at mark time from the incoming txn.
-
-  private static readonly SWR_COLS =
-    'transaction_id AS transactionId, counterparty_id AS counterpartyId, ' +
-    'counterparty_name AS counterpartyName, currency, amount, created_at AS createdAt';
 
   private static toRepayment(row: {
     transactionId: string; counterpartyId: string; counterpartyName: string;
@@ -760,19 +907,36 @@ export class Repo {
     return { ...row, counterpartyId: Number(row.counterpartyId) };
   }
 
+  /** Drizzle column map for splitwise_repayments. `counterpartyId` is stored as
+   *  TEXT and narrowed to a number by `toRepayment`. */
+  private swrColumns() {
+    return {
+      transactionId: splitwiseRepaymentsT.transactionId,
+      counterpartyId: splitwiseRepaymentsT.counterpartyId,
+      counterpartyName: splitwiseRepaymentsT.counterpartyName,
+      currency: splitwiseRepaymentsT.currency,
+      amount: splitwiseRepaymentsT.amount,
+      createdAt: splitwiseRepaymentsT.createdAt,
+    };
+  }
+
   /** Returns all repayment records ordered by creation time. */
   listRepayments(): SplitwiseRepayment[] {
-    const rows = this.db
-      .prepare(`SELECT ${Repo.SWR_COLS} FROM splitwise_repayments ORDER BY created_at`)
-      .all() as Parameters<typeof Repo.toRepayment>[0][];
+    const rows = this.orm
+      .select(this.swrColumns())
+      .from(splitwiseRepaymentsT)
+      .orderBy(splitwiseRepaymentsT.createdAt)
+      .all();
     return rows.map(Repo.toRepayment);
   }
 
   /** Returns the repayment linked to the given transaction, or undefined. */
   getRepayment(transactionId: string): SplitwiseRepayment | undefined {
-    const row = this.db
-      .prepare(`SELECT ${Repo.SWR_COLS} FROM splitwise_repayments WHERE transaction_id = ?`)
-      .get(transactionId) as Parameters<typeof Repo.toRepayment>[0] | undefined;
+    const row = this.orm
+      .select(this.swrColumns())
+      .from(splitwiseRepaymentsT)
+      .where(eq(splitwiseRepaymentsT.transactionId, transactionId))
+      .get();
     return row ? Repo.toRepayment(row) : undefined;
   }
 
@@ -784,40 +948,49 @@ export class Repo {
     currency: string;
     amount: number;
   }): SplitwiseRepayment {
-    this.db
-      .prepare(
-        `INSERT INTO splitwise_repayments
-           (transaction_id, counterparty_id, counterparty_name, currency, amount, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)
-         ON CONFLICT (transaction_id) DO UPDATE SET
-           counterparty_id = excluded.counterparty_id,
-           counterparty_name = excluded.counterparty_name,
-           currency = excluded.currency, amount = excluded.amount`,
-      )
-      .run(
-        r.transactionId,
-        String(r.counterpartyId),
-        r.counterpartyName,
-        r.currency,
-        r.amount,
-        new Date().toISOString(),
-      );
+    const counterpartyId = String(r.counterpartyId);
+    this.orm
+      .insert(splitwiseRepaymentsT)
+      .values({
+        transactionId: r.transactionId,
+        counterpartyId,
+        counterpartyName: r.counterpartyName,
+        currency: r.currency,
+        amount: r.amount,
+        createdAt: new Date().toISOString(),
+      })
+      .onConflictDoUpdate({
+        target: splitwiseRepaymentsT.transactionId,
+        set: {
+          counterpartyId,
+          counterpartyName: r.counterpartyName,
+          currency: r.currency,
+          amount: r.amount,
+        },
+      })
+      .run();
     return this.getRepayment(r.transactionId)!;
   }
 
   /** Removes the repayment record for the given transaction. */
   deleteRepayment(transactionId: string): void {
-    this.db.prepare('DELETE FROM splitwise_repayments WHERE transaction_id = ?').run(transactionId);
+    this.orm
+      .delete(splitwiseRepaymentsT)
+      .where(eq(splitwiseRepaymentsT.transactionId, transactionId))
+      .run();
   }
 
   /** Pool of money each person has repaid, keyed `counterpartyId|currency`. */
   getRepaymentPool(): Map<string, number> {
-    const rows = this.db
-      .prepare(
-        `SELECT counterparty_id AS counterpartyId, currency, SUM(amount) AS amount
-           FROM splitwise_repayments GROUP BY counterparty_id, currency`,
-      )
-      .all() as { counterpartyId: string; currency: string; amount: number }[];
+    const rows = this.orm
+      .select({
+        counterpartyId: splitwiseRepaymentsT.counterpartyId,
+        currency: splitwiseRepaymentsT.currency,
+        amount: sql<number>`SUM(${splitwiseRepaymentsT.amount})`,
+      })
+      .from(splitwiseRepaymentsT)
+      .groupBy(splitwiseRepaymentsT.counterpartyId, splitwiseRepaymentsT.currency)
+      .all();
     const pool = new Map<string, number>();
     for (const row of rows) pool.set(`${row.counterpartyId}|${row.currency}`, row.amount);
     return pool;
@@ -869,18 +1042,10 @@ export class Repo {
       a.currency.localeCompare(b.currency),
     );
 
-    const connectionCount = (
-      this.db.prepare('SELECT COUNT(*) AS n FROM connections').get() as { n: number }
-    ).n;
-    const accountCount = (
-      this.db.prepare('SELECT COUNT(*) AS n FROM accounts').get() as { n: number }
-    ).n;
-    const manualAssetCount = (
-      this.db.prepare('SELECT COUNT(*) AS n FROM manual_assets').get() as { n: number }
-    ).n;
-    const voucherCount = (
-      this.db.prepare('SELECT COUNT(*) AS n FROM vouchers').get() as { n: number }
-    ).n;
+    const connectionCount = this.countRows(connectionsT);
+    const accountCount = this.countRows(accountsT);
+    const manualAssetCount = this.countRows(manualAssetsT);
+    const voucherCount = this.countRows(vouchersT);
     return { connectionCount, accountCount, manualAssetCount, voucherCount, byCurrency };
   }
 
@@ -1093,21 +1258,17 @@ export class Repo {
   // Cars, property, cash and the like — things the user owns that have no
   // institution to scrape. They count toward net worth via summary().
 
-  private static readonly ASSET_COLS =
-    'id, kind, name, value, currency, details, excluded, ' +
-    'created_at AS createdAt, updated_at AS updatedAt';
-
   listManualAssets(): ManualAsset[] {
-    const rows = this.db
-      .prepare(`SELECT ${Repo.ASSET_COLS} FROM manual_assets ORDER BY created_at`)
-      .all() as ManualAssetRow[];
+    const rows = this.orm
+      .select()
+      .from(manualAssetsT)
+      .orderBy(manualAssetsT.createdAt)
+      .all();
     return rows.map(toManualAsset);
   }
 
   getManualAsset(id: string): ManualAsset | undefined {
-    const row = this.db
-      .prepare(`SELECT ${Repo.ASSET_COLS} FROM manual_assets WHERE id = ?`)
-      .get(id) as ManualAssetRow | undefined;
+    const row = this.orm.select().from(manualAssetsT).where(eq(manualAssetsT.id, id)).get();
     return row ? toManualAsset(row) : undefined;
   }
 
@@ -1120,22 +1281,19 @@ export class Repo {
   }): ManualAsset {
     const id = randomUUID();
     const now = new Date().toISOString();
-    this.db
-      .prepare(
-        `INSERT INTO manual_assets
-           (id, kind, name, value, currency, details, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
+    this.orm
+      .insert(manualAssetsT)
+      .values({
         id,
-        input.kind,
-        input.name,
-        input.value,
-        input.currency,
-        input.details ? JSON.stringify(input.details) : null,
-        now,
-        now,
-      );
+        kind: input.kind,
+        name: input.name,
+        value: input.value,
+        currency: input.currency,
+        details: input.details ? JSON.stringify(input.details) : null,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run();
     return this.getManualAsset(id)!;
   }
 
@@ -1148,35 +1306,20 @@ export class Repo {
       excluded: boolean;
     }>,
   ): void {
-    const sets: string[] = [];
-    const values: unknown[] = [];
-    if (fields.name !== undefined) {
-      sets.push('name = ?');
-      values.push(fields.name);
-    }
-    if (fields.value !== undefined) {
-      sets.push('value = ?');
-      values.push(fields.value);
-    }
+    const set: Partial<typeof manualAssetsT.$inferInsert> = {};
+    if (fields.name !== undefined) set.name = fields.name;
+    if (fields.value !== undefined) set.value = fields.value;
     if (fields.details !== undefined) {
-      sets.push('details = ?');
-      values.push(fields.details ? JSON.stringify(fields.details) : null);
+      set.details = fields.details ? JSON.stringify(fields.details) : null;
     }
-    if (fields.excluded !== undefined) {
-      sets.push('excluded = ?');
-      values.push(fields.excluded ? 1 : 0);
-    }
-    if (sets.length === 0) return;
-    sets.push('updated_at = ?');
-    values.push(new Date().toISOString());
-    values.push(id);
-    this.db
-      .prepare(`UPDATE manual_assets SET ${sets.join(', ')} WHERE id = ?`)
-      .run(...values);
+    if (fields.excluded !== undefined) set.excluded = fields.excluded;
+    if (Object.keys(set).length === 0) return;
+    set.updatedAt = new Date().toISOString();
+    this.orm.update(manualAssetsT).set(set).where(eq(manualAssetsT.id, id)).run();
   }
 
   deleteManualAsset(id: string): void {
-    this.db.prepare('DELETE FROM manual_assets WHERE id = ?').run(id);
+    this.orm.delete(manualAssetsT).where(eq(manualAssetsT.id, id)).run();
   }
 
   // --- Vouchers -------------------------------------------------------------
@@ -1185,25 +1328,16 @@ export class Repo {
   // user maintains; when a provider scraper lands the row carries a
   // connection_id + external_id and updates upsert-in-place.
 
-  private static readonly VOUCHER_COLS =
-    'id, name, provider, balance, currency, ' +
-    'expires_on AS expiresOn, notes, excluded, ' +
-    'connection_id AS connectionId, external_id AS externalId, ' +
-    'name_overridden AS nameOverridden, ' +
-    'created_at AS createdAt, updated_at AS updatedAt';
+  // `excluded` / `nameOverridden` are boolean-mode columns in the schema, so a
+  // plain `.select()` returns real booleans — vouchers carry no JSON column, so
+  // the old `toVoucher` coercion is no longer needed on reads.
 
   listVouchers(): Voucher[] {
-    const rows = this.db
-      .prepare(`SELECT ${Repo.VOUCHER_COLS} FROM vouchers ORDER BY created_at`)
-      .all() as VoucherRow[];
-    return rows.map(toVoucher);
+    return this.orm.select().from(vouchersT).orderBy(vouchersT.createdAt).all();
   }
 
   getVoucher(id: string): Voucher | undefined {
-    const row = this.db
-      .prepare(`SELECT ${Repo.VOUCHER_COLS} FROM vouchers WHERE id = ?`)
-      .get(id) as VoucherRow | undefined;
-    return row ? toVoucher(row) : undefined;
+    return this.orm.select().from(vouchersT).where(eq(vouchersT.id, id)).get();
   }
 
   createVoucher(input: {
@@ -1220,29 +1354,24 @@ export class Repo {
   }): Voucher {
     const id = randomUUID();
     const now = new Date().toISOString();
-    this.db
-      .prepare(
-        `INSERT INTO vouchers
-           (id, name, provider, balance, currency, expires_on, notes,
-            excluded, connection_id, external_id, name_overridden,
-            created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
+    this.orm
+      .insert(vouchersT)
+      .values({
         id,
-        input.name,
-        input.provider,
-        input.balance,
-        input.currency,
-        input.expiresOn ?? null,
-        input.notes ?? null,
-        input.excluded ? 1 : 0,
-        input.connectionId ?? null,
-        input.externalId ?? null,
-        input.nameOverridden ? 1 : 0,
-        now,
-        now,
-      );
+        name: input.name,
+        provider: input.provider,
+        balance: input.balance,
+        currency: input.currency,
+        expiresOn: input.expiresOn ?? null,
+        notes: input.notes ?? null,
+        excluded: input.excluded ?? false,
+        connectionId: input.connectionId ?? null,
+        externalId: input.externalId ?? null,
+        nameOverridden: input.nameOverridden ?? false,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run();
     return this.getVoucher(id)!;
   }
 
@@ -1259,40 +1388,28 @@ export class Repo {
       nameOverridden: boolean;
     }>,
   ): void {
-    const sets: string[] = [];
-    const values: unknown[] = [];
+    const set: Partial<typeof vouchersT.$inferInsert> = {};
     if (fields.name !== undefined) {
-      sets.push('name = ?');
-      values.push(fields.name);
+      set.name = fields.name;
       // A rename via this code path is a user edit; flip the override flag
       // so a future provider sync leaves the new name alone. (Matches the
       // loans semantics.)
-      if (fields.nameOverridden === undefined) {
-        sets.push('name_overridden = ?');
-        values.push(1);
-      }
+      if (fields.nameOverridden === undefined) set.nameOverridden = true;
     }
-    if (fields.nameOverridden !== undefined) {
-      sets.push('name_overridden = ?');
-      values.push(fields.nameOverridden ? 1 : 0);
-    }
-    if (fields.provider !== undefined) { sets.push('provider = ?'); values.push(fields.provider); }
-    if (fields.balance !== undefined) { sets.push('balance = ?'); values.push(fields.balance); }
-    if (fields.currency !== undefined) { sets.push('currency = ?'); values.push(fields.currency); }
-    if (fields.expiresOn !== undefined) { sets.push('expires_on = ?'); values.push(fields.expiresOn); }
-    if (fields.notes !== undefined) { sets.push('notes = ?'); values.push(fields.notes); }
-    if (fields.excluded !== undefined) { sets.push('excluded = ?'); values.push(fields.excluded ? 1 : 0); }
-    if (sets.length === 0) return;
-    sets.push('updated_at = ?');
-    values.push(new Date().toISOString());
-    values.push(id);
-    this.db
-      .prepare(`UPDATE vouchers SET ${sets.join(', ')} WHERE id = ?`)
-      .run(...values);
+    if (fields.nameOverridden !== undefined) set.nameOverridden = fields.nameOverridden;
+    if (fields.provider !== undefined) set.provider = fields.provider;
+    if (fields.balance !== undefined) set.balance = fields.balance;
+    if (fields.currency !== undefined) set.currency = fields.currency;
+    if (fields.expiresOn !== undefined) set.expiresOn = fields.expiresOn;
+    if (fields.notes !== undefined) set.notes = fields.notes;
+    if (fields.excluded !== undefined) set.excluded = fields.excluded;
+    if (Object.keys(set).length === 0) return;
+    set.updatedAt = new Date().toISOString();
+    this.orm.update(vouchersT).set(set).where(eq(vouchersT.id, id)).run();
   }
 
   deleteVoucher(id: string): void {
-    this.db.prepare('DELETE FROM vouchers WHERE id = ?').run(id);
+    this.orm.delete(vouchersT).where(eq(vouchersT.id, id)).run();
   }
 
   /**
@@ -1310,47 +1427,18 @@ export class Repo {
     expiresOn?: string | null;
     externalId: string;
   }): Voucher {
-    const existing = this.db
-      .prepare(
-        `SELECT id, name_overridden AS nameOverridden FROM vouchers
-         WHERE provider = ? AND external_id = ?`,
-      )
-      .get(input.provider, input.externalId) as
-      | { id: string; nameOverridden: number }
-      | undefined;
+    const existing = this.orm
+      .select({ id: vouchersT.id, nameOverridden: vouchersT.nameOverridden })
+      .from(vouchersT)
+      .where(and(eq(vouchersT.provider, input.provider), eq(vouchersT.externalId, input.externalId)))
+      .get();
     const now = new Date().toISOString();
     if (existing) {
-      if (existing.nameOverridden) {
-        // Keep the user-renamed `name`; everything else refreshes.
-        this.db
-          .prepare(
-            `UPDATE vouchers SET
-               balance = ?, currency = ?, expires_on = ?, updated_at = ?
-             WHERE id = ?`,
-          )
-          .run(
-            input.balance,
-            input.currency,
-            input.expiresOn ?? null,
-            now,
-            existing.id,
-          );
-      } else {
-        this.db
-          .prepare(
-            `UPDATE vouchers SET
-               name = ?, balance = ?, currency = ?, expires_on = ?, updated_at = ?
-             WHERE id = ?`,
-          )
-          .run(
-            input.name,
-            input.balance,
-            input.currency,
-            input.expiresOn ?? null,
-            now,
-            existing.id,
-          );
-      }
+      // Keep the user-renamed `name` when overridden; everything else refreshes.
+      const set = existing.nameOverridden
+        ? { balance: input.balance, currency: input.currency, expiresOn: input.expiresOn ?? null, updatedAt: now }
+        : { name: input.name, balance: input.balance, currency: input.currency, expiresOn: input.expiresOn ?? null, updatedAt: now };
+      this.orm.update(vouchersT).set(set).where(eq(vouchersT.id, existing.id)).run();
       return this.getVoucher(existing.id)!;
     }
     return this.createVoucher({
@@ -1367,23 +1455,25 @@ export class Repo {
 
   // --- Piggy banks ----------------------------------------------------------
 
-  private static readonly PIGGY_COLS =
-    'id, name, emoji, kind, target_amount AS targetAmount, ' +
-    'monthly_amount AS monthlyAmount, currency, sort_order AS sortOrder, ' +
-    'on_hold AS onHold, created_at AS createdAt, updated_at AS updatedAt';
+  /** `onHold` is boolean-mode (real boolean from Drizzle); `kind` is free-text
+   *  TEXT narrowed to the PiggyKind union at the read boundary. Replaces the old
+   *  `toPiggyBank` 0/1 coercion. */
+  private static narrowPiggy(row: typeof piggyBanksT.$inferSelect): PiggyBank {
+    return { ...row, kind: row.kind === 'lump' ? 'lump' : 'monthly' };
+  }
 
   listPiggyBanks(): PiggyBank[] {
-    const rows = this.db
-      .prepare(`SELECT ${Repo.PIGGY_COLS} FROM piggy_banks ORDER BY sort_order, created_at`)
-      .all() as PiggyBankRow[];
-    return rows.map(toPiggyBank);
+    return this.orm
+      .select()
+      .from(piggyBanksT)
+      .orderBy(piggyBanksT.sortOrder, piggyBanksT.createdAt)
+      .all()
+      .map(Repo.narrowPiggy);
   }
 
   getPiggyBank(id: string): PiggyBank | undefined {
-    const row = this.db
-      .prepare(`SELECT ${Repo.PIGGY_COLS} FROM piggy_banks WHERE id = ?`)
-      .get(id) as PiggyBankRow | undefined;
-    return row ? toPiggyBank(row) : undefined;
+    const row = this.orm.select().from(piggyBanksT).where(eq(piggyBanksT.id, id)).get();
+    return row ? Repo.narrowPiggy(row) : undefined;
   }
 
   createPiggyBank(input: {
@@ -1397,31 +1487,28 @@ export class Repo {
     const id = randomUUID();
     const now = new Date().toISOString();
     const nextOrder =
-      (this.db.prepare('SELECT COALESCE(MAX(sort_order), 0) AS n FROM piggy_banks').get() as {
-        n: number;
-      }).n + 1;
-    this.db
-      .prepare(
-        `INSERT INTO piggy_banks
-           (id, name, emoji, kind, target_amount, monthly_amount, currency,
-            sort_order, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
+      (this.orm
+        .select({ n: sql<number>`COALESCE(MAX(${piggyBanksT.sortOrder}), 0)` })
+        .from(piggyBanksT)
+        .get()?.n ?? 0) + 1;
+    this.orm
+      .insert(piggyBanksT)
+      .values({
         id,
-        input.name,
-        input.emoji,
-        input.kind === 'lump' ? 'lump' : 'monthly',
-        input.targetAmount,
+        name: input.name,
+        emoji: input.emoji,
+        kind: input.kind === 'lump' ? 'lump' : 'monthly',
+        targetAmount: input.targetAmount,
         // Lump-sum piggies don't recur, so the column gets the full target
         // — handy if anything ever reads monthlyAmount expecting "what this
         // piggy charges in a fund-able month".
-        input.kind === 'lump' ? input.targetAmount : input.monthlyAmount,
-        input.currency,
-        nextOrder,
-        now,
-        now,
-      );
+        monthlyAmount: input.kind === 'lump' ? input.targetAmount : input.monthlyAmount,
+        currency: input.currency,
+        sortOrder: nextOrder,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run();
     return this.getPiggyBank(id)!;
   }
 
@@ -1436,49 +1523,32 @@ export class Repo {
       onHold: boolean;
     }>,
   ): void {
-    const sets: string[] = [];
-    const values: unknown[] = [];
-    if (fields.name !== undefined) {
-      sets.push('name = ?');
-      values.push(fields.name);
-    }
-    if (fields.emoji !== undefined) {
-      sets.push('emoji = ?');
-      values.push(fields.emoji);
-    }
-    if (fields.kind !== undefined) {
-      sets.push('kind = ?');
-      values.push(fields.kind === 'lump' ? 'lump' : 'monthly');
-    }
-    if (fields.targetAmount !== undefined) {
-      sets.push('target_amount = ?');
-      values.push(fields.targetAmount);
-    }
-    if (fields.monthlyAmount !== undefined) {
-      sets.push('monthly_amount = ?');
-      values.push(fields.monthlyAmount);
-    }
-    if (fields.onHold !== undefined) {
-      sets.push('on_hold = ?');
-      values.push(fields.onHold ? 1 : 0);
-    }
-    if (sets.length === 0) return;
-    sets.push('updated_at = ?');
-    values.push(new Date().toISOString());
-    values.push(id);
-    this.db.prepare(`UPDATE piggy_banks SET ${sets.join(', ')} WHERE id = ?`).run(...values);
+    const set: Partial<typeof piggyBanksT.$inferInsert> = {};
+    if (fields.name !== undefined) set.name = fields.name;
+    if (fields.emoji !== undefined) set.emoji = fields.emoji;
+    if (fields.kind !== undefined) set.kind = fields.kind === 'lump' ? 'lump' : 'monthly';
+    if (fields.targetAmount !== undefined) set.targetAmount = fields.targetAmount;
+    if (fields.monthlyAmount !== undefined) set.monthlyAmount = fields.monthlyAmount;
+    if (fields.onHold !== undefined) set.onHold = fields.onHold;
+    if (Object.keys(set).length === 0) return;
+    set.updatedAt = new Date().toISOString();
+    this.orm.update(piggyBanksT).set(set).where(eq(piggyBanksT.id, id)).run();
   }
 
   deletePiggyBank(id: string): void {
-    this.db.prepare('DELETE FROM piggy_banks WHERE id = ?').run(id);
+    this.orm.delete(piggyBanksT).where(eq(piggyBanksT.id, id)).run();
   }
 
   /** Every recorded set-aside, across all piggy banks and months. */
   listPiggyContributions(): PiggyContribution[] {
-    return this.db
-      .prepare(
-        'SELECT piggy_id AS piggyId, month, amount, status FROM piggy_contributions',
-      )
+    return this.orm
+      .select({
+        piggyId: piggyContributionsT.piggyId,
+        month: piggyContributionsT.month,
+        amount: piggyContributionsT.amount,
+        status: piggyContributionsT.status,
+      })
+      .from(piggyContributionsT)
       .all() as PiggyContribution[];
   }
 
@@ -1492,49 +1562,55 @@ export class Repo {
     amount: number,
     status: 'funded' | 'skipped',
   ): void {
-    this.db
-      .prepare(
-        `INSERT INTO piggy_contributions (piggy_id, month, amount, status, created_at)
-         VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT (piggy_id, month) DO UPDATE SET
-           amount = excluded.amount, status = excluded.status`,
-      )
-      .run(piggyId, month, amount, status, new Date().toISOString());
+    this.orm
+      .insert(piggyContributionsT)
+      .values({ piggyId, month, amount, status, createdAt: new Date().toISOString() })
+      .onConflictDoUpdate({
+        target: [piggyContributionsT.piggyId, piggyContributionsT.month],
+        set: { amount, status },
+      })
+      .run();
   }
 
   // --- Categorization -------------------------------------------------------
 
   /** Distinct transaction descriptions that have no category yet. */
   uncategorizedDescriptions(): string[] {
-    const rows = this.db
-      .prepare('SELECT DISTINCT description FROM transactions WHERE category IS NULL')
-      .all() as { description: string }[];
-    return rows.map((row) => row.description);
+    return this.orm
+      .selectDistinct({ description: transactionsT.description })
+      .from(transactionsT)
+      .where(isNull(transactionsT.category))
+      .all()
+      .map((row) => row.description);
   }
 
   getCachedCategory(key: string): { category: string; source: string } | undefined {
-    return this.db
-      .prepare('SELECT category, source FROM category_cache WHERE description_key = ?')
-      .get(key) as { category: string; source: string } | undefined;
+    return this.orm
+      .select({ category: categoryCacheT.category, source: categoryCacheT.source })
+      .from(categoryCacheT)
+      .where(eq(categoryCacheT.descriptionKey, key))
+      .get();
   }
 
   cacheCategory(key: string, category: string, source: string): void {
-    this.db
-      .prepare(
-        `INSERT INTO category_cache (description_key, category, source, updated_at)
-         VALUES (?, ?, ?, ?)
-         ON CONFLICT (description_key) DO UPDATE SET
-           category = excluded.category, source = excluded.source,
-           updated_at = excluded.updated_at`,
-      )
-      .run(key, category, source, new Date().toISOString());
+    const updatedAt = new Date().toISOString();
+    this.orm
+      .insert(categoryCacheT)
+      .values({ descriptionKey: key, category, source, updatedAt })
+      .onConflictDoUpdate({
+        target: categoryCacheT.descriptionKey,
+        set: { category, source, updatedAt },
+      })
+      .run();
   }
 
   /** Applies a category to every still-uncategorized transaction with this description. */
   applyCategory(description: string, category: string): number {
-    return this.db
-      .prepare('UPDATE transactions SET category = ? WHERE description = ? AND category IS NULL')
-      .run(category, description).changes;
+    return this.orm
+      .update(transactionsT)
+      .set({ category })
+      .where(and(eq(transactionsT.description, description), isNull(transactionsT.category)))
+      .run().changes;
   }
 
   // --- Merchant rules -------------------------------------------------------
@@ -1542,19 +1618,18 @@ export class Repo {
   // future transactions from that business categorize the same way.
 
   listMerchantRules(): { description: string; category: string }[] {
-    return this.db
-      .prepare('SELECT description, category FROM merchant_rules')
-      .all() as { description: string; category: string }[];
+    return this.orm
+      .select({ description: merchantRulesT.description, category: merchantRulesT.category })
+      .from(merchantRulesT)
+      .all();
   }
 
   setMerchantRule(description: string, category: string): void {
-    this.db
-      .prepare(
-        `INSERT INTO merchant_rules (description, category, created_at)
-         VALUES (?, ?, ?)
-         ON CONFLICT (description) DO UPDATE SET category = excluded.category`,
-      )
-      .run(description, category, new Date().toISOString());
+    this.orm
+      .insert(merchantRulesT)
+      .values({ description, category, createdAt: new Date().toISOString() })
+      .onConflictDoUpdate({ target: merchantRulesT.description, set: { category } })
+      .run();
   }
 
   /**
@@ -1564,34 +1639,39 @@ export class Repo {
    * categories the user set by hand (H-4).
    */
   applyMerchantRule(description: string, category: string): number {
-    return this.db
-      .prepare('UPDATE transactions SET category = ? WHERE description = ? AND category IS NULL')
-      .run(category, description).changes;
+    return this.orm
+      .update(transactionsT)
+      .set({ category })
+      .where(and(eq(transactionsT.description, description), isNull(transactionsT.category)))
+      .run().changes;
   }
 
   // --- Merchant recurrence --------------------------------------------------
   // How often a recurring charge bills, keyed by a cleaned merchant name.
 
   listMerchantFrequencies(): { merchantKey: string; frequency: string }[] {
-    return this.db
-      .prepare('SELECT merchant_key AS merchantKey, frequency FROM merchant_recurrence')
-      .all() as { merchantKey: string; frequency: string }[];
+    return this.orm
+      .select({
+        merchantKey: merchantRecurrenceT.merchantKey,
+        frequency: merchantRecurrenceT.frequency,
+      })
+      .from(merchantRecurrenceT)
+      .all();
   }
 
   setMerchantFrequency(merchantKey: string, frequency: string): void {
-    this.db
-      .prepare(
-        `INSERT INTO merchant_recurrence (merchant_key, frequency, created_at)
-         VALUES (?, ?, ?)
-         ON CONFLICT (merchant_key) DO UPDATE SET frequency = excluded.frequency`,
-      )
-      .run(merchantKey, frequency, new Date().toISOString());
+    this.orm
+      .insert(merchantRecurrenceT)
+      .values({ merchantKey, frequency, createdAt: new Date().toISOString() })
+      .onConflictDoUpdate({ target: merchantRecurrenceT.merchantKey, set: { frequency } })
+      .run();
   }
 
   clearMerchantFrequency(merchantKey: string): void {
-    this.db
-      .prepare('DELETE FROM merchant_recurrence WHERE merchant_key = ?')
-      .run(merchantKey);
+    this.orm
+      .delete(merchantRecurrenceT)
+      .where(eq(merchantRecurrenceT.merchantKey, merchantKey))
+      .run();
   }
 
   // --- Merchant splits ------------------------------------------------------
@@ -1600,27 +1680,25 @@ export class Repo {
   // show the user's actual share alongside the full bill.
 
   listMerchantSplits(): { merchantKey: string; splitCount: number }[] {
-    return this.db
-      .prepare(
-        'SELECT merchant_key AS merchantKey, split_count AS splitCount FROM merchant_splits',
-      )
-      .all() as { merchantKey: string; splitCount: number }[];
+    return this.orm
+      .select({
+        merchantKey: merchantSplitsT.merchantKey,
+        splitCount: merchantSplitsT.splitCount,
+      })
+      .from(merchantSplitsT)
+      .all();
   }
 
   setMerchantSplit(merchantKey: string, splitCount: number): void {
-    this.db
-      .prepare(
-        `INSERT INTO merchant_splits (merchant_key, split_count, created_at)
-         VALUES (?, ?, ?)
-         ON CONFLICT (merchant_key) DO UPDATE SET split_count = excluded.split_count`,
-      )
-      .run(merchantKey, splitCount, new Date().toISOString());
+    this.orm
+      .insert(merchantSplitsT)
+      .values({ merchantKey, splitCount, createdAt: new Date().toISOString() })
+      .onConflictDoUpdate({ target: merchantSplitsT.merchantKey, set: { splitCount } })
+      .run();
   }
 
   clearMerchantSplit(merchantKey: string): void {
-    this.db
-      .prepare('DELETE FROM merchant_splits WHERE merchant_key = ?')
-      .run(merchantKey);
+    this.orm.delete(merchantSplitsT).where(eq(merchantSplitsT.merchantKey, merchantKey)).run();
   }
 
   // --- Category splits ------------------------------------------------------
@@ -1629,27 +1707,22 @@ export class Repo {
   // adjusts section totals + the headline reservation accordingly.
 
   listCategorySplits(): { category: string; splitCount: number }[] {
-    return this.db
-      .prepare(
-        'SELECT category, split_count AS splitCount FROM category_splits',
-      )
-      .all() as { category: string; splitCount: number }[];
+    return this.orm
+      .select({ category: categorySplitsT.category, splitCount: categorySplitsT.splitCount })
+      .from(categorySplitsT)
+      .all();
   }
 
   setCategorySplit(category: string, splitCount: number): void {
-    this.db
-      .prepare(
-        `INSERT INTO category_splits (category, split_count, created_at)
-         VALUES (?, ?, ?)
-         ON CONFLICT (category) DO UPDATE SET split_count = excluded.split_count`,
-      )
-      .run(category, splitCount, new Date().toISOString());
+    this.orm
+      .insert(categorySplitsT)
+      .values({ category, splitCount, createdAt: new Date().toISOString() })
+      .onConflictDoUpdate({ target: categorySplitsT.category, set: { splitCount } })
+      .run();
   }
 
   clearCategorySplit(category: string): void {
-    this.db
-      .prepare('DELETE FROM category_splits WHERE category = ?')
-      .run(category);
+    this.orm.delete(categorySplitsT).where(eq(categorySplitsT.category, category)).run();
   }
 
   // --- Cancelled subscriptions ----------------------------------------------
@@ -1658,27 +1731,29 @@ export class Repo {
   // possible "the cancellation didn't take" recurrence.
 
   listCancelledSubs(): { merchantKey: string; cancelledAt: string }[] {
-    return this.db
-      .prepare(
-        'SELECT merchant_key AS merchantKey, cancelled_at AS cancelledAt FROM cancelled_subscriptions',
-      )
-      .all() as { merchantKey: string; cancelledAt: string }[];
+    return this.orm
+      .select({
+        merchantKey: cancelledSubscriptionsT.merchantKey,
+        cancelledAt: cancelledSubscriptionsT.cancelledAt,
+      })
+      .from(cancelledSubscriptionsT)
+      .all();
   }
 
   markSubCancelled(merchantKey: string): void {
-    this.db
-      .prepare(
-        `INSERT INTO cancelled_subscriptions (merchant_key, cancelled_at)
-         VALUES (?, ?)
-         ON CONFLICT (merchant_key) DO UPDATE SET cancelled_at = excluded.cancelled_at`,
-      )
-      .run(merchantKey, new Date().toISOString());
+    const cancelledAt = new Date().toISOString();
+    this.orm
+      .insert(cancelledSubscriptionsT)
+      .values({ merchantKey, cancelledAt })
+      .onConflictDoUpdate({ target: cancelledSubscriptionsT.merchantKey, set: { cancelledAt } })
+      .run();
   }
 
   unmarkSubCancelled(merchantKey: string): void {
-    this.db
-      .prepare('DELETE FROM cancelled_subscriptions WHERE merchant_key = ?')
-      .run(merchantKey);
+    this.orm
+      .delete(cancelledSubscriptionsT)
+      .where(eq(cancelledSubscriptionsT.merchantKey, merchantKey))
+      .run();
   }
 
   // --- Budget tweaks --------------------------------------------------------
@@ -1701,27 +1776,32 @@ export class Repo {
     this.setMeta('expected_income_override', String(value));
   }
 
-  /** Every per-month savings entry — small dict, returned in full to the UI. */
+  /** Every per-month savings entry — small dict, returned in full to the UI.
+   *  `transferred` is a boolean-mode column, so Drizzle returns a real boolean. */
   listMonthlySavings(): { month: string; amount: number; transferred: boolean }[] {
-    const rows = this.db
-      .prepare('SELECT month, amount, transferred FROM monthly_savings')
-      .all() as { month: string; amount: number; transferred: number }[];
-    return rows.map((r) => ({ ...r, transferred: r.transferred !== 0 }));
+    return this.orm
+      .select({
+        month: monthlySavingsT.month,
+        amount: monthlySavingsT.amount,
+        transferred: monthlySavingsT.transferred,
+      })
+      .from(monthlySavingsT)
+      .all();
   }
 
   setMonthlySavings(month: string, amount: number, transferred: boolean): void {
     if (amount <= 0) {
-      this.db.prepare('DELETE FROM monthly_savings WHERE month = ?').run(month);
+      this.orm.delete(monthlySavingsT).where(eq(monthlySavingsT.month, month)).run();
       return;
     }
-    this.db
-      .prepare(
-        `INSERT INTO monthly_savings (month, amount, transferred) VALUES (?, ?, ?)
-         ON CONFLICT (month) DO UPDATE SET
-           amount = excluded.amount,
-           transferred = excluded.transferred`,
-      )
-      .run(month, amount, transferred ? 1 : 0);
+    this.orm
+      .insert(monthlySavingsT)
+      .values({ month, amount, transferred })
+      .onConflictDoUpdate({
+        target: monthlySavingsT.month,
+        set: { amount, transferred },
+      })
+      .run();
   }
 
   /** ILS expense totals per category within [start, end) — ISO date strings. */
@@ -1792,35 +1872,34 @@ export class Repo {
   }
 
   listBudgets(): { category: string; monthlyAmount: number }[] {
-    return this.db
-      .prepare('SELECT category, monthly_amount AS monthlyAmount FROM budgets')
-      .all() as { category: string; monthlyAmount: number }[];
+    return this.orm
+      .select({ category: budgetsT.category, monthlyAmount: budgetsT.monthlyAmount })
+      .from(budgetsT)
+      .all();
   }
 
   setBudget(category: string, monthlyAmount: number): void {
-    this.db
-      .prepare(
-        `INSERT INTO budgets (category, monthly_amount, updated_at)
-         VALUES (?, ?, ?)
-         ON CONFLICT (category) DO UPDATE SET
-           monthly_amount = excluded.monthly_amount, updated_at = excluded.updated_at`,
-      )
-      .run(category, monthlyAmount, new Date().toISOString());
+    const updatedAt = new Date().toISOString();
+    this.orm
+      .insert(budgetsT)
+      .values({ category, monthlyAmount, updatedAt })
+      .onConflictDoUpdate({ target: budgetsT.category, set: { monthlyAmount, updatedAt } })
+      .run();
   }
 
   deleteBudget(category: string): void {
-    this.db.prepare('DELETE FROM budgets WHERE category = ?').run(category);
+    this.orm.delete(budgetsT).where(eq(budgetsT.category, category)).run();
   }
 
   categorizationCounts(): { categorized: number; total: number } {
-    const total = (
-      this.db.prepare('SELECT COUNT(*) AS n FROM transactions').get() as { n: number }
-    ).n;
-    const categorized = (
-      this.db
-        .prepare('SELECT COUNT(*) AS n FROM transactions WHERE category IS NOT NULL')
-        .get() as { n: number }
-    ).n;
+    const total =
+      this.orm.select({ n: sql<number>`COUNT(*)` }).from(transactionsT).get()?.n ?? 0;
+    const categorized =
+      this.orm
+        .select({ n: sql<number>`COUNT(*)` })
+        .from(transactionsT)
+        .where(sql`${transactionsT.category} IS NOT NULL`)
+        .get()?.n ?? 0;
     return { categorized, total };
   }
 
@@ -1884,23 +1963,23 @@ export class Repo {
   // --- Meta & credential vault ---------------------------------------------
 
   getMeta(key: string): string | undefined {
-    const row = this.db.prepare('SELECT value FROM meta WHERE key = ?').get(key) as
-      | { value: string }
-      | undefined;
-    return row?.value;
+    return this.orm
+      .select({ value: metaT.value })
+      .from(metaT)
+      .where(eq(metaT.key, key))
+      .get()?.value;
   }
 
   setMeta(key: string, value: string): void {
-    this.db
-      .prepare(
-        'INSERT INTO meta (key, value) VALUES (?, ?) ' +
-          'ON CONFLICT(key) DO UPDATE SET value = excluded.value',
-      )
-      .run(key, value);
+    this.orm
+      .insert(metaT)
+      .values({ key, value })
+      .onConflictDoUpdate({ target: metaT.key, set: { value } })
+      .run();
   }
 
   deleteMeta(key: string): void {
-    this.db.prepare('DELETE FROM meta WHERE key = ?').run(key);
+    this.orm.delete(metaT).where(eq(metaT.key, key)).run();
   }
 
   private perfDisabledKey(connectionId: string): string {
@@ -1920,39 +1999,35 @@ export class Repo {
   }
 
   getCredentialBlob(connectionId: string): string | undefined {
-    const row = this.db
-      .prepare('SELECT blob FROM credentials WHERE connection_id = ?')
-      .get(connectionId) as { blob: string } | undefined;
-    return row?.blob;
+    return this.orm
+      .select({ blob: credentialsT.blob })
+      .from(credentialsT)
+      .where(eq(credentialsT.connectionId, connectionId))
+      .get()?.blob;
   }
 
   saveCredentialBlob(connectionId: string, blob: string): void {
-    this.db
-      .prepare(
-        `INSERT INTO credentials (connection_id, blob, updated_at)
-         VALUES (?, ?, ?)
-         ON CONFLICT(connection_id) DO UPDATE SET
-           blob = excluded.blob, updated_at = excluded.updated_at`,
-      )
-      .run(connectionId, blob, new Date().toISOString());
+    const updatedAt = new Date().toISOString();
+    this.orm
+      .insert(credentialsT)
+      .values({ connectionId, blob, updatedAt })
+      .onConflictDoUpdate({ target: credentialsT.connectionId, set: { blob, updatedAt } })
+      .run();
   }
 
   // --- Scrape runs ----------------------------------------------------------
 
   createRun(connectionId: string): ScrapeRunRow {
     const id = randomUUID();
-    this.db
-      .prepare(
-        'INSERT INTO scrape_runs (id, connection_id, started_at, status) VALUES (?, ?, ?, ?)',
-      )
-      .run(id, connectionId, new Date().toISOString(), 'running');
+    this.orm
+      .insert(scrapeRunsT)
+      .values({ id, connectionId, startedAt: new Date().toISOString(), status: 'running' })
+      .run();
     return this.getRun(id)!;
   }
 
   getRun(id: string): ScrapeRunRow | undefined {
-    return this.db
-      .prepare(`SELECT ${RUN_COLS} FROM scrape_runs WHERE id = ?`)
-      .get(id) as ScrapeRunRow | undefined;
+    return this.orm.select().from(scrapeRunsT).where(eq(scrapeRunsT.id, id)).get();
   }
 
   /**
@@ -1961,14 +2036,19 @@ export class Repo {
    * when the connection has no successful scrape yet (first-ever sync).
    */
   lastSuccessfulScrapeAt(connectionId: string): string | undefined {
-    const row = this.db
-      .prepare(
-        `SELECT finished_at AS finishedAt FROM scrape_runs
-         WHERE connection_id = ? AND status = 'success' AND finished_at IS NOT NULL
-         ORDER BY finished_at DESC LIMIT 1`,
+    return this.orm
+      .select({ finishedAt: scrapeRunsT.finishedAt })
+      .from(scrapeRunsT)
+      .where(
+        and(
+          eq(scrapeRunsT.connectionId, connectionId),
+          eq(scrapeRunsT.status, 'success'),
+          sql`${scrapeRunsT.finishedAt} IS NOT NULL`,
+        ),
       )
-      .get(connectionId) as { finishedAt: string } | undefined;
-    return row?.finishedAt;
+      .orderBy(desc(scrapeRunsT.finishedAt))
+      .limit(1)
+      .get()?.finishedAt ?? undefined;
   }
 
   updateRun(
@@ -1981,24 +2061,16 @@ export class Repo {
       transactionsCount: number;
     }>,
   ): void {
-    const columns: Record<string, string> = {
-      status: 'status',
-      message: 'message',
-      finishedAt: 'finished_at',
-      accountsCount: 'accounts_count',
-      transactionsCount: 'transactions_count',
-    };
-    const sets: string[] = [];
-    const values: unknown[] = [];
-    for (const [key, column] of Object.entries(columns)) {
-      if (key in fields) {
-        sets.push(`${column} = ?`);
-        values.push((fields as Record<string, unknown>)[key]);
-      }
-    }
-    if (sets.length === 0) return;
-    values.push(id);
-    this.db.prepare(`UPDATE scrape_runs SET ${sets.join(', ')} WHERE id = ?`).run(...values);
+    // `key in fields` (not `!== undefined`) so an explicit null still writes —
+    // e.g. updateRun(id, { message: null }) clears the message column.
+    const set: Partial<typeof scrapeRunsT.$inferInsert> = {};
+    if ('status' in fields) set.status = fields.status;
+    if ('message' in fields) set.message = fields.message;
+    if ('finishedAt' in fields) set.finishedAt = fields.finishedAt;
+    if ('accountsCount' in fields) set.accountsCount = fields.accountsCount;
+    if ('transactionsCount' in fields) set.transactionsCount = fields.transactionsCount;
+    if (Object.keys(set).length === 0) return;
+    this.orm.update(scrapeRunsT).set(set).where(eq(scrapeRunsT.id, id)).run();
   }
 
   /**
@@ -2010,15 +2082,19 @@ export class Repo {
    */
   reconcileInterruptedRuns(): number {
     const now = new Date().toISOString();
-    const changed = this.db
-      .prepare(
-        "UPDATE scrape_runs SET status = 'error', finished_at = ?, " +
-          "message = 'Sync was interrupted before it finished.' " +
-          "WHERE status = 'running'",
-      )
-      .run(now).changes;
-    this.db
-      .prepare("UPDATE connections SET last_status = 'error' WHERE last_status = 'running'")
+    const changed = this.orm
+      .update(scrapeRunsT)
+      .set({
+        status: 'error',
+        finishedAt: now,
+        message: 'Sync was interrupted before it finished.',
+      })
+      .where(eq(scrapeRunsT.status, 'running'))
+      .run().changes;
+    this.orm
+      .update(connectionsT)
+      .set({ lastStatus: 'error' })
+      .where(eq(connectionsT.lastStatus, 'running'))
       .run();
     return changed;
   }
@@ -2037,18 +2113,17 @@ export class Repo {
     'name_overridden AS nameOverridden, ' +
     'created_at AS createdAt, updated_at AS updatedAt';
 
+  // Loan boolean columns (isPrime/isCpiLinked/excluded/nameOverridden) are all
+  // boolean-mode in the schema and the row carries no JSON, so a plain
+  // `.select()` returns the `Loan` shape directly — the old `toLoan` 0/1
+  // coercion is no longer needed.
+
   listLoans(): Loan[] {
-    const rows = this.db
-      .prepare(`SELECT ${Repo.LOAN_COLS} FROM loans ORDER BY created_at`)
-      .all() as LoanRow[];
-    return rows.map(toLoan);
+    return this.orm.select().from(loansT).orderBy(loansT.createdAt).all();
   }
 
   getLoan(id: string): Loan | undefined {
-    const row = this.db
-      .prepare(`SELECT ${Repo.LOAN_COLS} FROM loans WHERE id = ?`)
-      .get(id) as LoanRow | undefined;
-    return row ? toLoan(row) : undefined;
+    return this.orm.select().from(loansT).where(eq(loansT.id, id)).get();
   }
 
   /** Sets (or clears) the loan link on a single transaction. Validates
@@ -2058,9 +2133,7 @@ export class Repo {
     if (loanId !== null && !this.getLoan(loanId)) {
       throw new Error(`unknown loan id: ${loanId}`);
     }
-    this.db
-      .prepare('UPDATE transactions SET loan_id = ? WHERE id = ?')
-      .run(loanId, txnId);
+    this.orm.update(transactionsT).set({ loanId }).where(eq(transactionsT.id, txnId)).run();
   }
 
   /** Sets (or clears) the per-transaction "exclude from cycle" override.
@@ -2070,15 +2143,20 @@ export class Repo {
   setTransactionExcluded(txnId: string, excluded: boolean | null): void {
     if (excluded === true) {
       // Excluding manually and the Savings mark are mutually exclusive.
-      this.db
-        .prepare('UPDATE transactions SET excluded_manual = 1, savings = 0 WHERE id = ?')
-        .run(txnId);
+      this.orm
+        .update(transactionsT)
+        .set({ excludedManual: true, savings: false })
+        .where(eq(transactionsT.id, txnId))
+        .run();
       return;
     }
-    const value = excluded === null ? null : 0;
-    this.db
-      .prepare('UPDATE transactions SET excluded_manual = ? WHERE id = ?')
-      .run(value, txnId);
+    // null clears the override (rule decides); false forces the row included.
+    const value = excluded === null ? null : false;
+    this.orm
+      .update(transactionsT)
+      .set({ excludedManual: value })
+      .where(eq(transactionsT.id, txnId))
+      .run();
   }
 
   /** Mark/unmark a transaction as a savings transfer. A savings row is pulled
@@ -2086,27 +2164,22 @@ export class Repo {
    *  Marking savings clears any manual exclude — the two are mutually
    *  exclusive. */
   setTransactionSavings(txnId: string, savings: boolean): void {
-    if (savings) {
-      this.db
-        .prepare('UPDATE transactions SET savings = 1, excluded_manual = NULL WHERE id = ?')
-        .run(txnId);
-    } else {
-      this.db
-        .prepare('UPDATE transactions SET savings = 0 WHERE id = ?')
-        .run(txnId);
-    }
+    this.orm
+      .update(transactionsT)
+      .set(savings ? { savings: true, excludedManual: null } : { savings: false })
+      .where(eq(transactionsT.id, txnId))
+      .run();
   }
 
   /** Every transaction linked to this loan, newest-first. */
   listLoanPayments(loanId: string): TxnRow[] {
-    return this.db
-      .prepare(
-        `SELECT ${TXN_COLS}
-         FROM transactions
-         WHERE loan_id = ?
-         ORDER BY date DESC, id DESC`,
-      )
-      .all(loanId) as TxnRow[];
+    return this.orm
+      .select()
+      .from(transactionsT)
+      .where(eq(transactionsT.loanId, loanId))
+      .orderBy(desc(transactionsT.date), desc(transactionsT.id))
+      .all()
+      .map((r) => coerceTxnRow(r as TxnRow));
   }
 
   createLoan(
@@ -2115,33 +2188,28 @@ export class Repo {
   ): Loan {
     const id = randomUUID();
     const now = new Date().toISOString();
-    this.db
-      .prepare(
-        `INSERT INTO loans
-           (id, name, principal, start_date, term_months, is_prime, is_cpi_linked,
-            rate_value, cpi_start, currency, excluded, notes,
-            connection_id, external_id, name_overridden, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
+    this.orm
+      .insert(loansT)
+      .values({
         id,
-        input.name,
-        input.principal,
-        input.startDate,
-        input.termMonths,
-        input.isPrime ? 1 : 0,
-        input.isCpiLinked ? 1 : 0,
-        input.rateValue,
-        input.cpiStart,
-        input.currency,
-        input.excluded ? 1 : 0,
-        input.notes,
-        input.connectionId ?? null,
-        input.externalId ?? null,
-        input.nameOverridden ? 1 : 0,
-        now,
-        now,
-      );
+        name: input.name,
+        principal: input.principal,
+        startDate: input.startDate,
+        termMonths: input.termMonths,
+        isPrime: input.isPrime,
+        isCpiLinked: input.isCpiLinked,
+        rateValue: input.rateValue,
+        cpiStart: input.cpiStart,
+        currency: input.currency,
+        excluded: input.excluded,
+        notes: input.notes,
+        connectionId: input.connectionId ?? null,
+        externalId: input.externalId ?? null,
+        nameOverridden: input.nameOverridden ?? false,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run();
     return this.getLoan(id)!;
   }
 
@@ -2261,51 +2329,37 @@ export class Repo {
     id: string,
     fields: Partial<Omit<Loan, 'id' | 'createdAt' | 'updatedAt'>>,
   ): void {
-    const sets: string[] = [];
-    const values: unknown[] = [];
+    const set: Partial<typeof loansT.$inferInsert> = {};
     if (fields.name !== undefined) {
-      sets.push('name = ?');
-      values.push(fields.name);
+      set.name = fields.name;
       // Any rename through this code path is a user-driven edit; flip the
       // override flag so the next bank-loan upsert leaves the new name alone.
       // Callers that need a non-overriding update (e.g. the scraper) go
       // through `upsertBankLoan`, not here.
-      if (fields.nameOverridden === undefined) {
-        sets.push('name_overridden = ?');
-        values.push(1);
-      }
+      if (fields.nameOverridden === undefined) set.nameOverridden = true;
     }
-    if (fields.nameOverridden !== undefined) {
-      sets.push('name_overridden = ?');
-      values.push(fields.nameOverridden ? 1 : 0);
-    }
-    if (fields.principal !== undefined) { sets.push('principal = ?'); values.push(fields.principal); }
-    if (fields.startDate !== undefined) { sets.push('start_date = ?'); values.push(fields.startDate); }
-    if (fields.termMonths !== undefined) { sets.push('term_months = ?'); values.push(fields.termMonths); }
-    if (fields.isPrime !== undefined) { sets.push('is_prime = ?'); values.push(fields.isPrime ? 1 : 0); }
-    if (fields.isCpiLinked !== undefined) { sets.push('is_cpi_linked = ?'); values.push(fields.isCpiLinked ? 1 : 0); }
-    if (fields.rateValue !== undefined) { sets.push('rate_value = ?'); values.push(fields.rateValue); }
-    if (fields.cpiStart !== undefined) { sets.push('cpi_start = ?'); values.push(fields.cpiStart); }
-    if (fields.currency !== undefined) { sets.push('currency = ?'); values.push(fields.currency); }
-    if (fields.excluded !== undefined) { sets.push('excluded = ?'); values.push(fields.excluded ? 1 : 0); }
-    if (fields.notes !== undefined) { sets.push('notes = ?'); values.push(fields.notes); }
-    if (sets.length === 0) return;
-    sets.push('updated_at = ?');
-    values.push(new Date().toISOString());
-    values.push(id);
-    this.db
-      .prepare(`UPDATE loans SET ${sets.join(', ')} WHERE id = ?`)
-      .run(...values);
+    if (fields.nameOverridden !== undefined) set.nameOverridden = fields.nameOverridden;
+    if (fields.principal !== undefined) set.principal = fields.principal;
+    if (fields.startDate !== undefined) set.startDate = fields.startDate;
+    if (fields.termMonths !== undefined) set.termMonths = fields.termMonths;
+    if (fields.isPrime !== undefined) set.isPrime = fields.isPrime;
+    if (fields.isCpiLinked !== undefined) set.isCpiLinked = fields.isCpiLinked;
+    if (fields.rateValue !== undefined) set.rateValue = fields.rateValue;
+    if (fields.cpiStart !== undefined) set.cpiStart = fields.cpiStart;
+    if (fields.currency !== undefined) set.currency = fields.currency;
+    if (fields.excluded !== undefined) set.excluded = fields.excluded;
+    if (fields.notes !== undefined) set.notes = fields.notes;
+    if (Object.keys(set).length === 0) return;
+    set.updatedAt = new Date().toISOString();
+    this.orm.update(loansT).set(set).where(eq(loansT.id, id)).run();
   }
 
   deleteLoan(id: string): void {
-    this.db.prepare('DELETE FROM loans WHERE id = ?').run(id);
+    this.orm.delete(loansT).where(eq(loansT.id, id)).run();
   }
 
   setLoanExcluded(id: string, excluded: boolean): void {
-    this.db
-      .prepare('UPDATE loans SET excluded = ? WHERE id = ?')
-      .run(excluded ? 1 : 0, id);
+    this.orm.update(loansT).set({ excluded }).where(eq(loansT.id, id)).run();
   }
 
   // --- Rate cache (BOI prime, CBS CPI) -------------------------------------
@@ -2318,21 +2372,23 @@ export class Repo {
     series: string,
     period: string,
   ): { value: number; fetchedAt: string } | undefined {
-    return this.db
-      .prepare(
-        'SELECT value, fetched_at AS fetchedAt FROM rate_cache WHERE series = ? AND period = ?',
-      )
-      .get(series, period) as { value: number; fetchedAt: string } | undefined;
+    return this.orm
+      .select({ value: rateCacheT.value, fetchedAt: rateCacheT.fetchedAt })
+      .from(rateCacheT)
+      .where(and(eq(rateCacheT.series, series), eq(rateCacheT.period, period)))
+      .get();
   }
 
   cacheRate(series: string, period: string, value: number): void {
-    this.db
-      .prepare(
-        `INSERT INTO rate_cache (series, period, value, fetched_at) VALUES (?, ?, ?, ?)
-         ON CONFLICT (series, period) DO UPDATE SET
-           value = excluded.value, fetched_at = excluded.fetched_at`,
-      )
-      .run(series, period, value, new Date().toISOString());
+    const fetchedAt = new Date().toISOString();
+    this.orm
+      .insert(rateCacheT)
+      .values({ series, period, value, fetchedAt })
+      .onConflictDoUpdate({
+        target: [rateCacheT.series, rateCacheT.period],
+        set: { value, fetchedAt },
+      })
+      .run();
   }
 
   // --- Categories ----------------------------------------------------------
@@ -2340,43 +2396,47 @@ export class Repo {
   // (LLM + rules), the budget engine and the frontend all read this table so
   // a user-added category is first-class everywhere.
 
-  private static readonly CATEGORY_COLS =
-    'name, emoji, color, cat_group AS catGroup, sort_order AS sortOrder, ' +
-    'is_builtin AS isBuiltin, created_at AS createdAt';
+  /** `isBuiltin` is a boolean-mode column in the schema, so Drizzle reads it
+   *  back as a real boolean and the old `toCategory` coercion is gone. The
+   *  declared `catGroup` union is preserved by a narrowing cast at the read
+   *  boundary (the column is free-text TEXT in SQLite). */
+  private static narrowCategory(row: {
+    name: string; emoji: string; color: string; catGroup: string;
+    sortOrder: number; isBuiltin: boolean; createdAt: string;
+  }): Category {
+    const group: Category['catGroup'] =
+      row.catGroup === 'essential' || row.catGroup === 'fixed' || row.catGroup === 'income'
+        ? row.catGroup : 'variable';
+    return { ...row, catGroup: group };
+  }
 
   listCategories(): Category[] {
-    const rows = this.db
-      .prepare(
-        `SELECT ${Repo.CATEGORY_COLS} FROM categories
-         ORDER BY sort_order, name`,
-      )
-      .all() as CategoryRow[];
-    return rows.map(toCategory);
+    return this.orm
+      .select()
+      .from(categoriesT)
+      .orderBy(categoriesT.sortOrder, categoriesT.name)
+      .all()
+      .map(Repo.narrowCategory);
   }
 
   getCategory(name: string): Category | undefined {
-    const row = this.db
-      .prepare(`SELECT ${Repo.CATEGORY_COLS} FROM categories WHERE name = ?`)
-      .get(name) as CategoryRow | undefined;
-    return row ? toCategory(row) : undefined;
+    const row = this.orm.select().from(categoriesT).where(eq(categoriesT.name, name)).get();
+    return row ? Repo.narrowCategory(row) : undefined;
   }
 
   createCategory(input: Omit<Category, 'isBuiltin' | 'createdAt'>): Category {
-    const now = new Date().toISOString();
-    this.db
-      .prepare(
-        `INSERT INTO categories
-           (name, emoji, color, cat_group, sort_order, is_builtin, created_at)
-         VALUES (?, ?, ?, ?, ?, 0, ?)`,
-      )
-      .run(
-        input.name,
-        input.emoji,
-        input.color,
-        input.catGroup,
-        input.sortOrder,
-        now,
-      );
+    this.orm
+      .insert(categoriesT)
+      .values({
+        name: input.name,
+        emoji: input.emoji,
+        color: input.color,
+        catGroup: input.catGroup,
+        sortOrder: input.sortOrder,
+        isBuiltin: false,
+        createdAt: new Date().toISOString(),
+      })
+      .run();
     return this.getCategory(input.name)!;
   }
 
@@ -2384,17 +2444,15 @@ export class Repo {
     name: string,
     fields: Partial<Omit<Category, 'name' | 'isBuiltin' | 'createdAt'>>,
   ): void {
-    const sets: string[] = [];
-    const values: unknown[] = [];
-    if (fields.emoji !== undefined) { sets.push('emoji = ?'); values.push(fields.emoji); }
-    if (fields.color !== undefined) { sets.push('color = ?'); values.push(fields.color); }
-    if (fields.catGroup !== undefined) { sets.push('cat_group = ?'); values.push(fields.catGroup); }
-    if (fields.sortOrder !== undefined) { sets.push('sort_order = ?'); values.push(fields.sortOrder); }
-    if (sets.length === 0) return;
-    values.push(name);
-    this.db
-      .prepare(`UPDATE categories SET ${sets.join(', ')} WHERE name = ?`)
-      .run(...values);
+    // Build a partial update from only the provided fields — column names come
+    // from the schema, so there is no hand-mapping of camelCase → snake_case.
+    const set: Partial<typeof categoriesT.$inferInsert> = {};
+    if (fields.emoji !== undefined) set.emoji = fields.emoji;
+    if (fields.color !== undefined) set.color = fields.color;
+    if (fields.catGroup !== undefined) set.catGroup = fields.catGroup;
+    if (fields.sortOrder !== undefined) set.sortOrder = fields.sortOrder;
+    if (Object.keys(set).length === 0) return;
+    this.orm.update(categoriesT).set(set).where(eq(categoriesT.name, name)).run();
   }
 
   /**
@@ -2408,28 +2466,24 @@ export class Repo {
     if (name === 'Other') return;
     const row = this.getCategory(name);
     if (!row) return;
-    this.db.transaction(() => {
-      this.db
-        .prepare(`UPDATE transactions SET category = 'Other' WHERE category = ?`)
-        .run(name);
-      this.db
-        .prepare(`UPDATE category_cache SET category = 'Other' WHERE category = ?`)
-        .run(name);
-      this.db
-        .prepare(`UPDATE merchant_rules SET category = 'Other' WHERE category = ?`)
-        .run(name);
-      this.db.prepare(`DELETE FROM budgets WHERE category = ?`).run(name);
-      this.db.prepare(`DELETE FROM categories WHERE name = ?`).run(name);
-    })();
+    this.orm.transaction((tx) => {
+      tx.update(transactionsT).set({ category: 'Other' }).where(eq(transactionsT.category, name)).run();
+      tx.update(categoryCacheT).set({ category: 'Other' }).where(eq(categoryCacheT.category, name)).run();
+      tx.update(merchantRulesT).set({ category: 'Other' }).where(eq(merchantRulesT.category, name)).run();
+      tx.delete(budgetsT).where(eq(budgetsT.category, name)).run();
+      tx.delete(categoriesT).where(eq(categoriesT.name, name)).run();
+    });
   }
 
   /** How many transactions currently carry this category. Used by the UI to
    *  show the impact of a delete before the user confirms. */
   countTransactionsInCategory(name: string): number {
-    const row = this.db
-      .prepare('SELECT COUNT(*) AS n FROM transactions WHERE category = ?')
-      .get(name) as { n: number };
-    return row.n;
+    const row = this.orm
+      .select({ n: sql<number>`COUNT(*)` })
+      .from(transactionsT)
+      .where(eq(transactionsT.category, name))
+      .get();
+    return row?.n ?? 0;
   }
 }
 
@@ -2448,50 +2502,8 @@ export interface Category {
   createdAt: string;
 }
 
-interface CategoryRow {
-  name: string;
-  emoji: string;
-  color: string;
-  catGroup: string;
-  sortOrder: number;
-  isBuiltin: number;
-  createdAt: string;
-}
-
-function toCategory(row: CategoryRow): Category {
-  const group: Category['catGroup'] =
-    row.catGroup === 'essential' || row.catGroup === 'fixed' || row.catGroup === 'income'
-      ? row.catGroup : 'variable';
-  return { ...row, catGroup: group, isBuiltin: row.isBuiltin !== 0 };
-}
-
-// SQLite stores the loan booleans as 0|1.
-interface LoanRow {
-  id: string;
-  name: string;
-  principal: number;
-  startDate: string;
-  termMonths: number;
-  isPrime: number;
-  isCpiLinked: number;
-  rateValue: number;
-  cpiStart: number | null;
-  currency: string;
-  excluded: number;
-  notes: string | null;
-  connectionId: string | null;
-  externalId: string | null;
-  nameOverridden: number;
-  createdAt: string;
-  updatedAt: string;
-}
-
-function toLoan(row: LoanRow): Loan {
-  return {
-    ...row,
-    isPrime: row.isPrime !== 0,
-    isCpiLinked: row.isCpiLinked !== 0,
-    excluded: row.excluded !== 0,
-    nameOverridden: row.nameOverridden !== 0,
-  };
-}
+// (Category rows now come from Drizzle; `isBuiltin` is boolean-mode and the
+// `catGroup` union is narrowed by Repo.narrowCategory. Loan rows likewise come
+// back fully typed — all four loan booleans are boolean-mode columns — so the
+// former CategoryRow/LoanRow shapes and their to* coercers are no longer
+// needed.)

@@ -1,10 +1,50 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
 import { api } from '../api';
 import { DelayedLoader } from '../ui/DelayedLoader';
 import { money } from '../format';
 import type { PiggyBankStatus, PiggyKind, PiggyReport } from './types';
+
+// Local form schema for PiggyFormDialog. The shared piggyCreate/Update schemas
+// model the WIRE shape (numeric amounts, monthly-only refinement), but the form
+// also carries a UI-only plan selector and keeps the amount inputs as strings so
+// they render the user's raw text. So the form validates strings here and maps to
+// the API's numeric body in onSubmit. The cross-field "monthly needs a positive
+// set-aside" rule mirrors piggyCreateSchema's superRefine, with the original
+// per-field messages preserved.
+const piggyFormSchema = z
+  .object({
+    name: z.string().trim().min(1, 'Give your piggy bank a name.'),
+    emoji: z.string().min(1).max(8),
+    kind: z.enum(['monthly', 'lump']),
+    targetAmount: z.string(),
+    monthlyAmount: z.string(),
+  })
+  .superRefine((v, ctx) => {
+    const target = Number(v.targetAmount);
+    if (!(Number.isFinite(target) && target > 0)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['targetAmount'],
+        message: v.kind === 'lump' ? 'Enter the amount to set aside.' : 'Enter a goal amount.',
+      });
+    }
+    if (v.kind === 'monthly') {
+      const monthly = Number(v.monthlyAmount);
+      if (!(Number.isFinite(monthly) && monthly > 0)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['monthlyAmount'],
+          message: 'Choose a monthly set-aside.',
+        });
+      }
+    }
+  });
+type PiggyForm = z.infer<typeof piggyFormSchema>;
 
 // Mirrors PIGGY_EMOJI + PIGGY_PLANS in sidecar/public/app.html.
 const PIGGY_EMOJI = ['🐷', '✈️', '🏖️', '🚗', '🏠', '💍', '🎓', '💻', '📷',
@@ -237,15 +277,7 @@ function PiggyCard({
   );
 }
 
-interface FormState {
-  name: string;
-  emoji: string;
-  kind: PiggyKind;
-  targetAmount: string;
-  monthlyAmount: string;
-}
-
-function formFor(bank: PiggyBankStatus | null): FormState {
+function formFor(bank: PiggyBankStatus | null): PiggyForm {
   if (!bank) return { name: '', emoji: '🐷', kind: 'monthly', targetAmount: '', monthlyAmount: '' };
   return {
     name: bank.name,
@@ -271,25 +303,50 @@ function PiggyFormDialog({
   const open = mode.kind === 'new' || mode.kind === 'edit';
   const editing = mode.kind === 'edit';
   const bank = mode.kind === 'edit' ? mode.bank : null;
-  const [form, setForm] = useState<FormState>(formFor(bank));
+  // The plan selector (3/6/12/24-month presets vs custom) is UI-only state that
+  // steers the monthly preset, so it stays a plain useState alongside RHF.
   const [planSel, setPlanSel] = useState<number | 'custom'>('custom');
-  const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
 
+  const {
+    register,
+    handleSubmit,
+    reset,
+    watch,
+    setValue,
+    setError,
+    formState: { errors, isSubmitting },
+  } = useForm<PiggyForm>({
+    resolver: zodResolver(piggyFormSchema),
+    defaultValues: formFor(bank),
+  });
+
+  // Register the picker fields (emoji/kind) so RHF tracks them; the visual
+  // buttons call setValue. Text/number fields use register() in the JSX.
+  // emoji/kind are button-pickers; targetAmount/monthlyAmount are controlled
+  // inputs with preset side-effects (so they're driven by setValue, not a bare
+  // register spread). Register them once so RHF tracks + resets them.
+  register('emoji');
+  register('kind');
+  register('targetAmount');
+  register('monthlyAmount');
+  const emoji = watch('emoji');
+  const kindVal = watch('kind');
+  const targetStr = watch('targetAmount');
+  const monthlyStr = watch('monthlyAmount');
+
+  // Re-seed the form whenever the dialog (re)opens for a different bank.
   useEffect(() => {
     if (open) {
-      setForm(formFor(bank));
+      reset(formFor(bank));
       setPlanSel('custom');
-      setError(null);
-      setSaving(false);
     }
-  }, [open, bank]);
+  }, [open, bank, reset]);
 
-  const target = Number(form.targetAmount);
-  const monthly = Number(form.monthlyAmount);
+  const target = Number(targetStr);
+  const monthly = Number(monthlyStr);
   const targetValid = Number.isFinite(target) && target > 0;
   const monthlyValid = Number.isFinite(monthly) && monthly > 0;
-  const lump = form.kind === 'lump';
+  const lump = kindVal === 'lump';
 
   const eta = useMemo(() => {
     if (lump || !targetValid || !monthlyValid) return null;
@@ -298,52 +355,38 @@ function PiggyFormDialog({
   }, [lump, targetValid, monthlyValid, target, monthly]);
 
   const setKind = (kind: PiggyKind): void => {
-    setForm((f) => ({ ...f, kind }));
+    setValue('kind', kind, { shouldValidate: true });
   };
-  const setEmoji = (emoji: string): void => {
-    setForm((f) => ({ ...f, emoji }));
+  const setEmoji = (newEmoji: string): void => {
+    setValue('emoji', newEmoji, { shouldValidate: true });
   };
   const onTargetChange = (v: string): void => {
-    setForm((f) => {
-      const next = { ...f, targetAmount: v };
-      if (typeof planSel === 'number') {
-        const pm = presetFor(Number(v), planSel);
-        if (pm != null) next.monthlyAmount = String(pm);
-      }
-      return next;
-    });
+    setValue('targetAmount', v, { shouldValidate: true });
+    // When a preset plan is active, the monthly amount tracks the target.
+    if (typeof planSel === 'number') {
+      const pm = presetFor(Number(v), planSel);
+      if (pm != null) setValue('monthlyAmount', String(pm), { shouldValidate: true });
+    }
   };
   const onMonthlyChange = (v: string): void => {
     setPlanSel('custom');
-    setForm((f) => ({ ...f, monthlyAmount: v }));
+    setValue('monthlyAmount', v, { shouldValidate: true });
   };
   const onPlanClick = (months: number): void => {
     setPlanSel(months);
     const pm = presetFor(target, months);
-    if (pm != null) setForm((f) => ({ ...f, monthlyAmount: String(pm) }));
+    if (pm != null) setValue('monthlyAmount', String(pm), { shouldValidate: true });
   };
 
-  const submit = async (): Promise<void> => {
-    setError(null);
-    if (!form.name.trim()) {
-      setError('Give your piggy bank a name.'); return;
-    }
-    if (!targetValid) {
-      setError(lump ? 'Enter the amount to set aside.' : 'Enter a goal amount.');
-      return;
-    }
-    if (!lump && !monthlyValid) {
-      setError('Choose a monthly set-aside.'); return;
-    }
-    setSaving(true);
+  const submit = handleSubmit(async (values) => {
+    const body = {
+      name: values.name.trim(),
+      emoji: values.emoji || '🐷',
+      kind: values.kind,
+      targetAmount: Number(values.targetAmount),
+      monthlyAmount: values.kind === 'lump' ? 0 : Number(values.monthlyAmount),
+    };
     try {
-      const body = {
-        name: form.name.trim(),
-        emoji: form.emoji || '🐷',
-        kind: form.kind,
-        targetAmount: target,
-        monthlyAmount: lump ? 0 : monthly,
-      };
       if (mode.kind === 'edit') {
         await api(`/piggy/${mode.bank.id}`, 'PUT', body);
       } else {
@@ -351,10 +394,15 @@ function PiggyFormDialog({
       }
       await onSaved();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-      setSaving(false);
+      setError('root', { message: e instanceof Error ? e.message : String(e) });
     }
-  };
+  });
+  // First field-level message (if any) for the single .form-error line below,
+  // preserving the original's one-error-at-a-time display.
+  const firstError = errors.name?.message
+    ?? errors.targetAmount?.message
+    ?? errors.monthlyAmount?.message
+    ?? errors.root?.message;
 
   return (
     <Dialog.Root open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
@@ -370,18 +418,18 @@ function PiggyFormDialog({
           </Dialog.Description>
           <form
             className="piggy-form"
-            onSubmit={(e) => { e.preventDefault(); void submit(); }}
+            onSubmit={submit}
           >
             <label className="fld-lbl">Type</label>
             <div
               className="seg pgy-kind"
               role="group"
               aria-label="Type"
-              data-kind={form.kind}
+              data-kind={kindVal}
             >
               <button
                 type="button"
-                className={form.kind === 'monthly' ? 'on' : ''}
+                className={kindVal === 'monthly' ? 'on' : ''}
                 onClick={() => setKind('monthly')}
               >
                 <span className="pgy-kind-t">Monthly</span>
@@ -389,7 +437,7 @@ function PiggyFormDialog({
               </button>
               <button
                 type="button"
-                className={form.kind === 'lump' ? 'on' : ''}
+                className={kindVal === 'lump' ? 'on' : ''}
                 onClick={() => setKind('lump')}
               >
                 <span className="pgy-kind-t">Set aside once</span>
@@ -403,9 +451,9 @@ function PiggyFormDialog({
                 <button
                   key={e}
                   type="button"
-                  className={`pgy-em${e === form.emoji ? ' on' : ''}`}
+                  className={`pgy-em${e === emoji ? ' on' : ''}`}
                   aria-label={`Icon ${e}`}
-                  aria-pressed={e === form.emoji}
+                  aria-pressed={e === emoji}
                   onClick={() => setEmoji(e)}
                 >{e}</button>
               ))}
@@ -417,9 +465,8 @@ function PiggyFormDialog({
               type="text"
               maxLength={40}
               placeholder="New camera, summer trip…"
-              value={form.name}
-              onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
               autoFocus
+              {...register('name')}
             />
 
             <label htmlFor="pgy-target" className="fld-lbl" style={{ marginTop: 13 }}>
@@ -433,7 +480,7 @@ function PiggyFormDialog({
                 min={0}
                 step={50}
                 placeholder="0"
-                value={form.targetAmount}
+                value={targetStr}
                 onChange={(e) => onTargetChange(e.target.value)}
               />
             </div>
@@ -473,7 +520,7 @@ function PiggyFormDialog({
                     min={0}
                     step={10}
                     placeholder="Custom amount"
-                    value={form.monthlyAmount}
+                    value={monthlyStr}
                     onChange={(e) => onMonthlyChange(e.target.value)}
                   />
                 </div>
@@ -488,13 +535,13 @@ function PiggyFormDialog({
               </div>
             )}
 
-            {error && <p className="form-error">{error}</p>}
+            {firstError && <p className="form-error">{firstError}</p>}
             <div className="form-actions">
               <Dialog.Close asChild>
                 <button type="button" className="btn-ghost">Cancel</button>
               </Dialog.Close>
-              <button type="submit" className="btn-primary" disabled={saving}>
-                {saving ? 'Saving…' : editing ? 'Save changes' : 'Create piggy bank'}
+              <button type="submit" className="btn-primary" disabled={isSubmitting}>
+                {isSubmitting ? 'Saving…' : editing ? 'Save changes' : 'Create piggy bank'}
               </button>
             </div>
           </form>

@@ -10,6 +10,74 @@ look strange. The README covers what Hon does and how to run it.
 
 ---
 
+## Stack modernization (2026-06-01) — ORM, shared zod, Query, Zustand, RHF
+
+A cross-cutting refactor introduced five patterns. The **why** for each:
+
+- **Drizzle ORM** replaces raw `db.prepare(...)` SQL in `repo.ts`. The typed
+  query layer is `sidecar/src/db/schema.ts` (tables) + `db/client.ts`
+  (`makeDb(sqlite)` wraps the SAME better-sqlite3 connection — no second
+  handle). **`db.ts` migrations (`db/migrations.ts`) remain the schema source
+  of truth**; Drizzle does NOT create tables. `tests/` (run via the repo net)
+  guards parity. ~8 methods deliberately keep raw SQL — the documented escape
+  hatch: `saveScrapeResult` (hot upsert loop), `listTransactions` (correlated
+  refund-peer subqueries), `summary` (GROUP BY), the analytics CTE methods over
+  `txn_effective`, and `upsertBankLoan`'s backfill scan. SQLite booleans are
+  now `integer(..., { mode: 'boolean' })` so reads come back as real booleans —
+  the old `to*`/`coerceTxnRow` 0/1 coercers were dropped (a `narrow*` helper
+  remains where a TEXT column maps to a TS union, e.g. category `catGroup`).
+
+- **Shared zod schemas** in `/shared/*.ts` are the SINGLE SOURCE OF TRUTH for
+  validation, imported by BOTH the engine (request validation) AND the web app
+  (react-hook-form resolver) via the `@hon/shared/<name>` path alias. NodeNext
+  (sidecar) needs an EXPLICIT `.ts` path entry per module in
+  `sidecar/tsconfig.json` (the bare `@hon/shared/*` wildcard does NOT resolve
+  under NodeNext tsc, only under tsx/bundler). Web (`bundler` resolution) +
+  Vite (`resolve.alias`) handle the wildcard. `zod` is a root-level dep so
+  `/shared` resolves it from either package.
+
+- **fastify-type-provider-zod** on the engine: `app.withTypeProvider()` +
+  `setValidatorCompiler` + a `setErrorHandler` that turns zod failures into the
+  existing `{ error: string }` 400 shape (so the client's `ApiError` handling is
+  unchanged). Routes opt in with `{ schema: { body/params: <zodSchema> } }`;
+  `req.body`/`params` are then typed. Business rules (404/409/the "Other" guard)
+  stay as explicit checks — zod only replaces SHAPE/TYPE guards.
+
+- **Frontend API library** `web/src/api/`: `client.ts` re-exports the
+  bearer-token fetch; per-domain modules (`categories.ts`, …) own every endpoint
+  URL + verb + payload and parse responses with the shared schemas. Components
+  call these (or the Query hooks), never `api('/path')` inline.
+
+- **TanStack Query** owns server state. `api/queryClient.ts` has the client +
+  the central `qk` query-key registry; `api/hooks/use*.ts` expose
+  `useQuery`/`useMutation` hooks that invalidate `qk.*()` on success. Provider is
+  in `main.tsx`. Replaces the `useEffect + api() + setState` fetch pattern.
+  **Tests** that render a Query-using component must wrap in a provider — use
+  `web/src/test/renderWithProviders.tsx` (`renderWithProviders as render`).
+
+- **Zustand** `web/src/store/uiStore.ts` holds CLIENT/UI state — active tab,
+  cross-component navigation, the unseen-loans badge — replacing the custom
+  window-event bus (`hon.go-to-loans`/`hon.go-to-assets`/`hon.loan-ids-changed`).
+  Components call `useUiStore((s) => s.tab)` or the imperative `uiActions.*`.
+  The durable `hon.pendingAddLoan` localStorage handoff to AccountsView is kept
+  (AccountsView reads it on mount); the store carries a `pendingAction` too.
+
+- **react-hook-form + zod** for forms. Reference: `CategoryEditor` in
+  `settings/CategoriesPanel.tsx` — `useForm({ resolver: zodResolver(shared) })`,
+  `register` for inputs, `register`+`setValue`+`watch` for button/picker fields,
+  `setError('root', …)` for submit errors. Converted: CategoryEditor,
+  CarAssetForm, PiggyFormDialog, BalanceModal, AssetEditModal, LoanEditModal.
+  Forms with bespoke UX keep a LOCAL form schema (numeric inputs as strings
+  parsed in onSubmit) and map to the shared API shape on submit.
+
+> **Sandbox note for future sessions:** the repo's `better-sqlite3` is a macOS
+> binary; it can't run under a Linux CI/sandbox ("invalid ELF header"). To
+> runtime-test repo.ts off-Mac, build a separate harness with a Linux-native
+> `better-sqlite3` and copy the source in (the migration used one under
+> `outputs/honverify`). `tsc` + the macOS `npm test` are the real gates.
+
+---
+
 ## The web app — React (`web/`), served from `web/dist`
 
 - **React app** — `web/` (Vite + React 19 + TS strict + Vitest).

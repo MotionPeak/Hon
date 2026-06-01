@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef, useState, lazy, Suspense, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
 import { api, ApiError } from '../api';
 import { money } from '../format';
 import type {
@@ -881,6 +884,16 @@ interface BalanceModalProps {
   onSaved: () => void | Promise<void>;
 }
 
+// Single-balance edit. Kept as a string field (parsed to a number in onSubmit)
+// so the input shows the rounded value and the "Enter a number." message lands
+// on the same bad input the old guard caught.
+const balanceFormSchema = z.object({
+  balance: z
+    .string()
+    .refine((s) => s.trim() !== '' && Number.isFinite(Number(s)), { message: 'Enter a number.' }),
+});
+type BalanceForm = z.infer<typeof balanceFormSchema>;
+
 function BalanceModal({ account, onClose, onSaved }: BalanceModalProps) {
   // Round to 2dp to suppress floating-point artefacts like
   // "-2945.5500000000006". Bank/card balances are always 2dp; brokerage
@@ -888,27 +901,29 @@ function BalanceModal({ account, onClose, onSaved }: BalanceModalProps) {
   const initial = account.balance != null
     ? String(Math.round(account.balance * 100) / 100)
     : '';
-  const [value, setValue] = useState(initial);
-  const [error, setError] = useState<string | null>(null);
-  const submit = async () => {
-    const n = Number(value);
-    if (!Number.isFinite(n) || value.trim() === '') {
-      setError('Enter a number.');
-      return;
-    }
+  const {
+    register,
+    handleSubmit,
+    setError,
+    formState: { errors, isSubmitting },
+  } = useForm<BalanceForm>({
+    resolver: zodResolver(balanceFormSchema),
+    defaultValues: { balance: initial },
+  });
+  const submit = handleSubmit(async (values) => {
     try {
       await api(`/accounts/${encodeURIComponent(account.id)}/balance`, 'PATCH', {
-        balance: n,
+        balance: Number(values.balance),
       });
       await onSaved();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : String(e));
+      setError('root', { message: e instanceof ApiError ? e.message : String(e) });
     }
-  };
+  });
   return (
     <ModalPortal>
       <div className="overlay">
-        <div role="dialog" aria-label="Account balance" className="modal">
+        <form role="dialog" aria-label="Account balance" className="modal" onSubmit={submit}>
           <h2>Account balance</h2>
           <p>
             Set the current balance for{' '}
@@ -920,17 +935,17 @@ function BalanceModal({ account, onClose, onSaved }: BalanceModalProps) {
             <input
               type="number"
               step="0.01"
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
               autoFocus
+              {...register('balance')}
             />
           </label>
-          {error && <div className="modal-err">{error}</div>}
+          {errors.balance && <div className="modal-err">{errors.balance.message}</div>}
+          {errors.root && <div className="modal-err">{errors.root.message}</div>}
           <div className="modal-actions">
             <button type="button" onClick={onClose}>Cancel</button>
-            <button type="button" className="primary" onClick={submit}>Save</button>
+            <button type="submit" className="primary" disabled={isSubmitting}>Save</button>
           </div>
-        </div>
+        </form>
       </div>
     </ModalPortal>
   );
@@ -1125,48 +1140,62 @@ interface AssetEditModalProps {
   onSaved: () => void | Promise<void>;
 }
 
+// name + value edit. Local schema (string `value`, parsed in onSubmit) keeps the
+// input text-faithful and reproduces the original per-field messages. The shared
+// assetUpdateSchema models the numeric wire shape, which the onSubmit maps to.
+const assetEditFormSchema = z.object({
+  name: z.string().trim().min(1, 'Name is required.'),
+  value: z
+    .string()
+    .refine((s) => Number.isFinite(Number(s)), { message: 'Value must be a number.' }),
+});
+type AssetEditForm = z.infer<typeof assetEditFormSchema>;
+
 function AssetEditModal({ asset, onClose, onSaved }: AssetEditModalProps) {
-  const [name, setName] = useState(asset.name);
-  const [value, setValue] = useState(String(asset.value));
-  const [error, setError] = useState<string | null>(null);
-  const submit = async () => {
-    setError(null);
-    if (!name.trim()) { setError('Name is required.'); return; }
-    const n = Number(value);
-    if (!Number.isFinite(n)) { setError('Value must be a number.'); return; }
+  const {
+    register,
+    handleSubmit,
+    setError,
+    formState: { errors, isSubmitting },
+  } = useForm<AssetEditForm>({
+    resolver: zodResolver(assetEditFormSchema),
+    defaultValues: { name: asset.name, value: String(asset.value) },
+  });
+  const submit = handleSubmit(async (values) => {
     try {
       await api(`/assets/${encodeURIComponent(asset.id)}`, 'PUT', {
-        name: name.trim(), value: n,
+        name: values.name.trim(), value: Number(values.value),
       });
       await onSaved();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : String(e));
+      setError('root', { message: e instanceof ApiError ? e.message : String(e) });
     }
-  };
+  });
   return (
     <ModalPortal>
       <div className="overlay">
-        <div role="dialog" aria-label={`Edit ${asset.name}`} className="modal">
+        <form role="dialog" aria-label={`Edit ${asset.name}`} className="modal" onSubmit={submit}>
           <h2>Edit asset</h2>
           <label className="field">
             <span>Name</span>
-            <input type="text" value={name} onChange={(e) => setName(e.target.value)} />
+            <input type="text" {...register('name')} />
           </label>
           <label className="field">
             <span>Value ({asset.currency})</span>
             <input
               type="number"
               step="0.01"
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
+              {...register('value')}
             />
           </label>
-          {error && <div className="modal-err">{error}</div>}
+          {errors.name && <div className="modal-err">{errors.name.message}</div>}
+          {errors.value && <div className="modal-err">{errors.value.message}</div>}
+          {errors.root && <div className="modal-err">{errors.root.message}</div>}
           <div className="modal-actions">
             <button type="button" onClick={onClose}>Cancel</button>
-            <button type="button" className="primary" onClick={submit}>Save</button>
+            <button type="submit" className="primary" disabled={isSubmitting}>Save</button>
           </div>
-        </div>
+        </form>
       </div>
     </ModalPortal>
   );
@@ -1178,53 +1207,81 @@ interface LoanEditModalProps {
   onSaved: () => void | Promise<void>;
 }
 
+// Loan edit. Local schema (string inputs parsed in onSubmit) reproduces the
+// original per-field guards + messages. The rate track stays fixed — switching
+// it would invalidate the CPI snapshot — so it isn't part of the form. Maps to
+// loanUpdateSchema's numeric shape in onSubmit.
+const loanEditFormSchema = z.object({
+  name: z.string().trim().min(1, 'Name is required.'),
+  principal: z
+    .string()
+    .refine((s) => Number.isFinite(Number(s)) && Number(s) > 0, {
+      message: 'Principal must be a positive number.',
+    }),
+  termMonths: z
+    .string()
+    .refine((s) => Number.isFinite(Number(s)) && Number(s) > 0, {
+      message: 'Term must be a positive integer.',
+    }),
+  rateValue: z
+    .string()
+    .refine((s) => Number.isFinite(Number(s)), { message: 'Rate must be a number.' }),
+  notes: z.string(),
+});
+type LoanEditForm = z.infer<typeof loanEditFormSchema>;
+
 function LoanEditModal({ loan, onClose, onSaved }: LoanEditModalProps) {
-  const [name, setName] = useState(loan.name);
-  const [principal, setPrincipal] = useState(String(loan.principal));
-  const [termMonths, setTermMonths] = useState(String(loan.termMonths));
-  const [rateValue, setRateValue] = useState(String(loan.rateValue));
-  const [notes, setNotes] = useState(loan.notes ?? '');
-  const [error, setError] = useState<string | null>(null);
-  const submit = async () => {
-    setError(null);
-    if (!name.trim()) { setError('Name is required.'); return; }
-    const p = Number(principal);
-    const t = Number(termMonths);
-    const r = Number(rateValue);
-    if (!Number.isFinite(p) || p <= 0) { setError('Principal must be a positive number.'); return; }
-    if (!Number.isFinite(t) || t <= 0) { setError('Term must be a positive integer.'); return; }
-    if (!Number.isFinite(r)) { setError('Rate must be a number.'); return; }
+  const {
+    register,
+    handleSubmit,
+    setError,
+    formState: { errors, isSubmitting },
+  } = useForm<LoanEditForm>({
+    resolver: zodResolver(loanEditFormSchema),
+    defaultValues: {
+      name: loan.name,
+      principal: String(loan.principal),
+      termMonths: String(loan.termMonths),
+      rateValue: String(loan.rateValue),
+      notes: loan.notes ?? '',
+    },
+  });
+  const submit = handleSubmit(async (values) => {
     try {
-      // Track type stays fixed — switching prime/CPI invalidates the CPI snapshot.
-      // To switch tracks the user can remove and re-add the loan.
       await api(`/loans/${encodeURIComponent(loan.id)}`, 'PUT', {
-        name: name.trim(),
-        principal: p,
-        termMonths: Math.round(t),
-        rateValue: r,
-        notes: notes.trim() || null,
+        name: values.name.trim(),
+        principal: Number(values.principal),
+        termMonths: Math.round(Number(values.termMonths)),
+        rateValue: Number(values.rateValue),
+        notes: values.notes.trim() || null,
       });
       await onSaved();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : String(e));
+      setError('root', { message: e instanceof ApiError ? e.message : String(e) });
     }
-  };
+  });
+  // Single .modal-err line showing the first failing field, matching the
+  // original's one-message-at-a-time guard ordering.
+  const firstError = errors.name?.message
+    ?? errors.principal?.message
+    ?? errors.termMonths?.message
+    ?? errors.rateValue?.message
+    ?? errors.root?.message;
   return (
     <ModalPortal>
       <div className="overlay">
-        <div role="dialog" aria-label={`Edit ${loan.name}`} className="modal">
+        <form role="dialog" aria-label={`Edit ${loan.name}`} className="modal" onSubmit={submit}>
           <h2>Edit loan</h2>
           <label className="field">
             <span>Name</span>
-            <input type="text" value={name} onChange={(e) => setName(e.target.value)} />
+            <input type="text" {...register('name')} />
           </label>
           <label className="field">
             <span>Principal ({loan.currency})</span>
             <input
               type="number"
               step="0.01"
-              value={principal}
-              onChange={(e) => setPrincipal(e.target.value)}
+              {...register('principal')}
             />
           </label>
           <label className="field">
@@ -1232,8 +1289,7 @@ function LoanEditModal({ loan, onClose, onSaved }: LoanEditModalProps) {
             <input
               type="number"
               step="1"
-              value={termMonths}
-              onChange={(e) => setTermMonths(e.target.value)}
+              {...register('termMonths')}
             />
           </label>
           <label className="field">
@@ -1241,25 +1297,23 @@ function LoanEditModal({ loan, onClose, onSaved }: LoanEditModalProps) {
             <input
               type="number"
               step="0.01"
-              value={rateValue}
-              onChange={(e) => setRateValue(e.target.value)}
+              {...register('rateValue')}
             />
           </label>
           <label className="field">
             <span>Notes</span>
             <input
               type="text"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
               placeholder="Optional"
+              {...register('notes')}
             />
           </label>
-          {error && <div className="modal-err">{error}</div>}
+          {firstError && <div className="modal-err">{firstError}</div>}
           <div className="modal-actions">
             <button type="button" onClick={onClose}>Cancel</button>
-            <button type="button" className="primary" onClick={submit}>Save</button>
+            <button type="submit" className="primary" disabled={isSubmitting}>Save</button>
           </div>
-        </div>
+        </form>
       </div>
     </ModalPortal>
   );

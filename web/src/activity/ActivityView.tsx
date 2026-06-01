@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { createPortal } from 'react-dom';
 import * as Dialog from '@radix-ui/react-dialog';
 import { api, ApiError } from '../api';
+import { uiActions } from '../store/uiStore';
 import { DelayedLoader } from '../ui/DelayedLoader';
 import { cycleKey, cycleLabel, currentCycleKey } from '../cycle';
 import { money } from '../format';
@@ -853,7 +854,9 @@ function LoanChip({
       title={`Linked to ${loan.name} — open the Loans tab`}
       onClick={(e) => {
         e.stopPropagation();
-        window.dispatchEvent(new CustomEvent('hon.go-to-loans'));
+        // Navigate to the Loans tab via the Zustand UI store (replaces the
+        // old `hon.go-to-loans` window event).
+        uiActions.goToLoans();
       }}
     >
       → {loan.name}

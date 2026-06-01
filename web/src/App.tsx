@@ -11,10 +11,7 @@ import { RecurringView } from './recurring/RecurringView';
 import { SettingsProvider } from './settings/useSettings';
 import { SettingsView } from './settings/SettingsView';
 import { VouchersView } from './vouchers/VouchersView';
-
-type Tab =
-  | 'overview' | 'accounts' | 'activity' | 'recurring'
-  | 'piggy' | 'vouchers' | 'loans' | 'insights' | 'settings';
+import { useUiStore, type Tab } from './store/uiStore';
 
 interface TabDef {
   id: Tab;
@@ -44,48 +41,26 @@ interface Health {
 }
 
 export function App() {
-  const [tab, setTab] = useState<Tab>('overview');
+  // Tab + cross-component navigation now live in the Zustand UI store, which
+  // replaced the custom window-event bus (hon.go-to-loans / hon.go-to-assets)
+  // and the localStorage-polling unseen-loans listener. Components call
+  // useUiStore / uiActions directly instead of dispatching DOM events.
+  const tab = useUiStore((s) => s.tab);
+  const setTab = useUiStore((s) => s.setTab);
+  const unseenLoanCount = useUiStore((s) => s.unseenLoanCount);
+  const refreshUnseenLoans = useUiStore((s) => s.refreshUnseenLoans);
   const [health, setHealth] = useState<Health | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
 
-  // Activity row's "→ Loan name" chip dispatches this to ask the shell
-  // to flip to the Loans tab. Decouples the chip from prop-drilling a
-  // navigation callback through five components.
+  // The browser's `storage` event is cross-tab only, so a same-tab write by
+  // AccountsView's new-loan detector still needs a nudge — but that now calls
+  // uiActions.refreshUnseenLoans() directly. Here we only handle the cross-tab
+  // case (another Hon tab syncing) by re-reading on the storage event.
   useEffect(() => {
-    const h = (): void => setTab('loans');
-    window.addEventListener('hon.go-to-loans', h);
-    return () => window.removeEventListener('hon.go-to-loans', h);
-  }, []);
-
-  // The empty Loans tab's "+ Add a loan" button dispatches this to flip to the
-  // Assets tab; AccountsView then opens the loan form (via its
-  // 'hon.pendingAddLoan' localStorage flag, read on mount).
-  useEffect(() => {
-    const h = (): void => setTab('accounts');
-    window.addEventListener('hon.go-to-assets', h);
-    return () => window.removeEventListener('hon.go-to-assets', h);
-  }, []);
-
-  // Reads localStorage['hon.unseenLoanIds'] (written by AccountsView's
-  // new-loan detector). Non-empty → the Loans nav button gets data-unseen
-  // so it can render an amber pulse dot. Same-tab updates fire via a
-  // custom event since the browser's storage event is cross-tab only.
-  const [unseenLoanCount, setUnseenLoanCount] = useState(0);
-  useEffect(() => {
-    const read = (): void => {
-      try {
-        const v = JSON.parse(window.localStorage.getItem('hon.unseenLoanIds') ?? '[]');
-        setUnseenLoanCount(Array.isArray(v) ? v.length : 0);
-      } catch { setUnseenLoanCount(0); }
-    };
-    read();
-    window.addEventListener('hon.loan-ids-changed', read);
-    window.addEventListener('storage', read);
-    return () => {
-      window.removeEventListener('hon.loan-ids-changed', read);
-      window.removeEventListener('storage', read);
-    };
-  }, []);
+    refreshUnseenLoans();
+    window.addEventListener('storage', refreshUnseenLoans);
+    return () => window.removeEventListener('storage', refreshUnseenLoans);
+  }, [refreshUnseenLoans]);
   // The amber pill that slides behind the active tab. Measured from the
   // selected button after every tab change so it tracks any layout shift.
   const navRef = useRef<HTMLElement | null>(null);

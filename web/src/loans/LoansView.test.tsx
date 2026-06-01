@@ -3,6 +3,7 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { LoansView } from './LoansView';
 import { installFetchMock } from '../test/mockFetch';
+import { useUiStore } from '../store/uiStore';
 
 const LOANS = {
   loans: [
@@ -46,14 +47,14 @@ describe('LoansView', () => {
   it('empty state offers + Add a loan that hands off to the Assets tab', async () => {
     const user = userEvent.setup();
     installFetchMock({ 'GET /api/loans': () => ({ loans: [], rates: {} }) });
-    const events: string[] = [];
-    const onGo = (): void => { events.push('go-to-assets'); };
-    window.addEventListener('hon.go-to-assets', onGo);
+    // Reset the UI store, then assert the click drives it to the Assets tab
+    // with the add-loan pending action (replaces the old hon.go-to-assets event).
+    useUiStore.setState({ tab: 'loans', pendingAction: null });
     render(<LoansView />);
     await user.click(await screen.findByRole('button', { name: /\+ add a loan/i }));
     expect(window.localStorage.getItem('hon.pendingAddLoan')).toBe('1');
-    expect(events).toContain('go-to-assets');
-    window.removeEventListener('hon.go-to-assets', onGo);
+    expect(useUiStore.getState().tab).toBe('accounts');
+    expect(useUiStore.getState().pendingAction).toBe('add-loan');
     window.localStorage.removeItem('hon.pendingAddLoan');
   });
 

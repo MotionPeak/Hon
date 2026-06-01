@@ -1,5 +1,38 @@
-import Fastify from 'fastify';
+import Fastify, { type FastifyError } from 'fastify';
 import fastifyStatic from '@fastify/static';
+import { z } from 'zod';
+import {
+  validatorCompiler,
+  hasZodFastifySchemaValidationErrors,
+  type ZodTypeProvider,
+} from 'fastify-type-provider-zod';
+import { idParamSchema, isoDateSchema } from '@hon/shared/common';
+import {
+  categoryCreateSchema,
+  categoryUpdateSchema,
+  categoryNameParamSchema,
+} from '@hon/shared/category';
+import {
+  loanCreateSchema,
+  loanUpdateSchema,
+  excludedToggleSchema,
+  rateTypeSchema,
+} from '@hon/shared/loan';
+import { assetCreateSchema, assetUpdateSchema } from '@hon/shared/asset';
+import { piggyCreateSchema, piggyUpdateSchema } from '@hon/shared/piggy';
+import { voucherCreateSchema, voucherUpdateSchema } from '@hon/shared/voucher';
+import {
+  budgetSetSchema,
+  monthlySavingsSchema,
+  incomeOverrideSchema,
+} from '@hon/shared/budget';
+import {
+  txnCategorySchema,
+  txnLoanSchema,
+  txnExcludedSchema,
+  txnSavingsSchema,
+  txnLinkSchema,
+} from '@hon/shared/transaction';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -62,7 +95,6 @@ import {
   fetchCpiForMonth,
   fetchCurrentPrime,
 } from './loans.js';
-import type { RateType } from './repo.js';
 
 const START = Date.now();
 const VERSION = '0.3.0';
@@ -157,7 +189,19 @@ const app = Fastify({
   // before routing AND before the onRequest auth hook, so a rewritten
   // /api/loans → /loans is token-gated exactly as before.
   rewriteUrl: (req) => rewriteApiPrefix(req.url ?? '/'),
-});
+}).withTypeProvider<ZodTypeProvider>();
+
+// Zod request validation. A route that declares `schema: { body, params,
+// querystring }` with zod schemas gets those parsed+typed before the handler
+// runs; a parse failure is turned into the engine's standard `{ error }` JSON
+// by the error handler below (see setErrorHandler). Routes WITHOUT a schema are
+// unaffected — this is incremental. Response serialization is left untouched
+// (no response schemas) so existing payload shapes pass through verbatim.
+app.setValidatorCompiler(validatorCompiler);
+
+/** Type of the app once the zod provider is attached — handlers read
+ *  `request.body`/`params`/`query` as the inferred zod types. */
+type App = typeof app;
 
 // GET-only URL prefixes exempt from the bearer token, alongside the exact
 // path `/` (the web app shell). All three carry no private data:
@@ -193,6 +237,23 @@ app.addHook('onRequest', async (req, reply) => {
   if (token && req.headers.authorization !== `Bearer ${token}`) {
     return reply.code(401).send({ error: 'unauthorized' });
   }
+});
+
+// Translate a zod validation failure into the engine's standard
+// `{ error: string }` 400 shape (the same shape the hand-rolled
+// `reply.code(400).send({ error })` guards produced), so the React client's
+// `ApiError` handling is unchanged. Non-validation errors fall through to
+// Fastify's default handling.
+app.setErrorHandler((err: FastifyError, _req, reply) => {
+  if (hasZodFastifySchemaValidationErrors(err)) {
+    const first = err.validation[0];
+    const where = err.validationContext ? `${err.validationContext}: ` : '';
+    const detail = first?.message ?? 'invalid request';
+    return reply.code(400).send({ error: `${where}${detail}` });
+  }
+  // Preserve any explicit statusCode an upstream threw; default 500.
+  const status = typeof err.statusCode === 'number' ? err.statusCode : 500;
+  return reply.code(status).send({ error: err.message || 'internal error' });
 });
 
 // Serve the React build's hashed assets. Tight scoping (root = web/dist/assets,
@@ -388,26 +449,27 @@ app.post('/connections/:id/scrape', async (req, reply) => {
   return { runId };
 });
 
-app.patch('/connections/:id/history-months', async (req, reply) => {
-  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
-  const { id } = req.params as { id: string };
-  const body = (req.body ?? {}) as { historyMonths?: unknown };
+app.patch(
+  '/connections/:id/history-months',
+  {
+    schema: {
+      params: idParamSchema,
+      body: z.object({ historyMonths: z.number().int().min(1).max(24) }),
+    },
+  },
+  async (req, reply) => {
+    if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+    const { id } = req.params;
 
-  // 404 first so callers can distinguish "bad id" from "bad value".
-  if (!repo.getConnection(id)) {
-    return reply.code(404).send({ error: 'connection not found' });
-  }
+    // 404 first so callers can distinguish "bad id" from "bad value".
+    if (!repo.getConnection(id)) {
+      return reply.code(404).send({ error: 'connection not found' });
+    }
 
-  const months = body.historyMonths;
-  if (typeof months !== 'number' || !Number.isInteger(months) || months < 1 || months > 24) {
-    return reply.code(400).send({
-      error: 'historyMonths must be an integer in [1, 24]',
-    });
-  }
-
-  const connection = repo.setConnectionHistoryMonths(id, months);
-  return { connection };
-});
+    const connection = repo.setConnectionHistoryMonths(id, req.body.historyMonths);
+    return { connection };
+  },
+);
 
 app.get('/scrape/:runId', async (req, reply) => {
   if (!repo || !runner) return reply.code(503).send({ error: 'database unavailable' });
@@ -589,60 +651,56 @@ app.get('/brokerage', async (_req, reply) => {
 
 // Sets an account balance by hand. Credit-card scrapers do not report a
 // balance, and a manual figure also lets the user correct a stale one.
-app.patch('/accounts/:id/balance', async (req, reply) => {
-  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
-  const { id } = req.params as { id: string };
-  const body = (req.body ?? {}) as { balance?: number };
-  const balance = Number(body.balance);
-  if (!Number.isFinite(balance)) {
-    return reply.code(400).send({ error: 'a numeric balance is required' });
-  }
-  if (!repo.listAccounts().some((a) => a.id === id)) {
-    return reply.code(404).send({ error: 'account not found' });
-  }
-  repo.setAccountBalance(id, balance);
-  return { ok: true };
-});
+app.patch(
+  '/accounts/:id/balance',
+  { schema: { params: idParamSchema, body: z.object({ balance: z.number().finite() }) } },
+  async (req, reply) => {
+    if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+    const { id } = req.params;
+    const { balance } = req.body;
+    if (!repo.listAccounts().some((a) => a.id === id)) {
+      return reply.code(404).send({ error: 'account not found' });
+    }
+    repo.setAccountBalance(id, balance);
+    return { ok: true };
+  },
+);
 
 // Sets (or clears, when body.inceptionDate is null) the user-defined
 // "when I actually started investing here" date for a brokerage account.
 // The Insights brokerage chart uses this to clip the synthetic Yahoo/Maya
 // backfill — so ALL means "since I started", not the 10 years of pretend
 // history Yahoo's chart API otherwise paints.
-app.patch('/accounts/:id/inception', async (req, reply) => {
-  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
-  const { id } = req.params as { id: string };
-  const body = (req.body ?? {}) as { inceptionDate?: string | null };
-  let inceptionDate: string | null = null;
-  if (body.inceptionDate != null && body.inceptionDate !== '') {
-    if (typeof body.inceptionDate !== 'string'
-      || !/^\d{4}-\d{2}-\d{2}$/.test(body.inceptionDate)) {
-      return reply.code(400).send({ error: 'inceptionDate must be YYYY-MM-DD' });
+app.patch(
+  '/accounts/:id/inception',
+  { schema: { params: idParamSchema, body: z.object({ inceptionDate: isoDateSchema.nullable() }) } },
+  async (req, reply) => {
+    if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+    const { id } = req.params;
+    const inceptionDate = req.body.inceptionDate;
+    if (!repo.listAccounts().some((a) => a.id === id)) {
+      return reply.code(404).send({ error: 'account not found' });
     }
-    inceptionDate = body.inceptionDate;
-  }
-  if (!repo.listAccounts().some((a) => a.id === id)) {
-    return reply.code(404).send({ error: 'account not found' });
-  }
-  repo.setAccountInceptionDate(id, inceptionDate);
-  return { ok: true };
-});
+    repo.setAccountInceptionDate(id, inceptionDate);
+    return { ok: true };
+  },
+);
 
 // Includes or excludes one account from the net-worth total. The account stays
 // visible on its connection card either way — only the totals change.
-app.patch('/accounts/:id/excluded', async (req, reply) => {
-  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
-  const { id } = req.params as { id: string };
-  const body = (req.body ?? {}) as { excluded?: boolean };
-  if (typeof body.excluded !== 'boolean') {
-    return reply.code(400).send({ error: 'excluded must be a boolean' });
-  }
-  if (!repo.listAccounts().some((a) => a.id === id)) {
-    return reply.code(404).send({ error: 'account not found' });
-  }
-  repo.setAccountExcluded(id, body.excluded);
-  return { ok: true };
-});
+app.patch(
+  '/accounts/:id/excluded',
+  { schema: { params: idParamSchema, body: excludedToggleSchema } },
+  async (req, reply) => {
+    if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+    const { id } = req.params;
+    if (!repo.listAccounts().some((a) => a.id === id)) {
+      return reply.code(404).send({ error: 'account not found' });
+    }
+    repo.setAccountExcluded(id, req.body.excluded);
+    return { ok: true };
+  },
+);
 
 app.get('/transactions', async (req, reply) => {
   if (!repo) return reply.code(503).send({ error: 'database unavailable' });
@@ -726,30 +784,34 @@ app.get('/summary', async (_req, reply) => {
 // Moves one transaction to a different category. With `applyToMerchant`, the
 // choice is saved as a rule so transactions from the same business — past and
 // future — categorize the same way.
-app.patch('/transactions/:id/category', async (req, reply) => {
-  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
-  const { id } = req.params as { id: string };
-  const body = (req.body ?? {}) as { category?: string; applyToMerchant?: boolean };
-  // Accept any category the user has — built-in or one they created in
-  // Settings. Fall back to the static CATEGORIES list only if the table is
-  // unexpectedly empty (e.g. a brand-new DB before its seed migration ran).
-  const liveCats = repo.listCategories().map((c) => c.name);
-  const allowed = liveCats.length > 0
-    ? liveCats
-    : (CATEGORIES as readonly string[]);
-  if (!body.category || !allowed.includes(body.category)) {
-    return reply.code(400).send({ error: 'unknown category' });
-  }
-  const txn = repo.getTransaction(id);
-  if (!txn) return reply.code(404).send({ error: 'transaction not found' });
+app.patch(
+  '/transactions/:id/category',
+  { schema: { params: idParamSchema, body: txnCategorySchema } },
+  async (req, reply) => {
+    if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+    const { id } = req.params;
+    const body = req.body;
+    // Accept any category the user has — built-in or one they created in
+    // Settings. Fall back to the static CATEGORIES list only if the table is
+    // unexpectedly empty (e.g. a brand-new DB before its seed migration ran).
+    const liveCats = repo.listCategories().map((c) => c.name);
+    const allowed = liveCats.length > 0
+      ? liveCats
+      : (CATEGORIES as readonly string[]);
+    if (!allowed.includes(body.category)) {
+      return reply.code(400).send({ error: 'unknown category' });
+    }
+    const txn = repo.getTransaction(id);
+    if (!txn) return reply.code(404).send({ error: 'transaction not found' });
 
-  repo.updateTransactionCategory(id, body.category);
-  if (body.applyToMerchant) {
-    repo.setMerchantRule(txn.description, body.category);
-    repo.applyMerchantRule(txn.description, body.category);
-  }
-  return { ok: true };
-});
+    repo.updateTransactionCategory(id, body.category);
+    if (body.applyToMerchant) {
+      repo.setMerchantRule(txn.description, body.category);
+      repo.applyMerchantRule(txn.description, body.category);
+    }
+    return { ok: true };
+  },
+);
 
 // How often a merchant recurs. 'monthly'/'bimonthly'/'yearly' tag a recurring
 // expense (for monthly-equivalent cost); 'income' tags a recurring income
@@ -780,24 +842,29 @@ app.get('/merchant-splits', async (_req, reply) => {
   return { splits };
 });
 
-app.put('/merchant-split', async (req, reply) => {
-  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
-  const body = (req.body ?? {}) as { key?: string; splitCount?: number | null };
-  const key = (body.key ?? '').trim();
-  if (!key) return reply.code(400).send({ error: 'a merchant key is required' });
-  if (body.splitCount == null || body.splitCount === 1) {
-    repo.clearMerchantSplit(key);
+// The wire field is `key` (the merchant key); `splitCount: null` (or <= 1)
+// clears the override — that business rule stays in the handler.
+app.put(
+  '/merchant-split',
+  { schema: { body: z.object({ key: z.string().min(1), splitCount: z.number().int().nullable() }) } },
+  async (req, reply) => {
+    if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+    const { splitCount } = req.body;
+    const key = req.body.key.trim();
+    if (!key) return reply.code(400).send({ error: 'a merchant key is required' });
+    if (splitCount == null || splitCount === 1) {
+      repo.clearMerchantSplit(key);
+      return { ok: true };
+    }
+    if (splitCount < 1 || splitCount > 50) {
+      return reply.code(400).send({
+        error: 'splitCount must be a whole number between 1 and 50',
+      });
+    }
+    repo.setMerchantSplit(key, splitCount);
     return { ok: true };
-  }
-  const n = Math.round(Number(body.splitCount));
-  if (!Number.isFinite(n) || n < 1 || n > 50) {
-    return reply.code(400).send({
-      error: 'splitCount must be a whole number between 1 and 50',
-    });
-  }
-  repo.setMerchantSplit(key, n);
-  return { ok: true };
-});
+  },
+);
 
 // Per-category split count (e.g. Utilities ÷ 3 when shared with roommates).
 // splitCount >= 1; setting it to 1 or null clears the override.
@@ -808,82 +875,101 @@ app.get('/category-splits', async (_req, reply) => {
   return { splits };
 });
 
-app.put('/category-split', async (req, reply) => {
-  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
-  const body = (req.body ?? {}) as { category?: string; splitCount?: number | null };
-  const category = (body.category ?? '').trim();
-  if (!category) return reply.code(400).send({ error: 'a category is required' });
-  if (body.splitCount == null || body.splitCount === 1) {
-    repo.clearCategorySplit(category);
+// `splitCount: null` (or <= 1) clears the override — business rule kept.
+app.put(
+  '/category-split',
+  { schema: { body: z.object({ category: z.string().min(1), splitCount: z.number().int().nullable() }) } },
+  async (req, reply) => {
+    if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+    const { splitCount } = req.body;
+    const category = req.body.category.trim();
+    if (!category) return reply.code(400).send({ error: 'a category is required' });
+    if (splitCount == null || splitCount === 1) {
+      repo.clearCategorySplit(category);
+      return { ok: true };
+    }
+    if (splitCount < 1 || splitCount > 50) {
+      return reply.code(400).send({
+        error: 'splitCount must be a whole number between 1 and 50',
+      });
+    }
+    repo.setCategorySplit(category, splitCount);
     return { ok: true };
-  }
-  const n = Math.round(Number(body.splitCount));
-  if (!Number.isFinite(n) || n < 1 || n > 50) {
-    return reply.code(400).send({
-      error: 'splitCount must be a whole number between 1 and 50',
-    });
-  }
-  repo.setCategorySplit(category, n);
-  return { ok: true };
-});
+  },
+);
 
-app.put('/merchant-frequency', async (req, reply) => {
-  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
-  const body = (req.body ?? {}) as { key?: string; frequency?: string };
-  const key = (body.key ?? '').trim();
-  if (!key) return reply.code(400).send({ error: 'a merchant key is required' });
-  // 'none' clears the tag — used to un-mark a recurring income source.
-  if (body.frequency === 'none') {
-    repo.clearMerchantFrequency(key);
+app.put(
+  '/merchant-frequency',
+  { schema: { body: z.object({ key: z.string().min(1), frequency: z.string() }) } },
+  async (req, reply) => {
+    if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+    const { frequency } = req.body;
+    const key = req.body.key.trim();
+    if (!key) return reply.code(400).send({ error: 'a merchant key is required' });
+    // 'none' clears the tag — used to un-mark a recurring income source.
+    if (frequency === 'none') {
+      repo.clearMerchantFrequency(key);
+      return { ok: true };
+    }
+    if (!RECURRENCE_FREQUENCIES.includes(frequency)) {
+      return reply.code(400).send({ error: 'unknown frequency' });
+    }
+    repo.setMerchantFrequency(key, frequency);
     return { ok: true };
-  }
-  if (!body.frequency || !RECURRENCE_FREQUENCIES.includes(body.frequency)) {
-    return reply.code(400).send({ error: 'unknown frequency' });
-  }
-  repo.setMerchantFrequency(key, body.frequency);
-  return { ok: true };
-});
+  },
+);
 
 // Links an expense to a refunding/reimbursing transaction, so the refund is
 // folded into the expense and not double-counted across the app.
-app.put('/transactions/:id/link', async (req, reply) => {
-  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
-  const { id } = req.params as { id: string };
-  const body = (req.body ?? {}) as { refundId?: string; amount?: number };
-  if (!body.refundId) return reply.code(400).send({ error: 'refundId is required' });
-  if (body.refundId === id) {
-    return reply.code(400).send({ error: 'a transaction cannot refund itself' });
-  }
-  const expense = repo.getTransaction(id);
-  if (!expense) return reply.code(404).send({ error: 'expense not found' });
-  const refund = repo.getTransaction(body.refundId);
-  if (!refund) return reply.code(404).send({ error: 'refund transaction not found' });
+// txnLinkSchema validates the required refundId; `amount` is an optional
+// partial-allocation override the route business-validates below (default,
+// magnitude cap, unallocated-remainder cap), so it rides along via .extend.
+app.put(
+  '/transactions/:id/link',
+  {
+    schema: {
+      params: idParamSchema,
+      body: txnLinkSchema.extend({ amount: z.number().finite().optional() }),
+    },
+  },
+  async (req, reply) => {
+    if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+    const { id } = req.params;
+    const body = req.body;
+    if (body.refundId === id) {
+      return reply.code(400).send({ error: 'a transaction cannot refund itself' });
+    }
+    const expense = repo.getTransaction(id);
+    if (!expense) return reply.code(404).send({ error: 'expense not found' });
+    const refund = repo.getTransaction(body.refundId);
+    if (!refund) return reply.code(404).send({ error: 'refund transaction not found' });
 
-  // Validate amount. Omitted → allocate the full unallocated remainder
-  // capped at the expense's outstanding magnitude.
-  const refundMagnitude = Math.abs(refund.amount);
-  const expenseMagnitude = Math.abs(expense.amount);
-  const remaining = repo.refundRemaining(body.refundId)
-    + (repo.listTransactionLinks().find(
-        (l) => l.expenseId === id && l.refundId === body.refundId,
-      )?.amount ?? 0);
-  let amount = typeof body.amount === 'number' ? body.amount : Math.min(remaining, expenseMagnitude);
-  if (!Number.isFinite(amount) || amount <= 0) {
-    return reply.code(400).send({ error: 'amount must be a positive number' });
-  }
-  if (amount > refundMagnitude + 0.005) {
-    return reply.code(400).send({
-      error: `amount exceeds refund magnitude (${refundMagnitude})`,
-    });
-  }
-  if (amount > remaining + 0.005) {
-    return reply.code(400).send({
-      error: `only ${remaining.toFixed(2)} of this refund is unallocated`,
-    });
-  }
-  repo.setTransactionLink(id, body.refundId, amount);
-  return { ok: true, amount };
-});
+    // Validate amount. Omitted → allocate the full unallocated remainder
+    // capped at the expense's outstanding magnitude.
+    const refundMagnitude = Math.abs(refund.amount);
+    const expenseMagnitude = Math.abs(expense.amount);
+    const remaining = repo.refundRemaining(body.refundId)
+      + (repo.listTransactionLinks().find(
+          (l) => l.expenseId === id && l.refundId === body.refundId,
+        )?.amount ?? 0);
+    const amount = typeof body.amount === 'number' ? body.amount : Math.min(remaining, expenseMagnitude);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return reply.code(400).send({ error: 'amount must be a positive number' });
+    }
+    if (amount > refundMagnitude + 0.005) {
+      return reply.code(400).send({
+        error: `amount exceeds refund magnitude (${refundMagnitude})`,
+      });
+    }
+    if (amount > remaining + 0.005) {
+      return reply.code(400).send({
+        error: `only ${remaining.toFixed(2)} of this refund is unallocated`,
+      });
+    }
+    repo.setTransactionLink(id, body.refundId, amount);
+    return { ok: true, amount };
+  },
+);
 
 app.delete('/transactions/:id/link', async (req, reply) => {
   if (!repo) return reply.code(503).send({ error: 'database unavailable' });
@@ -1142,67 +1228,42 @@ app.get('/assets', async (_req, reply) => {
   return { assets: repo.listManualAssets() };
 });
 
-app.post('/assets', async (req, reply) => {
+// Shape validation (kind enum, name, finite value, currency, details bag) via
+// the shared assetCreateSchema.
+app.post('/assets', { schema: { body: assetCreateSchema } }, async (req, reply) => {
   if (!repo) return reply.code(503).send({ error: 'database unavailable' });
-  const body = (req.body ?? {}) as {
-    kind?: string;
-    name?: string;
-    value?: number;
-    currency?: string;
-    details?: Record<string, unknown> | null;
-  };
-  if (!body.kind || !ASSET_KINDS.has(body.kind)) {
-    return reply.code(400).send({ error: 'unknown asset kind' });
-  }
-  const name = (body.name ?? '').trim();
-  if (!name) return reply.code(400).send({ error: 'a name is required' });
-  const value = Number(body.value);
-  if (!Number.isFinite(value)) {
-    return reply.code(400).send({ error: 'a numeric value is required' });
-  }
-  const currency = (body.currency ?? 'ILS').toUpperCase();
-  const details = body.details && typeof body.details === 'object' ? body.details : null;
-  const asset = repo.createManualAsset({ kind: body.kind, name, value, currency, details });
+  const { kind, name, value, currency } = req.body;
+  const details = req.body.details ?? null;
+  const asset = repo.createManualAsset({ kind, name, value, currency, details });
   return { asset };
 });
 
-app.put('/assets/:id', async (req, reply) => {
-  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
-  const { id } = req.params as { id: string };
-  if (!repo.getManualAsset(id)) return reply.code(404).send({ error: 'asset not found' });
-  const body = (req.body ?? {}) as {
-    name?: string;
-    value?: number;
-    details?: Record<string, unknown> | null;
-    excluded?: boolean;
-  };
-  const fields: {
-    name?: string;
-    value?: number;
-    details?: Record<string, unknown> | null;
-    excluded?: boolean;
-  } = {};
-  if (body.name !== undefined) {
-    const name = body.name.trim();
-    if (!name) return reply.code(400).send({ error: 'a name is required' });
-    fields.name = name;
-  }
-  if (body.value !== undefined) {
-    const value = Number(body.value);
-    if (!Number.isFinite(value)) {
-      return reply.code(400).send({ error: 'a numeric value is required' });
+// assetUpdateSchema validates the partial field shapes (trimmed name, finite
+// value, details record, excluded). The 404 + details null-normalize stay.
+app.put(
+  '/assets/:id',
+  { schema: { params: idParamSchema, body: assetUpdateSchema } },
+  async (req, reply) => {
+    if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+    const { id } = req.params;
+    if (!repo.getManualAsset(id)) return reply.code(404).send({ error: 'asset not found' });
+    const body = req.body;
+    const fields: {
+      name?: string;
+      value?: number;
+      details?: Record<string, unknown> | null;
+      excluded?: boolean;
+    } = {};
+    if (body.name !== undefined) fields.name = body.name;
+    if (body.value !== undefined) fields.value = body.value;
+    if (body.details !== undefined) {
+      fields.details = body.details && typeof body.details === 'object' ? body.details : null;
     }
-    fields.value = value;
-  }
-  if (body.details !== undefined) {
-    fields.details = body.details && typeof body.details === 'object' ? body.details : null;
-  }
-  if (body.excluded !== undefined) {
-    fields.excluded = body.excluded === true;
-  }
-  repo.updateManualAsset(id, fields);
-  return { asset: repo.getManualAsset(id) };
-});
+    if (body.excluded !== undefined) fields.excluded = body.excluded;
+    repo.updateManualAsset(id, fields);
+    return { asset: repo.getManualAsset(id) };
+  },
+);
 
 app.delete('/assets/:id', async (req, reply) => {
   if (!repo) return reply.code(503).send({ error: 'database unavailable' });
@@ -1222,83 +1283,40 @@ app.get('/vouchers', async (_req, reply) => {
   return { vouchers: repo.listVouchers() };
 });
 
-app.post('/vouchers', async (req, reply) => {
+// Shape validation (name, provider, finite balance, currency, optional
+// YYYY-MM-DD expiresOn, notes) via the shared voucherCreateSchema.
+app.post('/vouchers', { schema: { body: voucherCreateSchema } }, async (req, reply) => {
   if (!repo) return reply.code(503).send({ error: 'database unavailable' });
-  const body = (req.body ?? {}) as {
-    name?: string;
-    provider?: string;
-    balance?: number;
-    currency?: string;
-    expiresOn?: string | null;
-    notes?: string | null;
-  };
-  const name = (body.name ?? '').trim();
-  if (!name) return reply.code(400).send({ error: 'a name is required' });
-  const provider = (body.provider ?? '').trim();
-  if (!provider) return reply.code(400).send({ error: 'a provider is required' });
-  const balance = Number(body.balance);
-  if (!Number.isFinite(balance)) {
-    return reply.code(400).send({ error: 'a numeric balance is required' });
-  }
-  const currency = (body.currency ?? 'ILS').toUpperCase();
-  let expiresOn: string | null = null;
-  if (body.expiresOn) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(body.expiresOn)) {
-      return reply.code(400).send({ error: 'expiresOn must be YYYY-MM-DD' });
-    }
-    expiresOn = body.expiresOn;
-  }
-  const notes = body.notes ? String(body.notes).trim() || null : null;
+  const { name, provider, balance, currency } = req.body;
+  const expiresOn = req.body.expiresOn ?? null;
+  const notes = req.body.notes?.trim() || null;
   const voucher = repo.createVoucher({ name, provider, balance, currency, expiresOn, notes });
   return { voucher };
 });
 
-app.patch('/vouchers/:id', async (req, reply) => {
-  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
-  const { id } = req.params as { id: string };
-  if (!repo.getVoucher(id)) return reply.code(404).send({ error: 'voucher not found' });
-  const body = (req.body ?? {}) as {
-    name?: string;
-    provider?: string;
-    balance?: number;
-    currency?: string;
-    expiresOn?: string | null;
-    notes?: string | null;
-    excluded?: boolean;
-  };
-  const fields: Parameters<typeof repo.updateVoucher>[1] = {};
-  if (body.name !== undefined) {
-    const name = body.name.trim();
-    if (!name) return reply.code(400).send({ error: 'name cannot be empty' });
-    fields.name = name;
-  }
-  if (body.provider !== undefined) {
-    const provider = body.provider.trim();
-    if (!provider) return reply.code(400).send({ error: 'provider cannot be empty' });
-    fields.provider = provider;
-  }
-  if (body.balance !== undefined) {
-    const balance = Number(body.balance);
-    if (!Number.isFinite(balance)) {
-      return reply.code(400).send({ error: 'balance must be a number' });
-    }
-    fields.balance = balance;
-  }
-  if (body.currency !== undefined) fields.currency = body.currency.toUpperCase();
-  if (body.expiresOn !== undefined) {
-    if (body.expiresOn === null || body.expiresOn === '') {
-      fields.expiresOn = null;
-    } else if (!/^\d{4}-\d{2}-\d{2}$/.test(body.expiresOn)) {
-      return reply.code(400).send({ error: 'expiresOn must be YYYY-MM-DD' });
-    } else {
-      fields.expiresOn = body.expiresOn;
-    }
-  }
-  if (body.notes !== undefined) fields.notes = body.notes?.trim() || null;
-  if (body.excluded !== undefined) fields.excluded = body.excluded === true;
-  repo.updateVoucher(id, fields);
-  return { voucher: repo.getVoucher(id) };
-});
+// voucherUpdateSchema validates the partial field shapes (trimmed name +
+// provider, finite balance, currency, nullable YYYY-MM-DD expiresOn, notes,
+// excluded). The 404 + notes null-normalize stay.
+app.patch(
+  '/vouchers/:id',
+  { schema: { params: idParamSchema, body: voucherUpdateSchema } },
+  async (req, reply) => {
+    if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+    const { id } = req.params;
+    if (!repo.getVoucher(id)) return reply.code(404).send({ error: 'voucher not found' });
+    const body = req.body;
+    const fields: Parameters<typeof repo.updateVoucher>[1] = {};
+    if (body.name !== undefined) fields.name = body.name;
+    if (body.provider !== undefined) fields.provider = body.provider;
+    if (body.balance !== undefined) fields.balance = body.balance;
+    if (body.currency !== undefined) fields.currency = body.currency;
+    if (body.expiresOn !== undefined) fields.expiresOn = body.expiresOn;
+    if (body.notes !== undefined) fields.notes = body.notes?.trim() || null;
+    if (body.excluded !== undefined) fields.excluded = body.excluded;
+    repo.updateVoucher(id, fields);
+    return { voucher: repo.getVoucher(id) };
+  },
+);
 
 app.delete('/vouchers/:id', async (req, reply) => {
   if (!repo) return reply.code(503).send({ error: 'database unavailable' });
@@ -1803,10 +1821,6 @@ setInterval(() => {
 // progress, recomputed at read time from the BOI prime + CBS CPI rates so
 // the figure stays in step with the published indices without a write step.
 
-function isValidRateType(v: unknown): v is RateType {
-  return v === 'fixed' || v === 'prime' || v === 'cpi-fixed' || v === 'cpi-prime';
-}
-
 app.get('/loans', async (_req, reply) => {
   if (!repo) return reply.code(503).send({ error: 'database unavailable' });
   const loans = repo.listLoans();
@@ -1837,24 +1851,27 @@ app.get('/loans', async (_req, reply) => {
  * auto-matcher skips rows that already have loan_id set, so a manual
  * choice (link OR explicit unlink) sticks.
  */
-app.patch('/transactions/:id/loan', async (req, reply) => {
-  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
-  const { id } = req.params as { id: string };
-  const body = (req.body ?? {}) as { loanId?: string | null };
-  const loanId = body.loanId ?? null;
-  if (!repo.getTransaction(id)) {
-    return reply.code(404).send({ error: 'transaction not found' });
-  }
-  if (loanId !== null && !repo.getLoan(loanId)) {
-    return reply.code(404).send({ error: 'loan not found' });
-  }
-  try {
-    repo.setTransactionLoan(id, loanId);
-    return { ok: true, loanId };
-  } catch (err) {
-    return reply.code(500).send({ error: (err as Error).message });
-  }
-});
+app.patch(
+  '/transactions/:id/loan',
+  { schema: { params: idParamSchema, body: txnLoanSchema } },
+  async (req, reply) => {
+    if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+    const { id } = req.params;
+    const loanId = req.body.loanId;
+    if (!repo.getTransaction(id)) {
+      return reply.code(404).send({ error: 'transaction not found' });
+    }
+    if (loanId !== null && !repo.getLoan(loanId)) {
+      return reply.code(404).send({ error: 'loan not found' });
+    }
+    try {
+      repo.setTransactionLoan(id, loanId);
+      return { ok: true, loanId };
+    } catch (err) {
+      return reply.code(500).send({ error: (err as Error).message });
+    }
+  },
+);
 
 /**
  * Per-transaction override for the "exclude from cycle calculations"
@@ -1868,20 +1885,20 @@ app.patch('/transactions/:id/loan', async (req, reply) => {
  * `hideCardTotals`) and is applied client-side — this endpoint only
  * persists the manual override.
  */
-app.patch('/transactions/:id/excluded', async (req, reply) => {
-  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
-  const { id } = req.params as { id: string };
-  const body = (req.body ?? {}) as { excluded?: boolean | null };
-  const excluded = body.excluded === undefined ? null : body.excluded;
-  if (excluded !== null && typeof excluded !== 'boolean') {
-    return reply.code(400).send({ error: 'excluded must be a boolean or null' });
-  }
-  if (!repo.getTransaction(id)) {
-    return reply.code(404).send({ error: 'transaction not found' });
-  }
-  repo.setTransactionExcluded(id, excluded);
-  return { ok: true, excluded };
-});
+app.patch(
+  '/transactions/:id/excluded',
+  { schema: { params: idParamSchema, body: txnExcludedSchema } },
+  async (req, reply) => {
+    if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+    const { id } = req.params;
+    const excluded = req.body.excluded;
+    if (!repo.getTransaction(id)) {
+      return reply.code(404).send({ error: 'transaction not found' });
+    }
+    repo.setTransactionExcluded(id, excluded);
+    return { ok: true, excluded };
+  },
+);
 
 /**
  * Mark/unmark a transaction as a savings transfer. Body `{ savings: boolean }`.
@@ -1889,54 +1906,28 @@ app.patch('/transactions/:id/excluded', async (req, reply) => {
  * it is mutually exclusive with the manual exclude (the repo clears one when
  * setting the other).
  */
-app.patch('/transactions/:id/savings', async (req, reply) => {
-  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
-  const { id } = req.params as { id: string };
-  const body = (req.body ?? {}) as { savings?: boolean };
-  if (typeof body.savings !== 'boolean') {
-    return reply.code(400).send({ error: 'savings must be a boolean' });
-  }
-  if (!repo.getTransaction(id)) {
-    return reply.code(404).send({ error: 'transaction not found' });
-  }
-  repo.setTransactionSavings(id, body.savings);
-  return { ok: true, savings: body.savings };
-});
+app.patch(
+  '/transactions/:id/savings',
+  { schema: { params: idParamSchema, body: txnSavingsSchema } },
+  async (req, reply) => {
+    if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+    const { id } = req.params;
+    if (!repo.getTransaction(id)) {
+      return reply.code(404).send({ error: 'transaction not found' });
+    }
+    repo.setTransactionSavings(id, req.body.savings);
+    return { ok: true, savings: req.body.savings };
+  },
+);
 
-app.post('/loans', async (req, reply) => {
+// Field-shape validation (name, positive principal, YYYY-MM-DD startDate,
+// positive-int termMonths, the rateType enum, finite rateValue, currency) comes
+// from the SHARED loanCreateSchema — the same schema the loan form validates.
+// The CPI snapshot + rateType→isPrime/isCpiLinked decomposition stay here.
+app.post('/loans', { schema: { body: loanCreateSchema } }, async (req, reply) => {
   if (!repo) return reply.code(503).send({ error: 'database unavailable' });
-  const body = (req.body ?? {}) as {
-    name?: string;
-    principal?: number;
-    startDate?: string;
-    termMonths?: number;
-    rateType?: string;
-    rateValue?: number;
-    currency?: string;
-    notes?: string;
-  };
-  const name = (body.name ?? '').trim();
-  if (!name) return reply.code(400).send({ error: 'a name is required' });
-  const principal = Number(body.principal);
-  if (!Number.isFinite(principal) || principal <= 0) {
-    return reply.code(400).send({ error: 'principal must be a positive number' });
-  }
-  const startDate = (body.startDate ?? '').trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate)) {
-    return reply.code(400).send({ error: 'startDate must be YYYY-MM-DD' });
-  }
-  const termMonths = Math.round(Number(body.termMonths));
-  if (!Number.isFinite(termMonths) || termMonths <= 0) {
-    return reply.code(400).send({ error: 'termMonths must be a positive integer' });
-  }
-  if (!isValidRateType(body.rateType)) {
-    return reply.code(400).send({ error: 'rateType must be fixed | prime | cpi-fixed | cpi-prime' });
-  }
-  const rateValue = Number(body.rateValue);
-  if (!Number.isFinite(rateValue)) {
-    return reply.code(400).send({ error: 'rateValue must be a number' });
-  }
-  const { isPrime, isCpiLinked } = decomposeRateType(body.rateType);
+  const { name, principal, startDate, termMonths, rateType, rateValue, currency, notes } = req.body;
+  const { isPrime, isCpiLinked } = decomposeRateType(rateType);
   // Snapshot the CPI at the start month, so the loan's index linkage is
   // pinned to its own start — a later CPI revision does not retroactively
   // change the loan's history.
@@ -1952,86 +1943,61 @@ app.post('/loans', async (req, reply) => {
     isCpiLinked,
     rateValue,
     cpiStart,
-    currency: (body.currency || 'ILS').toUpperCase(),
+    currency,
     excluded: false,
-    notes: body.notes?.trim() || null,
+    notes: notes?.trim() || null,
   });
   return { loan };
 });
 
-app.put('/loans/:id', async (req, reply) => {
-  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
-  const { id } = req.params as { id: string };
-  const existing = repo.getLoan(id);
-  if (!existing) return reply.code(404).send({ error: 'loan not found' });
+// loanUpdateSchema validates the partial field shapes (name, positive
+// principal, YYYY-MM-DD startDate, positive-int termMonths, finite rateValue,
+// currency, notes, excluded). rateType is not in the shared partial — the
+// editor sends it to drive the CPI snapshot below — so it rides along via
+// .extend with the shared rateType enum. The decompose + CPI-snapshot business
+// logic stays here.
+app.put(
+  '/loans/:id',
+  {
+    schema: {
+      params: idParamSchema,
+      body: loanUpdateSchema.extend({ rateType: rateTypeSchema.optional() }),
+    },
+  },
+  async (req, reply) => {
+    if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+    const { id } = req.params;
+    const existing = repo.getLoan(id);
+    if (!existing) return reply.code(404).send({ error: 'loan not found' });
 
-  const body = (req.body ?? {}) as {
-    name?: string;
-    principal?: number;
-    startDate?: string;
-    termMonths?: number;
-    rateType?: string;
-    rateValue?: number;
-    currency?: string;
-    notes?: string | null;
-    excluded?: boolean;
-  };
+    const body = req.body;
 
-  const fields: Parameters<typeof repo.updateLoan>[1] = {};
-  if (body.name !== undefined) {
-    const name = body.name.trim();
-    if (!name) return reply.code(400).send({ error: 'name cannot be empty' });
-    fields.name = name;
-  }
-  if (body.principal !== undefined) {
-    const p = Number(body.principal);
-    if (!Number.isFinite(p) || p <= 0) {
-      return reply.code(400).send({ error: 'principal must be a positive number' });
+    const fields: Parameters<typeof repo.updateLoan>[1] = {};
+    if (body.name !== undefined) fields.name = body.name;
+    if (body.principal !== undefined) fields.principal = body.principal;
+    if (body.startDate !== undefined) fields.startDate = body.startDate;
+    if (body.termMonths !== undefined) fields.termMonths = body.termMonths;
+    if (body.rateType !== undefined) {
+      const { isPrime, isCpiLinked } = decomposeRateType(body.rateType);
+      fields.isPrime = isPrime;
+      fields.isCpiLinked = isCpiLinked;
+      // Track flipped to/from CPI-linked: refresh the start-CPI snapshot.
+      if (isCpiLinked && !existing.isCpiLinked) {
+        const startMonth = (fields.startDate ?? existing.startDate).slice(0, 7);
+        fields.cpiStart = await fetchCpiForMonth(repo, startMonth);
+      } else if (!isCpiLinked && existing.isCpiLinked) {
+        fields.cpiStart = null;
+      }
     }
-    fields.principal = p;
-  }
-  if (body.startDate !== undefined) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(body.startDate)) {
-      return reply.code(400).send({ error: 'startDate must be YYYY-MM-DD' });
-    }
-    fields.startDate = body.startDate;
-  }
-  if (body.termMonths !== undefined) {
-    const t = Math.round(Number(body.termMonths));
-    if (!Number.isFinite(t) || t <= 0) {
-      return reply.code(400).send({ error: 'termMonths must be a positive integer' });
-    }
-    fields.termMonths = t;
-  }
-  if (body.rateType !== undefined) {
-    if (!isValidRateType(body.rateType)) {
-      return reply.code(400).send({ error: 'invalid rateType' });
-    }
-    const { isPrime, isCpiLinked } = decomposeRateType(body.rateType);
-    fields.isPrime = isPrime;
-    fields.isCpiLinked = isCpiLinked;
-    // Track flipped to/from CPI-linked: refresh the start-CPI snapshot.
-    if (isCpiLinked && !existing.isCpiLinked) {
-      const startMonth = (fields.startDate ?? existing.startDate).slice(0, 7);
-      fields.cpiStart = await fetchCpiForMonth(repo, startMonth);
-    } else if (!isCpiLinked && existing.isCpiLinked) {
-      fields.cpiStart = null;
-    }
-  }
-  if (body.rateValue !== undefined) {
-    const r = Number(body.rateValue);
-    if (!Number.isFinite(r)) {
-      return reply.code(400).send({ error: 'rateValue must be a number' });
-    }
-    fields.rateValue = r;
-  }
-  if (body.currency !== undefined) fields.currency = body.currency.toUpperCase();
-  if (body.notes !== undefined) fields.notes = body.notes?.trim() || null;
-  if (body.excluded !== undefined) fields.excluded = body.excluded === true;
+    if (body.rateValue !== undefined) fields.rateValue = body.rateValue;
+    if (body.currency !== undefined) fields.currency = body.currency;
+    if (body.notes !== undefined) fields.notes = body.notes?.trim() || null;
+    if (body.excluded !== undefined) fields.excluded = body.excluded;
 
-  repo.updateLoan(id, fields);
-  return { loan: repo.getLoan(id) };
-});
+    repo.updateLoan(id, fields);
+    return { loan: repo.getLoan(id) };
+  },
+);
 
 app.delete('/loans/:id', async (req, reply) => {
   if (!repo) return reply.code(503).send({ error: 'database unavailable' });
@@ -2040,17 +2006,17 @@ app.delete('/loans/:id', async (req, reply) => {
   return { ok: true };
 });
 
-app.patch('/loans/:id/excluded', async (req, reply) => {
-  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
-  const { id } = req.params as { id: string };
-  const body = (req.body ?? {}) as { excluded?: boolean };
-  if (typeof body.excluded !== 'boolean') {
-    return reply.code(400).send({ error: 'excluded must be a boolean' });
-  }
-  if (!repo.getLoan(id)) return reply.code(404).send({ error: 'loan not found' });
-  repo.setLoanExcluded(id, body.excluded);
-  return { ok: true };
-});
+app.patch(
+  '/loans/:id/excluded',
+  { schema: { params: idParamSchema, body: excludedToggleSchema } },
+  async (req, reply) => {
+    if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+    const { id } = req.params;
+    if (!repo.getLoan(id)) return reply.code(404).send({ error: 'loan not found' });
+    repo.setLoanExcluded(id, req.body.excluded);
+    return { ok: true };
+  },
+);
 
 // Current BOI prime + CBS CPI, exposed so the UI can show today's reference
 // numbers and offer a "refresh rates" button.
@@ -2075,77 +2041,53 @@ app.get('/categories', async (_req, reply) => {
   return { categories: repo.listCategories() };
 });
 
-app.post('/categories', async (req, reply) => {
+// Field-shape validation (name length, #RRGGBB colour, the catGroup enum,
+// integer sortOrder, and the create defaults) now comes from the SHARED zod
+// schema in /shared/category.ts — the same schema the React form validates
+// against via react-hook-form. Only business rules that need the DB
+// (uniqueness, existence, the "Other" guard) stay as explicit checks here.
+app.post('/categories', { schema: { body: categoryCreateSchema } }, async (req, reply) => {
   if (!repo) return reply.code(503).send({ error: 'database unavailable' });
-  const body = (req.body ?? {}) as {
-    name?: string; emoji?: string; color?: string;
-    catGroup?: string; sortOrder?: number;
-  };
-  const name = (body.name ?? '').trim();
-  if (!name) return reply.code(400).send({ error: 'a name is required' });
-  if (name.length > 40) return reply.code(400).send({ error: 'name is too long' });
+  const { name, emoji, color, catGroup, sortOrder } = req.body;
   if (repo.getCategory(name)) {
     return reply.code(409).send({ error: 'a category with that name already exists' });
   }
-  const emoji = (body.emoji ?? '🏷️').trim() || '🏷️';
-  const color = (body.color ?? '#8C8FA8').trim();
-  if (!/^#[0-9A-Fa-f]{6}$/.test(color)) {
-    return reply.code(400).send({ error: 'color must be a #RRGGBB hex string' });
-  }
-  const catGroup = isValidGroup(body.catGroup) ? body.catGroup : 'variable';
-  const sortOrder = Number.isFinite(body.sortOrder) ? Math.round(Number(body.sortOrder)) : 500;
   const created = repo.createCategory({ name, emoji, color, catGroup, sortOrder });
   return { category: created };
 });
 
-app.put('/categories/:name', async (req, reply) => {
-  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
-  const { name } = req.params as { name: string };
-  const existing = repo.getCategory(name);
-  if (!existing) return reply.code(404).send({ error: 'category not found' });
-  const body = (req.body ?? {}) as {
-    emoji?: string; color?: string;
-    catGroup?: string; sortOrder?: number;
-  };
-  const fields: Parameters<typeof repo.updateCategory>[1] = {};
-  if (body.emoji !== undefined) {
-    const emoji = body.emoji.trim();
-    if (!emoji) return reply.code(400).send({ error: 'emoji cannot be empty' });
-    fields.emoji = emoji;
-  }
-  if (body.color !== undefined) {
-    if (!/^#[0-9A-Fa-f]{6}$/.test(body.color)) {
-      return reply.code(400).send({ error: 'color must be a #RRGGBB hex string' });
-    }
-    fields.color = body.color;
-  }
-  if (body.catGroup !== undefined) {
-    if (!isValidGroup(body.catGroup)) {
-      return reply.code(400).send({ error: 'catGroup must be essential, fixed, variable, or income' });
-    }
-    fields.catGroup = body.catGroup;
-  }
-  if (body.sortOrder !== undefined && Number.isFinite(body.sortOrder)) {
-    fields.sortOrder = Math.round(Number(body.sortOrder));
-  }
-  repo.updateCategory(name, fields);
-  return { category: repo.getCategory(name) };
-});
+app.put(
+  '/categories/:name',
+  { schema: { params: categoryNameParamSchema, body: categoryUpdateSchema } },
+  async (req, reply) => {
+    if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+    const { name } = req.params;
+    const existing = repo.getCategory(name);
+    if (!existing) return reply.code(404).send({ error: 'category not found' });
+    // req.body is already the validated partial — pass it straight through.
+    repo.updateCategory(name, req.body);
+    return { category: repo.getCategory(name) };
+  },
+);
 
-app.delete('/categories/:name', async (req, reply) => {
-  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
-  const { name } = req.params as { name: string };
-  const existing = repo.getCategory(name);
-  if (!existing) return reply.code(404).send({ error: 'category not found' });
-  if (name === 'Other') {
-    return reply.code(400).send({
-      error: '"Other" is the fallback target for deleted categories and cannot itself be removed',
-    });
-  }
-  const affected = repo.countTransactionsInCategory(name);
-  repo.deleteCategory(name);
-  return { ok: true, transactionsMoved: affected };
-});
+app.delete(
+  '/categories/:name',
+  { schema: { params: categoryNameParamSchema } },
+  async (req, reply) => {
+    if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+    const { name } = req.params;
+    const existing = repo.getCategory(name);
+    if (!existing) return reply.code(404).send({ error: 'category not found' });
+    if (name === 'Other') {
+      return reply.code(400).send({
+        error: '"Other" is the fallback target for deleted categories and cannot itself be removed',
+      });
+    }
+    const affected = repo.countTransactionsInCategory(name);
+    repo.deleteCategory(name);
+    return { ok: true, transactionsMoved: affected };
+  },
+);
 
 // Resolves an Israeli licence plate to the car's make/model/year via the
 // government open-data portal. Registration specs only — no Israeli API
@@ -2280,17 +2222,15 @@ app.get('/budget', async (req, reply) => {
   return report;
 });
 
-app.put('/budgets', async (req, reply) => {
+// category + finite monthlyAmount validated by the shared budgetSetSchema; a
+// non-positive amount clears the budget.
+app.put('/budgets', { schema: { body: budgetSetSchema } }, async (req, reply) => {
   if (!repo) return reply.code(503).send({ error: 'database unavailable' });
-  const body = (req.body ?? {}) as { category?: string; monthlyAmount?: number };
-  if (!body.category) {
-    return reply.code(400).send({ error: 'category is required' });
-  }
-  const amount = Number(body.monthlyAmount);
-  if (Number.isFinite(amount) && amount > 0) {
-    repo.setBudget(body.category, amount);
+  const { category, monthlyAmount } = req.body;
+  if (monthlyAmount > 0) {
+    repo.setBudget(category, monthlyAmount);
   } else {
-    repo.deleteBudget(body.category);
+    repo.deleteBudget(category);
   }
   return { ok: true };
 });
@@ -2302,21 +2242,22 @@ app.get('/budget/income-override', async (_req, reply) => {
   return { value: repo.getExpectedIncomeOverride() };
 });
 
-app.put('/budget/income-override', async (req, reply) => {
-  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
-  const body = (req.body ?? {}) as { value?: number | null };
-  const raw = body.value;
-  if (raw == null) {
-    repo.setExpectedIncomeOverride(null);
+// incomeOverrideSchema validates `value` is a non-negative number or null;
+// `value: null` clears the override (business rule kept).
+app.put(
+  '/budget/income-override',
+  { schema: { body: incomeOverrideSchema } },
+  async (req, reply) => {
+    if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+    const value = req.body.value;
+    if (value == null) {
+      repo.setExpectedIncomeOverride(null);
+      return { ok: true };
+    }
+    repo.setExpectedIncomeOverride(value);
     return { ok: true };
-  }
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n < 0) {
-    return reply.code(400).send({ error: 'value must be a non-negative number or null' });
-  }
-  repo.setExpectedIncomeOverride(n);
-  return { ok: true };
-});
+  },
+);
 
 // Per-month savings set-aside. The UI loads the whole dict (small) and PUTs
 // one month at a time. Amount 0 (or absent) clears that month's entry.
@@ -2332,53 +2273,24 @@ app.get('/budget/savings', async (_req, reply) => {
   return { savings };
 });
 
-app.put('/budget/savings', async (req, reply) => {
+// month (YYYY-MM), non-negative amount, and transferred flag validated by the
+// shared monthlySavingsSchema.
+app.put('/budget/savings', { schema: { body: monthlySavingsSchema } }, async (req, reply) => {
   if (!repo) return reply.code(503).send({ error: 'database unavailable' });
-  const body = (req.body ?? {}) as {
-    month?: string;
-    amount?: number;
-    transferred?: boolean;
-  };
-  const month = (body.month ?? '').trim();
-  if (!/^\d{4}-\d{2}$/.test(month)) {
-    return reply.code(400).send({ error: 'month must be YYYY-MM' });
-  }
-  const n = Number(body.amount);
-  if (!Number.isFinite(n) || n < 0) {
-    return reply.code(400).send({ error: 'amount must be a non-negative number' });
-  }
-  repo.setMonthlySavings(month, n, Boolean(body.transferred));
+  const { month, amount, transferred } = req.body;
+  repo.setMonthlySavings(month, amount, transferred);
   return { ok: true };
 });
 
 // Piggy banks — savings goals. The settled this-month status rides along in
 // the budget report's `piggy` block; these routes are CRUD only.
-app.post('/piggy', async (req, reply) => {
+// Shape + the monthly-needs-positive-monthlyAmount cross-check come from the
+// shared piggyCreateSchema (superRefine). Lump piggies fund the full target in
+// one shot, so monthlyAmount is forced to 0 here.
+app.post('/piggy', { schema: { body: piggyCreateSchema } }, async (req, reply) => {
   if (!repo) return reply.code(503).send({ error: 'database unavailable' });
-  const body = (req.body ?? {}) as {
-    name?: string;
-    emoji?: string;
-    kind?: string;
-    targetAmount?: number;
-    monthlyAmount?: number;
-  };
-  const name = (body.name ?? '').trim();
-  if (!name) return reply.code(400).send({ error: 'a name is required' });
-  const kind = body.kind === 'lump' ? 'lump' : 'monthly';
-  const targetAmount = Number(body.targetAmount);
-  if (!Number.isFinite(targetAmount) || targetAmount <= 0) {
-    return reply.code(400).send({ error: 'a positive target amount is required' });
-  }
-  // Monthly piggies need a positive monthly figure; lump piggies fund the
-  // full target in one shot, so the field is irrelevant.
-  let monthlyAmount = 0;
-  if (kind === 'monthly') {
-    monthlyAmount = Number(body.monthlyAmount);
-    if (!Number.isFinite(monthlyAmount) || monthlyAmount <= 0) {
-      return reply.code(400).send({ error: 'a positive monthly amount is required' });
-    }
-  }
-  const emoji = (body.emoji ?? '').trim() || '🐷';
+  const { name, emoji, kind, targetAmount } = req.body;
+  const monthlyAmount = kind === 'monthly' ? req.body.monthlyAmount : 0;
   const piggy = repo.createPiggyBank({
     name,
     emoji,
@@ -2390,53 +2302,42 @@ app.post('/piggy', async (req, reply) => {
   return { piggy };
 });
 
-app.put('/piggy/:id', async (req, reply) => {
-  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
-  const { id } = req.params as { id: string };
-  if (!repo.getPiggyBank(id)) return reply.code(404).send({ error: 'piggy bank not found' });
-  const body = (req.body ?? {}) as {
-    name?: string;
-    emoji?: string;
-    kind?: string;
-    targetAmount?: number;
-    monthlyAmount?: number;
-    onHold?: boolean;
-  };
-  const fields: Partial<{
-    name: string;
-    emoji: string;
-    kind: 'monthly' | 'lump';
-    targetAmount: number;
-    monthlyAmount: number;
-    onHold: boolean;
-  }> = {};
-  if (body.kind !== undefined) {
-    fields.kind = body.kind === 'lump' ? 'lump' : 'monthly';
-  }
-  if (body.name !== undefined) {
-    const name = body.name.trim();
-    if (!name) return reply.code(400).send({ error: 'a name is required' });
-    fields.name = name;
-  }
-  if (body.emoji !== undefined) fields.emoji = body.emoji.trim() || '🐷';
-  if (body.targetAmount !== undefined) {
-    const v = Number(body.targetAmount);
-    if (!Number.isFinite(v) || v <= 0) {
-      return reply.code(400).send({ error: 'a positive target amount is required' });
+// piggyUpdateSchema validates the partial field shapes (trimmed name, emoji,
+// kind enum, positive targetAmount, non-negative monthlyAmount, onHold). The
+// 404, the emoji default, and the monthly-must-be-positive rule stay — the
+// schema's nonNegativeNumber on monthlyAmount allows 0, which this route
+// rejects.
+app.put(
+  '/piggy/:id',
+  { schema: { params: idParamSchema, body: piggyUpdateSchema } },
+  async (req, reply) => {
+    if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+    const { id } = req.params;
+    if (!repo.getPiggyBank(id)) return reply.code(404).send({ error: 'piggy bank not found' });
+    const body = req.body;
+    const fields: Partial<{
+      name: string;
+      emoji: string;
+      kind: 'monthly' | 'lump';
+      targetAmount: number;
+      monthlyAmount: number;
+      onHold: boolean;
+    }> = {};
+    if (body.kind !== undefined) fields.kind = body.kind;
+    if (body.name !== undefined) fields.name = body.name;
+    if (body.emoji !== undefined) fields.emoji = body.emoji.trim() || '🐷';
+    if (body.targetAmount !== undefined) fields.targetAmount = body.targetAmount;
+    if (body.monthlyAmount !== undefined) {
+      if (body.monthlyAmount <= 0) {
+        return reply.code(400).send({ error: 'a positive monthly amount is required' });
+      }
+      fields.monthlyAmount = body.monthlyAmount;
     }
-    fields.targetAmount = v;
-  }
-  if (body.monthlyAmount !== undefined) {
-    const v = Number(body.monthlyAmount);
-    if (!Number.isFinite(v) || v <= 0) {
-      return reply.code(400).send({ error: 'a positive monthly amount is required' });
-    }
-    fields.monthlyAmount = v;
-  }
-  if (body.onHold !== undefined) fields.onHold = !!body.onHold;
-  repo.updatePiggyBank(id, fields);
-  return { piggy: repo.getPiggyBank(id) };
-});
+    if (body.onHold !== undefined) fields.onHold = body.onHold;
+    repo.updatePiggyBank(id, fields);
+    return { piggy: repo.getPiggyBank(id) };
+  },
+);
 
 app.delete('/piggy/:id', async (req, reply) => {
   if (!repo) return reply.code(503).send({ error: 'database unavailable' });
@@ -2473,23 +2374,29 @@ app.get('/subscriptions/cancelled', async (_req, reply) => {
   return { cancelled };
 });
 
-app.put('/subscriptions/cancelled', async (req, reply) => {
-  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
-  const body = (req.body ?? {}) as { merchantKey?: string };
-  const key = (body.merchantKey ?? '').trim();
-  if (!key) return reply.code(400).send({ error: 'a merchant key is required' });
-  repo.markSubCancelled(key);
-  return { ok: true };
-});
+app.put(
+  '/subscriptions/cancelled',
+  { schema: { body: z.object({ merchantKey: z.string().min(1) }) } },
+  async (req, reply) => {
+    if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+    const key = req.body.merchantKey.trim();
+    if (!key) return reply.code(400).send({ error: 'a merchant key is required' });
+    repo.markSubCancelled(key);
+    return { ok: true };
+  },
+);
 
-app.delete('/subscriptions/cancelled', async (req, reply) => {
-  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
-  const body = (req.body ?? {}) as { merchantKey?: string };
-  const key = (body.merchantKey ?? '').trim();
-  if (!key) return reply.code(400).send({ error: 'a merchant key is required' });
-  repo.unmarkSubCancelled(key);
-  return { ok: true };
-});
+app.delete(
+  '/subscriptions/cancelled',
+  { schema: { body: z.object({ merchantKey: z.string().min(1) }) } },
+  async (req, reply) => {
+    if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+    const key = req.body.merchantKey.trim();
+    if (!key) return reply.code(400).send({ error: 'a merchant key is required' });
+    repo.unmarkSubCancelled(key);
+    return { ok: true };
+  },
+);
 
 // Given the user's active and lapsed subscription names, returns which lapsed
 // ones are the same service as an active one (a renamed billing descriptor).

@@ -1,6 +1,7 @@
 /// <reference types="vitest/config" />
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { fileURLToPath } from 'node:url';
 
 // Dev-server config tuned for Hon's engine-on-loopback architecture.
 //
@@ -21,6 +22,14 @@ import react from '@vitejs/plugin-react';
 // (see sidecar/src/server.ts).
 export default defineConfig({
   plugins: [react()],
+  resolve: {
+    alias: {
+      // Single source of truth for the zod schemas shared with the engine.
+      // Mirrors the "@hon/shared/*" path in web/tsconfig.json and the sidecar
+      // tsconfig, so the same import works in Vite, Vitest, tsc and tsx.
+      '@hon/shared': fileURLToPath(new URL('../shared', import.meta.url)),
+    },
+  },
   server: {
     port: 5173,
     // The engine picks a free port each launch (HON_PORT=0 unless

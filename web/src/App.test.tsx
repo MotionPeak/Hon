@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { App } from './App';
 import { installFetchMock } from './test/mockFetch';
+import { renderWithProviders as render } from './test/renderWithProviders';
 import { __resetSplitwiseCache } from './splitwise/useSplitwise';
 
 afterEach(() => { __resetSplitwiseCache(); });

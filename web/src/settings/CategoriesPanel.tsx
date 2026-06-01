@@ -1,6 +1,25 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { api, ApiError } from '../api';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import {
+  categoryFormSchema,
+  type Category,
+  type CategoryForm,
+} from '@hon/shared/category';
+
+// Re-export the shared Category type. It used to be declared locally in this
+// file and ~10 modules import it from here; the canonical definition now lives
+// in @hon/shared/category (single source of truth, shared with the engine), and
+// this keeps those imports working. New code should import from @hon/shared.
+export type { Category } from '@hon/shared/category';
+import { ApiError } from '../api/client';
+import {
+  useCategories,
+  useCreateCategory,
+  useDeleteCategory,
+  useUpdateCategory,
+} from '../api/hooks/useCategories';
 
 // Modals must escape .set-card's stacking context (.set-card has an animation
 // that leaves an identity transform behind, which creates a containing block
@@ -8,16 +27,6 @@ import { api, ApiError } from '../api';
 // matches what the old app.html does — its openModal() appends to <body>.
 function ModalPortal({ children }: { children: ReactNode }) {
   return createPortal(children, document.body);
-}
-
-export interface Category {
-  name: string;
-  emoji: string;
-  color: string;
-  catGroup: 'income' | 'essential' | 'fixed' | 'variable';
-  sortOrder: number;
-  isBuiltin: boolean;
-  createdAt: string;
 }
 
 const GROUP_ORDER: Category['catGroup'][] = ['income', 'essential', 'fixed', 'variable'];
@@ -68,36 +77,25 @@ const COLOR_CHOICES = [
 ];
 
 export function CategoriesPanel() {
-  const [categories, setCategories] = useState<Category[]>([]);
+  // Server state via TanStack Query — no more useEffect + api() + setState.
+  const { data: categories = [], isError } = useCategories();
+  const deleteCategory = useDeleteCategory();
+
   const [deleting, setDeleting] = useState<Category | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [editor, setEditor] = useState<EditorState | null>(null);
 
-  const refresh = useCallback(async () => {
-    try {
-      const d = await api<{ categories: Category[] }>('/categories');
-      setCategories(d.categories);
-    } catch {
-      setCategories([]);
-    }
-  }, []);
-
-  useEffect(() => { void refresh(); }, [refresh]);
-
   const cancelDelete = () => { setDeleting(null); setDeleteError(null); };
-  const confirmDelete = async () => {
+  const confirmDelete = () => {
     if (!deleting) return;
-    try {
-      await api(`/categories/${encodeURIComponent(deleting.name)}`, 'DELETE');
-      setDeleting(null);
-      setDeleteError(null);
-      await refresh();
-    } catch (e) {
-      setDeleteError(e instanceof ApiError ? e.message : String(e));
-    }
+    deleteCategory.mutate(deleting.name, {
+      onSuccess: () => { setDeleting(null); setDeleteError(null); },
+      onError: (e) => setDeleteError(e instanceof ApiError ? e.message : String(e)),
+    });
   };
 
-  const grouped = group(categories);
+  // A fetch error renders as an empty grid (matching the old `catch → []`).
+  const grouped = group(isError ? [] : categories);
   return (
     <div className="cat-panel">
       {GROUP_ORDER.map((g) => grouped[g].length === 0 ? null : (
@@ -146,10 +144,7 @@ export function CategoriesPanel() {
         <CategoryEditor
           state={editor}
           onClose={() => setEditor(null)}
-          onSaved={async () => {
-            setEditor(null);
-            await refresh();
-          }}
+          onSaved={() => setEditor(null)}
         />
       )}
       {deleting && !editor && (
@@ -164,7 +159,14 @@ export function CategoriesPanel() {
           {deleteError && <div className="modal-err">{deleteError}</div>}
           <div className="modal-actions">
             <button type="button" onClick={cancelDelete}>Cancel</button>
-            <button type="button" className="danger" onClick={confirmDelete}>Remove</button>
+            <button
+              type="button"
+              className="danger"
+              onClick={confirmDelete}
+              disabled={deleteCategory.isPending}
+            >
+              {deleteCategory.isPending ? 'Removing…' : 'Remove'}
+            </button>
           </div>
         </div>
         </div>
@@ -177,67 +179,81 @@ export function CategoriesPanel() {
 interface EditorProps {
   state: EditorState;
   onClose: () => void;
-  onSaved: () => void | Promise<void>;
+  onSaved: () => void;
 }
 
 function CategoryEditor({ state, onClose, onSaved }: EditorProps) {
   const isEdit = state.mode === 'edit';
-  const cur = isEdit ? state.category : {
-    name: '', emoji: '🏷️', color: '#8C8FA8',
-    catGroup: 'variable' as Category['catGroup'],
-  };
-  const [name, setName] = useState(cur.name);
-  const [group, setGroup] = useState<Category['catGroup']>(cur.catGroup);
-  const [emoji, setEmoji] = useState(cur.emoji);
-  const [color, setColor] = useState(cur.color);
-  const [error, setError] = useState<string | null>(null);
+  const createCategory = useCreateCategory();
+  const updateCategory = useUpdateCategory();
 
-  const submit = async () => {
-    setError(null);
-    if (!isEdit && !name.trim()) {
-      setError('Name the category.');
-      return;
-    }
+  // react-hook-form + zod (the SHARED categoryFormSchema — the same schema the
+  // engine validates the request against). Field errors come from the resolver;
+  // the submit handler just fires the right TanStack mutation.
+  const {
+    register,
+    handleSubmit,
+    watch,
+    setValue,
+    setError,
+    formState: { errors, isSubmitting },
+  } = useForm<CategoryForm>({
+    resolver: zodResolver(categoryFormSchema),
+    defaultValues: isEdit
+      ? {
+          name: state.category.name,
+          emoji: state.category.emoji,
+          color: state.category.color,
+          catGroup: state.category.catGroup,
+        }
+      : { name: '', emoji: '🏷️', color: '#8C8FA8', catGroup: 'variable' },
+  });
+
+  // Register the three "picker" fields (emoji/colour/group) so RHF tracks them;
+  // the visual buttons call setValue instead of native inputs.
+  register('emoji');
+  register('color');
+  register('catGroup');
+  const emoji = watch('emoji');
+  const color = watch('color');
+  const groupVal = watch('catGroup');
+
+  const onSubmit = handleSubmit(async (values) => {
     try {
       if (isEdit) {
-        await api(
-          `/categories/${encodeURIComponent(state.category.name)}`,
-          'PUT',
-          { emoji, color, catGroup: group },
-        );
-      } else {
-        await api('/categories', 'POST', {
-          name: name.trim(),
-          emoji,
-          color,
-          catGroup: group,
-          sortOrder: 500,
+        await updateCategory.mutateAsync({
+          name: state.category.name,
+          patch: { emoji: values.emoji, color: values.color, catGroup: values.catGroup },
         });
+      } else {
+        // sortOrder is owned by the API layer (new categories default to 500).
+        await createCategory.mutateAsync({ ...values, sortOrder: 500 });
       }
-      await onSaved();
+      onSaved();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : String(e));
+      setError('root', { message: e instanceof ApiError ? e.message : String(e) });
     }
-  };
+  });
 
   return (
     <ModalPortal>
     <div className="overlay">
-    <div
+    <form
       role="dialog"
-      aria-label={isEdit ? `Edit ${cur.name}` : 'Add category'}
+      aria-label={isEdit ? `Edit ${state.category.name}` : 'Add category'}
       className="modal"
+      onSubmit={onSubmit}
     >
       <h2>{isEdit ? 'Edit category' : 'Add a category'}</h2>
       <label className="field">
         <span>Name</span>
         <input
           type="text"
-          value={name}
           maxLength={40}
           disabled={isEdit}
-          onChange={(e) => setName(e.target.value)}
+          {...register('name')}
         />
+        {errors.name && <span className="field-err">{errors.name.message}</span>}
       </label>
       <fieldset className="field">
         <legend>Icon</legend>
@@ -249,7 +265,7 @@ function CategoryEditor({ state, onClose, onSaved }: EditorProps) {
               className={`ce-emoji${emoji === e ? ' on' : ''}`}
               aria-label={e}
               aria-pressed={emoji === e}
-              onClick={() => setEmoji(e)}
+              onClick={() => setValue('emoji', e, { shouldValidate: true })}
             >
               {e}
             </button>
@@ -267,7 +283,7 @@ function CategoryEditor({ state, onClose, onSaved }: EditorProps) {
               style={{ background: c }}
               aria-label={c}
               aria-pressed={color === c}
-              onClick={() => setColor(c)}
+              onClick={() => setValue('color', c, { shouldValidate: true })}
             />
           ))}
         </div>
@@ -275,13 +291,13 @@ function CategoryEditor({ state, onClose, onSaved }: EditorProps) {
       <fieldset className="field">
         <legend>Group</legend>
         {GROUP_DESCRIPTIONS.map(([g, sub]) => (
-          <label key={g} className={`ce-group${group === g ? ' on' : ''}`}>
+          <label key={g} className={`ce-group${groupVal === g ? ' on' : ''}`}>
             <input
               type="radio"
               name="ce-group"
               value={g}
-              checked={group === g}
-              onChange={() => setGroup(g)}
+              checked={groupVal === g}
+              onChange={() => setValue('catGroup', g, { shouldValidate: true })}
             />
             <span className="ce-group-name">
               {g.charAt(0).toUpperCase() + g.slice(1)}
@@ -290,14 +306,14 @@ function CategoryEditor({ state, onClose, onSaved }: EditorProps) {
           </label>
         ))}
       </fieldset>
-      {error && <div className="modal-err">{error}</div>}
+      {errors.root && <div className="modal-err">{errors.root.message}</div>}
       <div className="modal-actions">
         <button type="button" onClick={onClose}>Cancel</button>
-        <button type="button" className="primary" onClick={submit}>
+        <button type="submit" className="primary" disabled={isSubmitting}>
           {isEdit ? 'Save' : 'Add'}
         </button>
       </div>
-    </div>
+    </form>
     </div>
     </ModalPortal>
   );

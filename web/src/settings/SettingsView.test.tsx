@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { screen } from '@testing-library/react';
 import { SettingsView } from './SettingsView';
 import { SettingsProvider } from './useSettings';
 import { installFetchMock } from '../test/mockFetch';
+import { renderWithProviders } from '../test/renderWithProviders';
 import { __resetSplitwiseCache } from '../splitwise/useSplitwise';
 import { __resetVaultCache } from '../vault/useVault';
 
@@ -16,9 +17,11 @@ const splitwiseRoutes = {
 afterEach(() => { vi.restoreAllMocks(); __resetSplitwiseCache(); __resetVaultCache(); });
 
 // SettingsView no longer carries its own provider (it relies on the app-level
-// one), so tests supply it.
+// one), so tests supply it. renderWithProviders also wraps in a
+// QueryClientProvider, which the embedded CategoriesPanel needs (it uses
+// TanStack Query hooks).
 function renderView() {
-  return render(<SettingsProvider><SettingsView /></SettingsProvider>);
+  return renderWithProviders(<SettingsProvider><SettingsView /></SettingsProvider>);
 }
 
 describe('SettingsView', () => {

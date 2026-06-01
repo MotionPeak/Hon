@@ -9,7 +9,18 @@
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "noEmit": true,
-    "types": ["node"]
+    "types": ["node"],
+    "paths": {
+      "@hon/shared/common": ["../shared/common.ts"],
+      "@hon/shared/category": ["../shared/category.ts"],
+      "@hon/shared/loan": ["../shared/loan.ts"],
+      "@hon/shared/asset": ["../shared/asset.ts"],
+      "@hon/shared/piggy": ["../shared/piggy.ts"],
+      "@hon/shared/budget": ["../shared/budget.ts"],
+      "@hon/shared/voucher": ["../shared/voucher.ts"],
+      "@hon/shared/transaction": ["../shared/transaction.ts"],
+      "@hon/shared/*": ["../shared/*"]
+    }
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts", "../shared/**/*.ts"]
 }
