@@ -61,7 +61,7 @@ export async function fetchYahooHistory(
       chart?: {
         result?: Array<{
           timestamp?: number[];
-          meta?: { currency?: string };
+          meta?: { currency?: string; gmtoffset?: number };
           indicators?: { quote?: Array<{ close?: (number | null)[] }> };
         }>;
         error?: { description?: string };
@@ -78,12 +78,20 @@ export async function fetchYahooHistory(
     const ts = result.timestamp ?? [];
     const closes = result.indicators?.quote?.[0]?.close ?? [];
     const currency = result.meta?.currency || 'USD';
+    // Each timestamp is the epoch of that day's market close in the exchange's
+    // local time (e.g. 16:00 ET, ~20:00–21:00 UTC). Taking the bare UTC
+    // calendar day pushes evening-UTC closes onto the *next* date (and would
+    // pull early-UTC closes onto the previous one for exchanges east of UTC),
+    // so the close lands on the wrong trading day. Shift the epoch by the
+    // exchange's GMT offset before slicing so the date reflects the local
+    // trading day. Falls back to a plain UTC day when Yahoo omits the offset.
+    const offsetMs = typeof result.meta?.gmtoffset === 'number' ? result.meta.gmtoffset * 1000 : 0;
     const out: HistoricalClose[] = [];
     for (let i = 0; i < ts.length; i += 1) {
       const c = closes[i];
       if (typeof c !== 'number' || !isFinite(c)) continue;
       out.push({
-        date: new Date(ts[i] * 1000).toISOString().slice(0, 10),
+        date: new Date(ts[i] * 1000 + offsetMs).toISOString().slice(0, 10),
         close: c,
         currency,
       });

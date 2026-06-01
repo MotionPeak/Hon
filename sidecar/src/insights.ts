@@ -67,11 +67,16 @@ export class InsightsGenerator {
       // insight's "this month" figures match the Budget tab instead of diverging
       // on a calendar month near a custom cycle boundary.
       const report = buildBudgetReport(this.repo, this.range, { cardProviders: this.cardProviders });
-      if (report.totalSpent <= 0) {
+      const analytics = buildAnalytics(this.repo, this.cardProviders);
+      // Abort only when there's genuinely nothing to talk about. `totalSpent`
+      // counts CATEGORIZED spend only, so on its own it reads 0 when the user
+      // has spent but not yet categorized — aborting spuriously. Fold in the
+      // analytics monthly total (which includes uncategorized spend) so a fresh,
+      // uncategorized month still produces insights.
+      if (report.totalSpent <= 0 && analytics.thisMonth.spending <= 0) {
         this.fail('No spending this month yet — sync and categorize transactions first.');
         return;
       }
-      const analytics = buildAnalytics(this.repo, this.cardProviders);
 
       const session = await this.llm.openSession({
         system: SYSTEM_PROMPT,
@@ -105,7 +110,7 @@ function buildPrompt(report: BudgetReport, a: Analytics): string {
     a.spendingChangePct == null
       ? 'no prior month to compare'
       : `${a.spendingChangePct >= 0 ? 'up' : 'down'} ` +
-        `${Math.abs(Math.round(a.spendingChangePct))}% versus last month`;
+        `${Math.abs(Math.round(a.spendingChangePct))}%`;
 
   const cats = a.byCategory.slice(0, 8).map((c) => {
     const move =
@@ -138,18 +143,26 @@ function buildPrompt(report: BudgetReport, a: Analytics): string {
     `${Math.round(v.disposable)} for discretionary spending; ` +
     `${Math.round(v.spent)} spent so far (${variableNote}).`;
 
-  const net = Math.round(a.thisMonth.income - a.thisMonth.spending);
+  // The absolute "this cycle" figures and the budgets below come from the
+  // budget report, so they all sit on ONE basis — the user's billing cycle
+  // (`report.month`). The category list and trend come from `analytics`, which
+  // is a fixed CALENDAR-month series; it is presented purely as a
+  // month-over-month comparison and labelled as such. The previous prompt mixed
+  // analytics' absolute calendar-month total in as "this month" alongside the
+  // cycle's `totalSpent`, so the two "spent this month" numbers contradicted
+  // each other whenever the cycle boundary wasn't the 1st.
+  const income = Math.round(v.income);
+  const spent = Math.round(report.totalSpent);
+  const net = income - spent;
 
   return (
-    `Month: ${report.month}. Currency: ${report.currency}.\n` +
-    `Spent ${Math.round(a.thisMonth.spending)} this month, ` +
-    `${Math.round(a.lastMonth.spending)} last month (${trend}).\n` +
-    `Income ${Math.round(a.thisMonth.income)} this month; ` +
+    `Cycle: ${report.month}. Currency: ${report.currency}.\n` +
+    `Spent ${spent} ${report.currency} this cycle on ${income} of income; ` +
     `net ${net >= 0 ? 'saved' : 'overspent'} ${Math.abs(net)} ${report.currency}.\n` +
-    `Average expense ${Math.round(a.avgTransaction)} ${report.currency} over the past year.\n` +
-    `Total spent ${Math.round(report.totalSpent)} ${report.currency} this month.\n\n` +
-    `Spending by category this month:\n${cats.join('\n')}\n\n` +
-    `Essential budgets:\n${essentials.length ? essentials.join('\n') : '- none set'}\n\n` +
+    `Total spending is ${trend} versus the prior calendar month.\n` +
+    `Average expense ${Math.round(a.avgTransaction)} ${report.currency} over the past year.\n\n` +
+    `Spending by category (calendar month, vs the one before):\n${cats.join('\n')}\n\n` +
+    `Essential budgets this cycle:\n${essentials.length ? essentials.join('\n') : '- none set'}\n\n` +
     `${variableLine}\n\n` +
     'Write the 5-6 tagged insights now.'
   );

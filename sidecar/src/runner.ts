@@ -7,6 +7,7 @@ import { fetchHistoryForSymbol } from './marketData.js';
 import { isPensionCompany, runPensionScrape } from './pension.js';
 import { runInteractiveScrape, runScrape, type ScrapeOutcome } from './scrapers.js';
 import { openSession } from './session.js';
+import { fetchCpiForMonth } from './loans.js';
 import { makeLog } from './log.js';
 
 const runnerLog = makeLog('runner');
@@ -412,7 +413,25 @@ export class ScrapeRunner {
       // instead of creating duplicates. User-set fields (excluded, notes)
       // are preserved by repo.upsertBankLoan.
       if (outcome.scrapedLoans) {
+        // CPI snapshot for index-linked loans. The bank reports a loan as
+        // צמוד-למדד but not the index value it was pinned at, so a CPI-linked
+        // loan with no captured cpiStart computes as purely nominal (cpiRatio
+        // collapses to 1), understating the balance + payment. Snapshot the CPI
+        // at the loan's start month — the same pin manual loans use
+        // (server.ts POST /loans) — but only when this loan has no value yet:
+        // a re-sync must not re-pin (or re-fetch) an already-captured loan.
+        const existingCpiStart = new Map<string, number | null>(
+          this.repo
+            .listLoans()
+            .filter((l) => l.connectionId === args.connectionId && l.externalId != null)
+            .map((l) => [l.externalId as string, l.cpiStart]),
+        );
         for (const loan of outcome.scrapedLoans) {
+          const stored = existingCpiStart.get(loan.externalId);
+          const cpiStart =
+            loan.isCpiLinked && stored == null
+              ? await fetchCpiForMonth(this.repo, loan.startDate.slice(0, 7))
+              : undefined;
           this.repo.upsertBankLoan(args.connectionId, {
             externalId: loan.externalId,
             name: loan.name,
@@ -423,6 +442,7 @@ export class ScrapeRunner {
             isCpiLinked: loan.isCpiLinked,
             rateValue: loan.rateValue,
             currency: loan.currency,
+            cpiStart,
           });
         }
         log.info('loans.upserted', { count: outcome.scrapedLoans.length });

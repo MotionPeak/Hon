@@ -490,7 +490,11 @@ export async function runPensionScrape(
       // read before asking the user to sign in at all.
       if (session?.cookies?.length) {
         onProgress?.('Resuming your saved session…');
-        const resumed = await readBalances(companyId, page, screenshotPath).catch(
+        // Pass `extras` so a Meitav portfolio resume still bubbles up its
+        // performance series — without it the brokerage chart and 1M/3M/YTD/
+        // 1Y/ALL tiles come back empty on the common steady-state resume path
+        // (matches the poll-loop and automated-flow reads below).
+        const resumed = await readBalances(companyId, page, screenshotPath, extras).catch(
           () => [] as NormalizedAccount[],
         );
         if (resumed.length > 0) {
@@ -872,18 +876,46 @@ async function enterOtpCode(page: Page, code: string): Promise<void> {
   const digits = code.replace(/\D/g, '');
   // Tag the OTP box(es): prefer inputs that identify themselves as OTP — named
   // otp/otp2… (Migdal), formcontrolname="otp" (Clal) or autocomplete="one-time-
-  // code" (Harel/Clal). Only if none match fall back to the visible empty text
-  // inputs, and even then skip search boxes — a stray search field next to the
-  // OTP box would otherwise be mistaken for a second code box.
+  // code" (Harel/Clal). Only if none match fall back to inputs that LOOK like a
+  // code field, and even then exclude search/email/etc. — a stray open text box
+  // (newsletter signup, filter, address) next to the OTP step would otherwise be
+  // mistaken for a code box and scramble the digit entry.
   const boxes = await page.evaluate(() => {
     const inputs: any[] = Array.from(document.querySelectorAll('input'));
     const visible = (el: any): boolean => Boolean(el.offsetWidth || el.offsetHeight);
-    const isSearch = (el: any): boolean => {
-      const id = (el.id || '') + ' ' + (el.getAttribute('name') || '');
+    // A field whose type/role/identifiers mark it as clearly NOT a verification
+    // code box: search, email or url inputs, or anything named like search /
+    // email / address / coupon-promo / name. These must never be tagged as OTP.
+    // (type=tel is NOT excluded — OTP boxes are commonly tel for numeric keypads.)
+    const isNonCodeField = (el: any): boolean => {
+      const type = (el.getAttribute('type') || '').toLowerCase();
+      if (['search', 'email', 'url'].includes(type)) return true;
+      if (el.getAttribute('role') === 'searchbox') return true;
+      const hint = [
+        el.id, el.getAttribute('name'), el.getAttribute('formcontrolname'),
+        el.getAttribute('placeholder'), el.getAttribute('aria-label'),
+        el.getAttribute('autocomplete'),
+      ].filter(Boolean).join(' ');
+      return /search|חיפוש|email|e-mail|mail|אימייל|דוא"?ל|address|כתובת|coupon|promo|קופון|name|שם|street|רחוב/i.test(hint);
+    };
+    // The fallback only accepts inputs that actually resemble a code box: a
+    // numeric-ish type/inputmode, a small maxlength (per-digit boxes are 1, a
+    // single OTP field is typically 4–8), or an explicit one-time-code hint. An
+    // open-ended text field with none of these is rejected — that's the stray
+    // field the previous heuristic wrongly tagged.
+    const looksLikeCode = (el: any): boolean => {
+      const type = (el.getAttribute('type') || 'text').toLowerCase();
+      const inputmode = (el.getAttribute('inputmode') || '').toLowerCase();
+      const ml = Number(el.getAttribute('maxlength'));
+      const autocomplete = (el.getAttribute('autocomplete') || '').toLowerCase();
+      const idName = (el.id || '') + ' ' + (el.getAttribute('name') || '')
+        + ' ' + (el.getAttribute('formcontrolname') || '');
       return (
-        (el.getAttribute('type') || '').toLowerCase() === 'search' ||
-        el.getAttribute('role') === 'searchbox' ||
-        /search|חיפוש/i.test(id)
+        ['tel', 'number', 'password'].includes(type) ||
+        ['numeric', 'tel'].includes(inputmode) ||
+        autocomplete === 'one-time-code' ||
+        (Number.isFinite(ml) && ml >= 1 && ml <= 8) ||
+        /otp|code|קוד|pin|verif|אימות|sms/i.test(idName)
       );
     };
     let picked: any[] = inputs.filter((el: any) => {
@@ -903,7 +935,8 @@ async function enterOtpCode(page: Page, code: string): Promise<void> {
           !el.disabled &&
           !el.readOnly &&
           !el.value &&
-          !isSearch(el)
+          !isNonCodeField(el) &&
+          looksLikeCode(el)
         );
       });
     }
@@ -1049,6 +1082,12 @@ async function readMigdalBalances(page: Page): Promise<NormalizedAccount[]> {
   } catch {
     return [];
   }
+  // FRAGILE KEY: Migdal's "my products" page exposes no stable account/policy
+  // number in the DOM — only the product-name link — so accountNumber is keyed
+  // on the display name. If the portal ever changes the rendered product text,
+  // the (connection_id, account_number) upsert key shifts and a re-sync inserts
+  // a duplicate row instead of updating the existing one. Switch to a policy
+  // number here if Migdal starts rendering one.
   return products.map((p) => ({
     accountNumber: `migdal:${p.name}`,
     label: p.name,
@@ -1089,7 +1128,20 @@ async function readHarelBalances(
           if (!keywords.some((k) => text.includes(k))) continue;
           let largest = 0;
           for (const match of text.match(/[\d][\d.,]{3,}/g) || []) {
-            const value = parseFloat(match.replace(/[^\d.,]/g, '').replace(/,/g, ''));
+            // Robust Israeli money parse: handle both "1,234.56" (comma=
+            // thousands, dot=decimal) and "1.234,56" (dot=thousands, comma=
+            // decimal). The separator nearer the end is the decimal point only
+            // when it leaves 1–2 trailing digits (agorot); 3 trailing digits is
+            // a thousands group ("12,345" / "1.234"). The naive `replace(/,/g,
+            // '')` mangled the European form. (Inline, no helper — this runs in
+            // the cross-origin Harel frame where the __name shim is absent.)
+            const t = match.replace(/[^\d.,]/g, '');
+            const decPos = Math.max(t.lastIndexOf('.'), t.lastIndexOf(','));
+            const trailing = decPos === -1 ? 0 : t.length - decPos - 1;
+            const value =
+              decPos !== -1 && trailing >= 1 && trailing <= 2
+                ? parseFloat(t.slice(0, decPos).replace(/[.,]/g, '') + '.' + t.slice(decPos + 1))
+                : parseFloat(t.replace(/[.,]/g, ''));
             if (Number.isFinite(value) && value > largest) largest = value;
           }
           if (largest < 1000) continue;
@@ -1116,7 +1168,15 @@ async function readHarelBalances(
           if (!text.includes('₪')) continue;
           let largest = 0;
           for (const match of text.match(/[\d][\d.,]{3,}/g) || []) {
-            const value = parseFloat(match.replace(/[^\d.,]/g, '').replace(/,/g, ''));
+            // Robust Israeli money parse — see the keyword-matched block above
+            // for the full rationale (handles "1,234.56" and "1.234,56").
+            const t = match.replace(/[^\d.,]/g, '');
+            const decPos = Math.max(t.lastIndexOf('.'), t.lastIndexOf(','));
+            const trailing = decPos === -1 ? 0 : t.length - decPos - 1;
+            const value =
+              decPos !== -1 && trailing >= 1 && trailing <= 2
+                ? parseFloat(t.slice(0, decPos).replace(/[.,]/g, '') + '.' + t.slice(decPos + 1))
+                : parseFloat(t.replace(/[.,]/g, ''));
             if (Number.isFinite(value) && value > largest) largest = value;
           }
           if (largest < 1000) continue;
@@ -1230,6 +1290,13 @@ async function readHarelBalances(
       byBalance.set(item.balance, item.label);
     }
   }
+  // FRAGILE KEY: the client-view widget exposes no stable account/policy number
+  // — `label` is heuristically scraped from each tile's innerText (digits and ₪
+  // stripped out). accountNumber is therefore keyed on that derived text, so any
+  // change to the rendered tile wording shifts the (connection_id, account_
+  // number) upsert key and a re-sync inserts a duplicate instead of updating.
+  // This is the most fragile of the pension keys; key on a policy number here if
+  // the widget ever surfaces one (and see crossFileNeeds re: retiring stale rows).
   return [...byBalance].map(([balance, label]) => ({
     accountNumber: `harel:${label}`,
     label,
@@ -1283,6 +1350,12 @@ async function readClalBalances(page: Page): Promise<NormalizedAccount[]> {
   } catch {
     return [];
   }
+  // FRAGILE KEY: Clal's portfolio page exposes no stable policy/account number
+  // in the product card — only the product-type title and provider name, both
+  // scraped from innerText — so accountNumber is keyed on that combined display
+  // text. A change to either rendered string shifts the (connection_id, account_
+  // number) upsert key and a re-sync inserts a duplicate instead of updating.
+  // Switch to a policy number here if Clal starts rendering one.
   return found.map((p) => {
     const name = p.provider ? `${p.label} — ${p.provider}` : p.label;
     return {
@@ -1368,17 +1441,24 @@ async function readMeitavBalances(
         accountNum: p.AccountNum,
         balance: p.YitrotAccountSum,
       }));
-    const byAccount = new Map<string, { name: string; balance: number }>();
+    const byAccount = new Map<string, { name: string; balance: number; key: string }>();
     for (const row of [...pick(t.CustomPensionAccountMain), ...pick(t.CustomAccountMain)]) {
       const balance = Number(row.balance);
       const name = (row.name ?? '').trim();
       if (!name || !Number.isFinite(balance)) continue;
       const key = String(row.accountNum ?? name);
       const prev = byAccount.get(key);
-      if (!prev || balance > prev.balance) byAccount.set(key, { name, balance });
+      if (!prev || balance > prev.balance) byAccount.set(key, { name, balance, key });
     }
     for (const p of byAccount.values()) {
       accounts.push({
+        // Keyed on the display name for backward-compat with already-saved rows.
+        // Switching to the stable AccountNum (p.key) is more robust against a
+        // portal label change, BUT would orphan existing `meitav:<name>` rows on
+        // the next sync — double-counting the balance — until a safe account
+        // reconciliation pass exists (reconcile-by-absence is unsafe against a
+        // partial scrape that could wrongly delete a real account). Deferred:
+        // see HON-AUDIT.md M6. The name still rides along as `label`.
         accountNumber: `meitav:${p.name}`,
         label: p.name,
         balance: Math.round(p.balance * 100) / 100,
@@ -1634,6 +1714,12 @@ async function readMenoraBalances(page: Page): Promise<NormalizedAccount[]> {
   }
   if (!rows) return [];
   const out: NormalizedAccount[] = [];
+  // FRAGILE KEY: this reader pulls only `title` (name) + `cashSurrenderValue`
+  // from each dashboard row, so accountNumber is keyed on the display title. The
+  // customer-summary payload likely carries a stable per-product policy id too —
+  // if a real response confirms one (e.g. a `policyId`/`productNumber` field),
+  // thread it into `pick` above and key on that here so a renamed product can't
+  // shift the (connection_id, account_number) upsert key and duplicate the row.
   for (const row of rows) {
     const balance = Number(row.balance);
     const name = (row.name ?? '').trim();
@@ -1658,9 +1744,21 @@ async function readGenericBalances(page: Page): Promise<NormalizedAccount[]> {
   let found: { label: string; balance: number }[] = [];
   try {
     found = (await page.evaluate((keywords: string[]) => {
+      // Robust Israeli money parse: handle both "1,234.56" (comma=thousands,
+      // dot=decimal) and "1.234,56" (dot=thousands, comma=decimal). The
+      // separator nearer the end is the decimal point only when it leaves 1–2
+      // trailing digits (agorot); 3 trailing digits is a thousands group
+      // ("12,345" / "1.234"). The old `replace(/,/g, '')` mangled the European
+      // form (and any ₪/ש"ח marker is dropped by the non-numeric strip).
       const toAmount = (text: string): number | null => {
-        const cleaned = (text || '').replace(/[^\d.,]/g, '').replace(/,/g, '');
-        const value = parseFloat(cleaned);
+        const t = (text || '').replace(/[^\d.,]/g, '');
+        if (!t) return null;
+        const decPos = Math.max(t.lastIndexOf('.'), t.lastIndexOf(','));
+        const trailing = decPos === -1 ? 0 : t.length - decPos - 1;
+        const value =
+          decPos !== -1 && trailing >= 1 && trailing <= 2
+            ? parseFloat(t.slice(0, decPos).replace(/[.,]/g, '') + '.' + t.slice(decPos + 1))
+            : parseFloat(t.replace(/[.,]/g, ''));
         return Number.isFinite(value) ? value : null;
       };
       const results: { label: string; balance: number }[] = [];
@@ -1692,6 +1790,13 @@ async function readGenericBalances(page: Page): Promise<NormalizedAccount[]> {
   for (const item of found) {
     byLabel.set(item.label, Math.max(byLabel.get(item.label) ?? 0, item.balance));
   }
+  // FRAGILE KEY: this generic fallback has no provider mapping at all — the
+  // "label" is just the matched product keyword, so accountNumber is keyed on
+  // text. A portal that renders a different keyword (or a mapping that lands a
+  // product under a different keyword) shifts the (connection_id, account_
+  // number) upsert key and a re-sync inserts a duplicate. Funds that reach this
+  // path need a precise reader; until then, see crossFileNeeds re: retiring
+  // stale rows so a key change doesn't double-count.
   return [...byLabel].map(([label, balance]) => ({
     accountNumber: `pension:${label}`,
     label,

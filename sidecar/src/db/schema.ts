@@ -311,9 +311,10 @@ export const splitwiseRepayments = sqliteTable('splitwise_repayments', {
   createdAt: text('created_at').notNull(),
 });
 
-// Read-only view (created by migration v24). `.existing()` means Drizzle treats
-// it as already-present and only uses these column types for typed SELECTs — it
-// will never try to (re)create it. Column shape mirrors the view's projection.
+// Read-only view (created by migration v24, last recreated by v40). `.existing()`
+// means Drizzle treats it as already-present and only uses these column types for
+// typed SELECTs — it will never try to (re)create it. Column shape mirrors the
+// view's projection.
 export const txnEffective = sqliteView('txn_effective', {
   id: text('id').notNull(),
   accountId: text('account_id').notNull(),

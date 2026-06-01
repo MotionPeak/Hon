@@ -32,7 +32,12 @@ async function loadRates(): Promise<Record<string, number>> {
     // 2026; the old host now only 301-redirects. Hit the canonical endpoint
     // directly so FX doesn't silently die if that redirect ever stops. Same
     // response shape: { rates: { <code>: <units per 1 base> } }.
-    const res = await fetch('https://api.frankfurter.dev/v1/latest?base=ILS');
+    // Bound the socket: without a timeout a stalled Frankfurter hangs the
+    // inline-awaited /summary and /brokerage routes instead of degrading. The
+    // catch below already maps a rejection (abort included) to a null fallback.
+    const res = await fetch('https://api.frankfurter.dev/v1/latest?base=ILS', {
+      signal: AbortSignal.timeout(10_000),
+    });
     if (!res.ok) throw new Error(`FX HTTP ${res.status}`);
     const data = (await res.json()) as { rates: Record<string, number> };
 

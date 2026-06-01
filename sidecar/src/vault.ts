@@ -10,6 +10,21 @@ import type { Repo } from './repo.js';
 // passphrase is correct without ever storing the passphrase itself.
 const VERIFIER_PLAINTEXT = 'hon-vault-ok';
 
+/**
+ * Thrown when a stored credential blob fails to decrypt or parse — a corrupt
+ * or tampered row, or a partial write. Carries `statusCode = 400` so Fastify's
+ * error handler surfaces it as a clean `{ error }` 400 to the caller instead of
+ * an opaque 500, while still being distinguishable from "no credentials stored"
+ * (which the load methods signal with `undefined`).
+ */
+export class VaultDecryptError extends Error {
+  readonly statusCode = 400;
+  constructor(message = 'stored credentials are corrupt and could not be read') {
+    super(message);
+    this.name = 'VaultDecryptError';
+  }
+}
+
 // OWASP-2024 scrypt parameters for NEW vaults (N=2^17). maxmem must be raised
 // above Node's default because the higher N exceeds the 32 MiB default budget.
 // New salts are persisted with a `v2:` prefix so deriveKey knows to apply these.
@@ -80,11 +95,30 @@ export class Vault {
     );
   }
 
-  /** Returns the stored credentials for a connection, or undefined if none. */
+  /**
+   * Returns the stored credentials for a connection, or undefined if none.
+   * A blob that fails to decrypt or parse (corrupt/tampered/partial write)
+   * throws a typed {@link VaultDecryptError} (400) rather than a raw 500 — and
+   * never the bare `undefined` that means "nothing stored", so callers don't
+   * mistake corruption for an empty vault.
+   */
   loadCredentials(connectionId: string): Record<string, string> | undefined {
     const blob = this.repo.getCredentialBlob(connectionId);
     if (!blob) return undefined;
-    return JSON.parse(decryptWith(this.requireKey(), blob)) as Record<string, string>;
+    let plaintext: string;
+    try {
+      plaintext = decryptWith(this.requireKey(), blob);
+    } catch (err) {
+      // A locked vault is a precondition failure, not corruption — let it
+      // propagate unchanged so the caller's 409 path stays intact.
+      if (err instanceof Error && /vault is locked/i.test(err.message)) throw err;
+      throw new VaultDecryptError();
+    }
+    try {
+      return JSON.parse(plaintext) as Record<string, string>;
+    } catch {
+      throw new VaultDecryptError();
+    }
   }
 
   // A named secret not tied to a connection — e.g. the SnapTrade user, which

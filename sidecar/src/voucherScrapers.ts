@@ -406,21 +406,6 @@ async function clickByText(page: Page, needle: string, timeoutMs: number): Promi
   }, tag);
 }
 
-async function clickByTextIfPresent(page: Page, needle: string): Promise<void> {
-  try {
-    const ok = await page.evaluate((n: string) => {
-      const all: any[] = Array.from(document.querySelectorAll('button, a, [role="button"]'));
-      for (const el of all) {
-        if (!el.offsetParent) continue;
-        const txt = (el.innerText || el.textContent || '').trim();
-        if (txt.includes(n)) { el.click(); return true; }
-      }
-      return false;
-    }, needle);
-    if (ok) log.info('clicked.optional', { needle });
-  } catch {/* best effort */}
-}
-
 async function pressEnter(page: Page): Promise<void> {
   try { await page.keyboard.press('Enter'); } catch {/* best effort */}
 }
@@ -575,12 +560,28 @@ async function extractCards(page: Page): Promise<ScrapedVoucher[]> {
         }
       }
 
-      // Balance: pick the largest plausible NIS amount on the tile.
+      // Balance: anchor on the "₪" the overlay prints next to the amount
+      // (e.g. "₪120.00"), exactly like the BuyMe parser. Taking the max of
+      // every digit token used to misread the masked PAN — "**** **** ****
+      // 6375" tokenizes as "637" (the integer part caps at 3 digits without
+      // a thousands separator) and beats a real low-value balance.
       let balance = 0;
-      const amounts = (text.match(/\d{1,3}(?:,\d{3})*(?:\.\d+)?/g) || [])
-        .map((s: string) => parseFloat(s.replace(/,/g, '')))
-        .filter((n: number) => Number.isFinite(n) && n > 0 && n < 1_000_000);
-      if (amounts.length) balance = Math.max(...amounts);
+      const nisMatch = text.match(/₪\s*([\d,]+(?:\.\d+)?)/);
+      if (nisMatch) {
+        const v = parseFloat(nisMatch[1].replace(/,/g, ''));
+        if (Number.isFinite(v) && v >= 0) balance = v;
+      } else {
+        // No currency symbol on the tile — fall back to the max-token
+        // heuristic, but first strip the masked-PAN region (any sequence
+        // containing "*") and the MM/YY expiry so neither contaminates it.
+        const cleaned = text
+          .replace(/(?:\*+\s*)+\d{3,4}/g, ' ')   // "**** **** **** 6375"
+          .replace(/\b\d{2}\s*\/\s*\d{2}\b/g, ' '); // "12/29"
+        const amounts = (cleaned.match(/\d{1,3}(?:,\d{3})*(?:\.\d+)?/g) || [])
+          .map((s: string) => parseFloat(s.replace(/,/g, '')))
+          .filter((n: number) => Number.isFinite(n) && n > 0 && n < 1_000_000);
+        if (amounts.length) balance = Math.max(...amounts);
+      }
 
       // Brand: look for the alt/title of an image inside the tile first;
       // fall back to a short text token before the balance.
@@ -1208,6 +1209,19 @@ export async function scrapeHitechZoneBalance(
   if (options.userDataDir) {
     try { mkdirSync(options.userDataDir, { recursive: true }); } catch {/* best effort */}
     sweepStaleProfileLocks(options.userDataDir);
+    // Identity check BEFORE the launch — mirrors BuyMe. The /Ballance
+    // fast-path reads whatever balance the cached page already shows but
+    // stamps externalId htz-<code> from the NEWLY supplied code, so a
+    // profile holding code A's page would upsert A's balance under htz-B.
+    // If the profile was last used for a DIFFERENT code, wipe it so the
+    // engine is forced through a fresh code-entry + CAPTCHA on this code.
+    const codeMarkerPath = joinPath(options.userDataDir, 'last-code');
+    const lastCode = readMarker(codeMarkerPath);
+    if (lastCode && lastCode !== code) {
+      htzLog.info('profile.code.mismatch', { wipingProfile: true });
+      try { rmSync(options.userDataDir, { recursive: true, force: true }); } catch { /* best effort */ }
+      try { mkdirSync(options.userDataDir, { recursive: true }); } catch { /* best effort */ }
+    }
   }
   // CRITICAL: visible (non-headless). reCAPTCHA's bot-detection refuses to
   // present a checkbox in headless Chrome, and the user has to click it
@@ -1385,6 +1399,14 @@ async function harvestHtzAndFinish(
         : 'Could not read the Hi-Tech Zone balance from the result page. '
           + 'The layout may have changed — see debug HTML dump.',
     );
+  }
+  // Record which code this profile now holds a /Ballance page for, so the
+  // next sync's pre-launch identity check can keep the cached session only
+  // when the same code is looked up again (and wipe it otherwise). Written
+  // only after a balance was actually parsed — a failed lookup leaves the
+  // marker pointing at the last good code. Mirrors BuyMe's last-email marker.
+  if (options.userDataDir) {
+    writeMarker(joinPath(options.userDataDir, 'last-code'), code);
   }
   done({ result: 'ok', cards: 1 });
   return [parsed];

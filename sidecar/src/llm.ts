@@ -149,6 +149,63 @@ function normalizeUrl(url: string): string {
   return (url ?? '').trim().replace(/\/+$/, '');
 }
 
+/**
+ * True when `host` is a loopback / private / link-local / unique-local target —
+ * i.e. somewhere on the user's own machine or LAN, never the public internet.
+ * Mirrors the host families logos.ts blocks for SSRF: loopback, RFC-1918,
+ * link-local (incl. cloud metadata 169.254.169.254), CGNAT, and IPv6 ULA/LL.
+ */
+function isPrivateHost(host: string): boolean {
+  const h = host.toLowerCase().replace(/^\[|\]$/g, ''); // strip IPv6 brackets
+  if (h === 'localhost' || h === 'localhost.localdomain') return true;
+  if (h.endsWith('.localhost') || h.endsWith('.local') || h.endsWith('.internal')) {
+    return true;
+  }
+  if (h === '::1' || h === '::') return true;
+  // IPv6 ULA (fc00::/7) / link-local (fe80::/10). Gate on the `:` so a DNS name
+  // that merely starts with "fc"/"fd" (e.g. fcbarcelona.com) isn't misjudged.
+  if (h.includes(':') && (/^f[cd]/.test(h) || h.startsWith('fe80:'))) return true;
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
+  if (m) {
+    const [a, b] = [Number(m[1]), Number(m[2])];
+    if (a === 127 || a === 10 || a === 0) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 169 && b === 254) return true; // link-local + cloud metadata
+    if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
+  }
+  return false;
+}
+
+/**
+ * Whether it's safe to send the stored API key as a Bearer header to `url`.
+ * The key is a secret, so it must only ever leave the machine over HTTPS to a
+ * PUBLIC host — never plaintext, and never to a private/link-local address an
+ * attacker could point the base URL at to exfiltrate the key (low-sev SSRF).
+ * A loopback target is the user's own machine, so a key there isn't
+ * "exfiltrated" — that's allowed (local Ollama/LM Studio over http://localhost).
+ * Exported for unit testing of the key-exfiltration / SSRF guard.
+ */
+export function isSafeKeyTarget(url: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  const isLoopback =
+    host === 'localhost' ||
+    host === 'localhost.localdomain' ||
+    host.endsWith('.localhost') ||
+    host === '::1' ||
+    /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host);
+  // Loopback: the user's own box — http is fine and no key leaves the machine.
+  if (isLoopback) return true;
+  // Anything else must be HTTPS to a public host.
+  return parsed.protocol === 'https:' && !isPrivateHost(host);
+}
+
 /** An inference handle backed by the on-device llama.cpp model. */
 class LocalSession implements LlmSession {
   private readonly grammars = new Map<string, Promise<LlamaGrammar>>();
@@ -194,7 +251,12 @@ class OllamaSession implements LlmSession {
 
   async prompt(text: string, opts?: PromptOptions): Promise<string> {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (this.cfg.apiKey) headers.Authorization = `Bearer ${this.cfg.apiKey}`;
+    // Only attach the secret key when the target is safe (HTTPS+public, or the
+    // user's own loopback) — never leak it to a private/link-local host the
+    // base URL might be pointed at. A keyless LAN Ollama still works.
+    if (this.cfg.apiKey && isSafeKeyTarget(this.cfg.baseUrl)) {
+      headers.Authorization = `Bearer ${this.cfg.apiKey}`;
+    }
 
     const body: Record<string, unknown> = {
       model: this.cfg.model,
@@ -234,6 +296,14 @@ class OpenAiSession implements LlmSession {
   ) {}
 
   async prompt(text: string, opts?: PromptOptions): Promise<string> {
+    // The API key is mandatory for this provider and goes out as a Bearer
+    // header, so refuse to send it anywhere unsafe — a base URL pointed at an
+    // http/private/link-local host would exfiltrate the key (low-sev SSRF).
+    if (!isSafeKeyTarget(this.cfg.baseUrl)) {
+      throw new Error(
+        'API base URL must be HTTPS and a public host (or a local loopback) — refusing to send the API key.',
+      );
+    }
     // JSON-schema support varies across providers, so rather than the strict
     // `json_schema` response format Hon asks for plain JSON object mode (which
     // every OpenAI-compatible service supports) and states the shape in the
@@ -434,7 +504,9 @@ export class LlmManager {
     const apiKey = opts.apiKey ?? this.ollama.apiKey;
     try {
       const headers: Record<string, string> = {};
-      if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+      // Don't leak the key to an unsafe (non-HTTPS / private) host the URL
+      // might be pointed at; a keyless reachability probe still works.
+      if (apiKey && isSafeKeyTarget(baseUrl)) headers.Authorization = `Bearer ${apiKey}`;
       const res = await fetch(`${baseUrl}/api/tags`, {
         headers,
         signal: AbortSignal.timeout(8_000),
@@ -468,6 +540,16 @@ export class LlmManager {
     if (!baseUrl) return { ok: false, models: [], message: 'Enter the API base URL first.' };
     const apiKey = opts.apiKey ?? this.api.apiKey;
     if (!apiKey) return { ok: false, models: [], message: 'Enter the API key first.' };
+    // The key is mandatory here and goes out as a Bearer header, so refuse the
+    // probe entirely if the URL isn't a safe key target (HTTPS+public or a
+    // local loopback) — never leak the key to a private/link-local address.
+    if (!isSafeKeyTarget(baseUrl)) {
+      return {
+        ok: false,
+        models: [],
+        message: 'The API base URL must be HTTPS and a public host (or a local loopback).',
+      };
+    }
     try {
       const res = await fetch(`${baseUrl}/models`, {
         headers: { Authorization: `Bearer ${apiKey}` },

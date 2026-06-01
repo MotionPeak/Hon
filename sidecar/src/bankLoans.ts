@@ -265,11 +265,13 @@ function parseRow(row: RawRow): ScrapedLoan | null {
 
   if (!Number.isFinite(principal) || !startDate || !finalDate) return null;
 
-  // Prefer the parsed sub-id. When the row has none, a bare name would collide
-  // for two same-named loans (and shift if the bank tweaks the label), so use a
-  // deterministic composite of name+start+principal instead — mirrors
-  // parseHapoalimRow's `hapoalim-${name}-${startDate}`.
-  const externalId = subId ?? `fibi-${name}-${startDate}-${principal}`;
+  // Prefer the parsed sub-id (the bank's own stable loan number). When the row
+  // has none, key off the loan's contractual term endpoints — start + final
+  // payment date. Both are fixed facts of the loan, unlike the display name
+  // (which the bank can re-truncate/alias) or the principal cell (a money value
+  // that can re-render or round); embedding either of those would change the id
+  // on a cosmetic tweak and spawn a duplicate loan on the next re-sync.
+  const externalId = subId ?? `fibi-${startDate}-${finalDate}`;
   if (!externalId) return null;
 
   return {
@@ -289,12 +291,24 @@ function parseRow(row: RawRow): ScrapedLoan | null {
 
 function parseMoney(s: string | undefined): number {
   if (!s) return NaN;
-  // Hebrew amount cells wrap in directional marks and a "ש"ח" suffix and may
-  // render a trailing (accounting-style) minus. Detect the sign first, then
-  // keep only digits + the dot decimal (comma is a thousands separator in the
-  // current FIBI/Hapoalim NIS format).
-  const negative = /-/.test(s);
-  const cleaned = s.replace(/[^\d.]/g, '');
+  // Hebrew amount cells wrap in directional marks and a "ש"ח"/"₪" suffix and
+  // may render a leading or trailing (accounting-style) minus. Strip the
+  // directional/format marks and whitespace first, then decide the sign by the
+  // minus's position relative to the digits: a minus directly before the first
+  // digit or directly after the last digit means negative. An interior hyphen
+  // (e.g. a sub-id like "108-416" or a date) sits between digits and must NOT
+  // flip the sign. Finally keep only digits + the dot decimal (comma is a
+  // thousands separator in the current FIBI/Hapoalim NIS format).
+  const trimmed = s.replace(/[‎‏‪-‮\s]/g, '');
+  // A minus only signals a negative when it sits OUTSIDE the digit span — i.e.
+  // before the first digit or after the last. A hyphen between two digits is a
+  // separator (sub-id / date), so we ignore it.
+  const firstDigit = trimmed.search(/\d/);
+  const lastDigit = trimmed.length - 1 - [...trimmed].reverse().findIndex((c) => /\d/.test(c));
+  const negative =
+    firstDigit >= 0 &&
+    (trimmed.slice(0, firstDigit).includes('-') || trimmed.slice(lastDigit + 1).includes('-'));
+  const cleaned = trimmed.replace(/[^\d.]/g, '');
   // Reject anything that isn't a clean number (e.g. a stray second dot from a
   // European comma-decimal) rather than silently mis-parsing the principal.
   if (!cleaned || !/^\d+(\.\d+)?$/.test(cleaned)) return NaN;
@@ -341,9 +355,13 @@ function monthsBetweenDates(fromIso: string, toIso: string): number {
   const a = new Date(fromIso);
   const b = new Date(toIso);
   if (isNaN(a.getTime()) || isNaN(b.getTime())) return 0;
-  const months = (b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth());
+  // `new Date('YYYY-MM-DD')` parses as UTC midnight, so read the components
+  // with the UTC getters too — the local getters would shift the day (and thus
+  // the month delta) by one in a negative-UTC zone.
+  const months =
+    (b.getUTCFullYear() - a.getUTCFullYear()) * 12 + (b.getUTCMonth() - a.getUTCMonth());
   // Round to the nearest whole month using day-of-month as the tiebreaker.
-  return Math.max(1, months + (b.getDate() >= a.getDate() ? 0 : -1));
+  return Math.max(1, months + (b.getUTCDate() >= a.getUTCDate() ? 0 : -1));
 }
 
 // The Beinleumi-group banks share one portal and one loans page; the company

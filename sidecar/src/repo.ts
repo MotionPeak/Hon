@@ -10,6 +10,9 @@ import type {
 import type { Loan } from './loans.js';
 import { matchPaymentToLoan } from './loanMatcher.js';
 import { makeDb, schema, type HonDb } from './db/client.js';
+import { makeLog } from './log.js';
+
+const repoLog = makeLog('repo');
 
 // Typed table handles from the Drizzle schema. Aliased to short names so the
 // query bodies below read close to SQL. The schema is the typed query layer
@@ -1102,13 +1105,23 @@ export class Repo {
     );
 
     const deleteHoldings = this.db.prepare('DELETE FROM holdings WHERE account_id = ?');
+    // Upsert (not plain INSERT) on (account_id, symbol): a scrape can return two
+    // lots of the same symbol, or a broker can list a symbol twice — a plain
+    // INSERT would hit the UNIQUE(account_id, symbol) constraint and, inside the
+    // batch transaction below, roll back the entire scrape. The conflict target
+    // mirrors the snapshot upserts right below; last write wins.
     const insertHolding = this.db.prepare(
       `INSERT INTO holdings
          (id, account_id, symbol, description, units, price, currency,
           cost_basis, open_pnl, value, updated_at)
        VALUES
          (@id, @accountId, @symbol, @description, @units, @price, @currency,
-          @costBasis, @openPnl, @value, @updatedAt)`,
+          @costBasis, @openPnl, @value, @updatedAt)
+       ON CONFLICT (account_id, symbol) DO UPDATE SET
+         description = excluded.description, units = excluded.units,
+         price = excluded.price, currency = excluded.currency,
+         cost_basis = excluded.cost_basis, open_pnl = excluded.open_pnl,
+         value = excluded.value, updated_at = excluded.updated_at`,
     );
     const upsertSnapshot = this.db.prepare(
       `INSERT INTO account_value_snapshots (account_id, date, value, currency)
@@ -1175,19 +1188,31 @@ export class Repo {
         if (account.holdings) {
           deleteHoldings.run(row.id);
           for (const h of account.holdings) {
-            insertHolding.run({
-              id: randomUUID(),
-              accountId: row.id,
-              symbol: h.symbol,
-              description: h.description ?? null,
-              units: h.units,
-              price: h.price ?? null,
-              currency: h.currency,
-              costBasis: h.costBasis ?? null,
-              openPnl: h.openPnl ?? null,
-              value: h.value ?? null,
-              updatedAt: now,
-            });
+            // Per-row guard: a single malformed holding (e.g. a non-finite
+            // units/price binding the column rejects) must not roll back the
+            // whole scrape. Skip + log the bad row and keep the rest. The
+            // statement-level failure leaves the surrounding transaction valid.
+            try {
+              insertHolding.run({
+                id: randomUUID(),
+                accountId: row.id,
+                symbol: h.symbol,
+                description: h.description ?? null,
+                units: h.units,
+                price: h.price ?? null,
+                currency: h.currency,
+                costBasis: h.costBasis ?? null,
+                openPnl: h.openPnl ?? null,
+                value: h.value ?? null,
+                updatedAt: now,
+              });
+            } catch (err) {
+              repoLog.warn('saveScrapeResult.holding.skipped', {
+                account: account.accountNumber,
+                symbol: h.symbol,
+                message: (err as Error).message,
+              });
+            }
           }
           if (account.balance != null) {
             upsertSnapshot.run({
@@ -1218,21 +1243,35 @@ export class Repo {
         }
 
         for (const txn of account.transactions) {
-          upsertTxn.run({
-            id: randomUUID(),
-            accountId: row.id,
-            externalId: txn.externalId,
-            date: txn.date,
-            processedDate: txn.processedDate ?? null,
-            amount: txn.amount,
-            currency: txn.currency,
-            description: txn.description,
-            memo: txn.memo ?? null,
-            kind: txn.kind ?? null,
-            status: txn.status ?? null,
-            rawJson: txn.raw ? JSON.stringify(txn.raw) : null,
-            createdAt: now,
-          });
+          // Per-row guard: a single malformed transaction (the classic case is
+          // a non-finite `amount` the `amount REAL NOT NULL` column rejects at
+          // bind time) must not abort the whole scrape. Skip + log it and carry
+          // on. A statement that throws here leaves the enclosing transaction
+          // valid, so every well-formed row still commits.
+          try {
+            upsertTxn.run({
+              id: randomUUID(),
+              accountId: row.id,
+              externalId: txn.externalId,
+              date: txn.date,
+              processedDate: txn.processedDate ?? null,
+              amount: txn.amount,
+              currency: txn.currency,
+              description: txn.description,
+              memo: txn.memo ?? null,
+              kind: txn.kind ?? null,
+              status: txn.status ?? null,
+              rawJson: txn.raw ? JSON.stringify(txn.raw) : null,
+              createdAt: now,
+            });
+          } catch (err) {
+            repoLog.warn('saveScrapeResult.transaction.skipped', {
+              account: account.accountNumber,
+              externalId: txn.externalId,
+              message: (err as Error).message,
+            });
+            continue;
+          }
           txnCount += 1;
 
           // Auto-link bank-loan payments. loansForConn is computed once
@@ -2276,6 +2315,7 @@ export class Repo {
             `UPDATE loans SET
                principal = ?, start_date = ?, term_months = ?,
                is_prime = ?, is_cpi_linked = ?, rate_value = ?,
+               cpi_start = CASE WHEN ? = 1 AND cpi_start IS NULL THEN ? ELSE cpi_start END,
                currency = ?, updated_at = ?
              WHERE id = ?`,
           )
@@ -2286,6 +2326,12 @@ export class Repo {
             input.isPrime ? 1 : 0,
             input.isCpiLinked ? 1 : 0,
             input.rateValue,
+            // Backfill the CPI snapshot only when the loan is index-linked and
+            // no value was ever captured (older rows scraped before the runner
+            // computed it). A non-null stored cpi_start — a manual edit or an
+            // earlier snapshot — is preserved so linkage stays pinned to start.
+            input.isCpiLinked ? 1 : 0,
+            input.cpiStart ?? null,
             input.currency,
             now,
             existing.id,
@@ -2296,6 +2342,7 @@ export class Repo {
             `UPDATE loans SET
                name = ?, principal = ?, start_date = ?, term_months = ?,
                is_prime = ?, is_cpi_linked = ?, rate_value = ?,
+               cpi_start = CASE WHEN ? = 1 AND cpi_start IS NULL THEN ? ELSE cpi_start END,
                currency = ?, updated_at = ?
              WHERE id = ?`,
           )
@@ -2307,6 +2354,11 @@ export class Repo {
             input.isPrime ? 1 : 0,
             input.isCpiLinked ? 1 : 0,
             input.rateValue,
+            // Same CPI backfill as the name-overridden branch above: fill the
+            // snapshot only when index-linked and never captured; never clobber
+            // an existing value.
+            input.isCpiLinked ? 1 : 0,
+            input.cpiStart ?? null,
             input.currency,
             now,
             existing.id,

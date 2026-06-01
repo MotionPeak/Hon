@@ -101,20 +101,46 @@ function balanceAfter(
   return Math.max(0, principal * factor - (M * (factor - 1)) / monthlyRate);
 }
 
-// Months between two ISO dates, counting partial months as a fraction of 30
-// days. Cheap and good enough for a balance estimate — banks round to the
-// next billing day, which is itself within ±a few days for any given loan.
+function daysInMonth(year: number, month1to12: number): number {
+  // Day 0 of the next month is the last day of `month1to12` (UTC-safe).
+  return new Date(Date.UTC(year, month1to12, 0)).getUTCDate();
+}
+
+// Months between two ISO dates, counting the partial trailing month as a
+// fraction of that month's actual length. Cheap and good enough for a balance
+// estimate — banks round to the next billing day, which is itself within ±a
+// few days for any given loan.
 function monthsBetween(fromIso: string, toIso: string): number {
-  // Parse YYYY-MM-DD components directly. `new Date(iso)` parses as UTC midnight
-  // but the getters read local time, so in a negative-UTC zone the day could
-  // shift — drifting monthsElapsed by ~1/30 right at a billing boundary.
+  // Parse YYYY-MM-DD components directly rather than via `new Date(iso)`, which
+  // parses as UTC midnight but whose getters read local time — in a negative-UTC
+  // zone the day would shift and drift the result right at a billing boundary.
   const a = /^(\d{4})-(\d{2})-(\d{2})/.exec(fromIso);
   const b = /^(\d{4})-(\d{2})-(\d{2})/.exec(toIso);
   if (!a || !b) return 0;
-  const years = Number(b[1]) - Number(a[1]);
-  const months = Number(b[2]) - Number(a[2]);
-  const days = Number(b[3]) - Number(a[3]);
-  return Math.max(0, years * 12 + months + days / 30);
+  const ay = Number(a[1]), am = Number(a[2]), ad = Number(a[3]);
+  const by = Number(b[1]), bm = Number(b[2]), bd = Number(b[3]);
+
+  // Whole calendar months between the two month-numbers, then the fractional
+  // progress through the trailing month. The old code added `(bd - ad) / 30`
+  // unconditionally: when the end day-of-month was earlier than the start day
+  // that term went as low as −1, cancelling a whole month the calendar delta
+  // had legitimately counted (e.g. Jan-31 → Feb-01 read as 0 months, not ~1
+  // day in). Borrowing a month when `bd < ad` keeps the fraction in [0, 1).
+  let whole = (by - ay) * 12 + (bm - am);
+  let frac: number;
+  if (bd >= ad) {
+    frac = (bd - ad) / daysInMonth(by, bm);
+  } else {
+    whole -= 1;
+    const prevYear = bm === 1 ? by - 1 : by;
+    const prevMonth = bm === 1 ? 12 : bm - 1;
+    const dim = daysInMonth(prevYear, prevMonth);
+    // Clamp the start day-of-month to the borrowed month's length so a 31st
+    // anchor against a 30-/28-day month doesn't push the fraction negative.
+    const anchor = Math.min(ad, dim);
+    frac = (dim - anchor + bd) / dim;
+  }
+  return Math.max(0, whole + frac);
 }
 
 /**

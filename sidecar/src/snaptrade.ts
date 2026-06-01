@@ -346,10 +346,16 @@ export async function runSnapTradeSync(
       if (balance === undefined && holdings.length > 0) {
         const currencies = new Set(holdings.map((h) => h.currency));
         if (currencies.size === 1) {
-          const derived = holdings.reduce(
-            (s, h) => s + (h.price != null ? h.units * h.price : 0), 0,
-          );
-          if (derived > 0) { balance = derived; currency = holdings[0]!.currency; }
+          const priced = holdings.filter((h) => h.price != null);
+          // Only derive when at least one position is actually priced —
+          // otherwise the reduce sums to a meaningless 0. But once we have
+          // priced positions, accept the result regardless of sign: a 0 net
+          // (fully closed) or a negative net (margin debit / net short) is a
+          // valid balance and must not be silently discarded.
+          if (priced.length > 0) {
+            balance = priced.reduce((s, h) => s + h.units * h.price!, 0);
+            currency = holdings[0]!.currency;
+          }
         }
       }
       return {
@@ -464,11 +470,15 @@ function extractRangeStats(raw: unknown): BrokerageRangeStats {
   const d = (raw ?? {}) as {
     rateOfReturn?: number | null;
     dividendIncome?: number | null;
-    contributions?: { total?: number | null } | number | null;
+    // SnapTrade's PerformanceCustom nests this as a NetContributions object
+    // whose numeric value lives under `.contributions` (NOT `.total`, which
+    // never existed — the old read always nulled out). `.total` is kept as a
+    // defensive fallback since the SDK types the payload loosely.
+    contributions?: { contributions?: number | null; total?: number | null } | number | null;
   };
   let contributions: number | null = null;
   if (typeof d.contributions === 'object' && d.contributions) {
-    contributions = d.contributions.total ?? null;
+    contributions = d.contributions.contributions ?? d.contributions.total ?? null;
   } else if (typeof d.contributions === 'number') {
     contributions = d.contributions;
   }
@@ -517,7 +527,7 @@ async function fetchPerformanceHistory(
       contributionTimeframeCumulative?: unknown;
       rateOfReturn?: number | null;
       dividendIncome?: number | null;
-      contributions?: { total?: number | null } | number | null;
+      contributions?: { contributions?: number | null; total?: number | null } | number | null;
     } | null) : null;
   if (!allData) return { data: undefined, disabled };
 

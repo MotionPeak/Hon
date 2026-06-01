@@ -11,7 +11,7 @@
 // migration here, mirror the change in ./schema.ts; the schema-parity test
 // (tests/schema.parity.test.ts) fails if they drift.
 
-export const SCHEMA_VERSION = 39;
+export const SCHEMA_VERSION = 40;
 
 export const MIGRATIONS: { version: number; sql: string }[] = [
   {
@@ -749,6 +749,57 @@ export const MIGRATIONS: { version: number; sql: string }[] = [
         SELECT 1 FROM refund_used u
         WHERE u.refund_id = t.id AND u.used >= ABS(t.amount) - 0.005
       );
+    `,
+  },
+  {
+    // Recreate txn_effective so a row that is used as a refund is dropped only
+    // when its FULL effective amount nets to ~0 — not whenever the refund-out
+    // leg alone covers its magnitude. The v39 WHERE clause looked solely at
+    // refund_used (`used >= ABS(amount)`), so a dual-role row — one that gives
+    // a refund AND also receives one (refund_allocs) or carries a Splitwise
+    // virtual leg — vanished entirely even though its net is non-zero. The net
+    // is already computed in the SELECT (identical math to v39); this just
+    // moves the drop test onto that net. For every single-role refund the
+    // allocation cap (Σ links ≤ refund magnitude, enforced in the API layer)
+    // makes the net-based drop identical to the old behavior, so fully-consumed
+    // pure refunds still disappear. Columns are unchanged from v39.
+    version: 40,
+    sql: `
+      DROP VIEW IF EXISTS txn_effective;
+      CREATE VIEW txn_effective AS
+      WITH refund_allocs AS (
+        SELECT expense_id, SUM(amount) AS refunded
+        FROM transaction_links GROUP BY expense_id
+      ),
+      refund_used AS (
+        SELECT refund_id, SUM(amount) AS used
+        FROM transaction_links GROUP BY refund_id
+      ),
+      splitwise_virtual AS (
+        SELECT s.transaction_id AS expense_id,
+               MAX(0, s.owed_to_me - s.paid_amount - COALESCE(r.refunded, 0))
+                 AS virtual
+        FROM splitwise_links s
+        LEFT JOIN refund_allocs r ON r.expense_id = s.transaction_id
+      ),
+      effective AS (
+        SELECT t.id, t.account_id, t.date,
+               t.amount
+                 + COALESCE(r.refunded, 0)
+                 + COALESCE(sv.virtual, 0)
+                 - CASE WHEN t.amount > 0 THEN COALESCE(ru.used, 0)
+                        ELSE -COALESCE(ru.used, 0) END
+                 AS amount,
+               t.currency, t.description, t.category,
+               ru.used AS refund_used
+        FROM transactions t
+        LEFT JOIN refund_allocs r ON r.expense_id = t.id
+        LEFT JOIN refund_used ru ON ru.refund_id = t.id
+        LEFT JOIN splitwise_virtual sv ON sv.expense_id = t.id
+      )
+      SELECT id, account_id, date, amount, currency, description, category
+      FROM effective
+      WHERE refund_used IS NULL OR ABS(amount) >= 0.005;
     `,
   },
 ];

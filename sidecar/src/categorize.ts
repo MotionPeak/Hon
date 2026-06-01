@@ -318,14 +318,26 @@ export class Categorizer {
               byRule += 1;
             }
           }
+          // A confident in-set LLM classification is cached like the others; a
+          // null result (parse error / throw / out-of-set) is NOT — we still
+          // display 'Other' for this run but never persist a fallback, so one
+          // transient hiccup can't pin a merchant to 'Other' forever and a
+          // later/stronger model gets to retry. (M2)
+          let cacheable = true;
           if (!category && classifier) {
-            category = await classifier.classify(description);
-            source = 'llm';
-            byLlm += 1;
+            const classified = await classifier.classify(description);
+            if (classified) {
+              category = classified;
+              source = 'llm';
+              byLlm += 1;
+            } else {
+              category = 'Other';
+              cacheable = false;
+            }
           }
           if (category) {
             this.repo.applyCategory(description, category);
-            this.repo.cacheCategory(key, category, source);
+            if (cacheable) this.repo.cacheCategory(key, category, source);
           }
           this.status.done += 1;
           this.status.message = `Categorized ${this.status.done} of ${this.status.total}…`;
@@ -361,7 +373,7 @@ export class Categorizer {
     allowedNames: string[],
     allowedSet: Set<string>,
   ): Promise<{
-    classify: (description: string) => Promise<string>;
+    classify: (description: string) => Promise<string | null>;
     dispose: () => void;
   } | null> {
     if (!this.llm.isReady()) return null;
@@ -376,17 +388,25 @@ export class Categorizer {
       properties: { category: { enum: allowedNames } },
     };
 
-    const classify = async (description: string): Promise<string> => {
+    // Returns a confident in-set category, or null when the result can't be
+    // trusted (parse error, prompt throw/timeout, or an out-of-set value). The
+    // caller treats null as "couldn't classify" and must NOT cache it. (M2)
+    const classify = async (description: string): Promise<string | null> => {
       try {
-        const response = await session.prompt(`Transaction: "${description}"`, {
+        // Bound the input: a merchant string this long is already unambiguous,
+        // and an unbounded description shouldn't blow up the prompt. The output
+        // is a single category name, so a small token cap is plenty.
+        const text = description.slice(0, 200);
+        const response = await session.prompt(`Transaction: "${text}"`, {
           jsonSchema: schema,
+          maxTokens: 32,
         });
         const parsed = JSON.parse(response) as { category?: string };
         return parsed.category && allowedSet.has(parsed.category)
           ? parsed.category
-          : 'Other';
+          : null;
       } catch {
-        return 'Other';
+        return null;
       }
     };
 

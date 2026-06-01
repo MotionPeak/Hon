@@ -37,6 +37,7 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { timingSafeEqual } from 'node:crypto';
 import { rewriteApiPrefix } from './httpRewrite.js';
 import { openDatabase, type DbHandle } from './db.js';
 import { Repo } from './repo.js';
@@ -236,11 +237,25 @@ function isPublicRoute(method: string, url: string): boolean {
   return PUBLIC_ROUTE_PREFIXES.some((prefix) => url.startsWith(prefix));
 }
 
+// Constant-time compare of the presented Authorization header against the
+// expected `Bearer <token>`. A plain `!==` leaks, via its early-exit timing,
+// how many leading bytes matched — enough to recover a secret byte-by-byte over
+// many requests. timingSafeEqual avoids that, but it THROWS on length
+// mismatch, so we guard equal length first (and bail out for a missing/array
+// header). The length check itself is not secret — the token length is fixed.
+function tokenMatches(authHeader: string | string[] | undefined): boolean {
+  if (typeof authHeader !== 'string') return false;
+  const expected = Buffer.from(`Bearer ${token}`);
+  const presented = Buffer.from(authHeader);
+  if (presented.length !== expected.length) return false;
+  return timingSafeEqual(presented, expected);
+}
+
 // Every request must carry the bearer token the app generated this launch,
 // except for the public routes enumerated above.
 app.addHook('onRequest', async (req, reply) => {
   if (isPublicRoute(req.method, req.url)) return;
-  if (token && req.headers.authorization !== `Bearer ${token}`) {
+  if (token && !tokenMatches(req.headers.authorization)) {
     return reply.code(401).send({ error: 'unauthorized' });
   }
 });
@@ -345,9 +360,14 @@ app.get('/logo/:companyId', async (req, reply) => {
   if (domain && !/^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(domain)) {
     return reply.code(400).send({ error: 'bad domain' });
   }
-  // SSRF guard: a supplied ?domain= must be a public brand hostname — never a
-  // raw IP / loopback / link-local / *.local / *.internal (H-1). Otherwise a
-  // local tab could make the engine fetch internal hosts (e.g. 169.254.169.254).
+  // SSRF guard (string layer): a supplied ?domain= must be a public brand
+  // hostname — never a raw IP / loopback / link-local / *.local / *.internal
+  // (H-1). This name check alone can't stop DNS rebinding (a public name whose
+  // A record points inward) or a redirect to an internal host, so getLogo →
+  // resolveFromWeb resolves every host and re-validates every redirect hop
+  // against private/loopback/link-local addresses before fetching (M7/M8, see
+  // assertPublicHost/safeFetch in logos.ts). With HON_HOST=0.0.0.0 (LAN mode)
+  // /logo is token-exempt, so that resolved-IP check is the real backstop.
   if (domain && !isPublicLogoDomain(domain)) {
     return reply.code(400).send({ error: 'bad domain' });
   }
@@ -971,6 +991,19 @@ app.put(
     if (!expense) return reply.code(404).send({ error: 'expense not found' });
     const refund = repo.getTransaction(body.refundId);
     if (!refund) return reply.code(404).send({ error: 'refund transaction not found' });
+
+    // Direction guard: `txn_effective` folds the refund INTO the expense and
+    // drops the refund row, so the legs must point opposite ways — the expense
+    // an outflow (amount < 0), the refund an inflow (amount > 0). The web picker
+    // already enforces this (ActivityView only offers opposite-sign candidates),
+    // but a direct API call could link two outflows or two inflows and corrupt
+    // the net-amount view. Reject both bad orientations explicitly.
+    if (expense.amount >= 0) {
+      return reply.code(400).send({ error: 'the linked expense must be an outflow' });
+    }
+    if (refund.amount <= 0) {
+      return reply.code(400).send({ error: 'the refund must be an inflow' });
+    }
 
     // Validate amount. Omitted → allocate the full unallocated remainder
     // capped at the expense's outstanding magnitude.
@@ -2255,8 +2288,24 @@ app.get('/budget', async (req, reply) => {
       : undefined;
   const report = buildBudgetReport(repo, range, projection);
   // `/budget` is the one caller that commits the piggy ledger — so a report
-  // built elsewhere (insights) cannot overwrite it with stale figures.
-  persistPiggyMonth(repo, report.piggy);
+  // built elsewhere (insights) cannot overwrite it with stale figures. But the
+  // ledger may only be written for the CURRENT cycle: persistPiggyMonth keys
+  // rows on the caller-supplied month label, so a request for a past (or future)
+  // cycle would otherwise overwrite that month's frozen contributions with
+  // figures recomputed from today's data. Persist only when today falls inside
+  // the requested [start, end) window. No range = the calendar-month fallback,
+  // which is always the current cycle. The window comes from the client's
+  // local-time cycle math, so we compare against a local-time "today" (same
+  // basis as currentMonthRange), not a UTC date, to avoid a near-midnight
+  // off-by-one at the boundary.
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(
+    now.getDate(),
+  ).padStart(2, '0')}`;
+  const isCurrentCycle = !range || (range.start <= today && today < range.end);
+  if (isCurrentCycle) {
+    persistPiggyMonth(repo, report.piggy);
+  }
   return report;
 });
 

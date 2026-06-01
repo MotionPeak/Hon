@@ -710,17 +710,28 @@ export function normalizeTransaction(txn: RawTransaction): NormalizedTransaction
   // update the row once the conversion lands.
   const sameCurrency = txn.chargedCurrency === txn.originalCurrency
     || !txn.chargedCurrency || !txn.originalCurrency;
-  const amount = (typeof txn.chargedAmount === 'number' && txn.chargedAmount !== 0)
-    ? txn.chargedAmount
-    : (sameCurrency && typeof txn.originalAmount === 'number' && txn.originalAmount !== 0
-        ? txn.originalAmount
-        : txn.chargedAmount);
+  // The library types these as `number`, but the account it lives on reaches
+  // us through an unchecked `as unknown as RawAccount` cast — info/memo/pending
+  // rows can ship a missing or NaN chargedAmount. Guard with Number.isFinite so
+  // `amount` is always a real number: an undefined/NaN binding would throw on
+  // the `amount REAL NOT NULL` column and roll back the whole scrape batch.
+  const chargedUsable = Number.isFinite(txn.chargedAmount) && txn.chargedAmount !== 0;
+  const originalUsable = sameCurrency
+    && Number.isFinite(txn.originalAmount) && txn.originalAmount !== 0;
+  // Track which source the figure came from so the currency label matches it —
+  // when the fallback uses originalAmount, the amount is in originalCurrency,
+  // not chargedCurrency (labelling it chargedCurrency would mislabel a
+  // foreign-original figure). A 0 fallback is currency-neutral.
+  const amount = chargedUsable ? txn.chargedAmount : (originalUsable ? txn.originalAmount : 0);
+  const currency = (!chargedUsable && originalUsable)
+    ? (txn.originalCurrency ?? txn.chargedCurrency ?? 'ILS')
+    : (txn.chargedCurrency ?? txn.originalCurrency ?? 'ILS');
   return {
     externalId: `${base}:${date}`,
     date,
     processedDate: txn.processedDate ? israelDate(txn.processedDate) : undefined,
     amount,
-    currency: txn.chargedCurrency ?? txn.originalCurrency ?? 'ILS',
+    currency,
     description: txn.description,
     memo: txn.memo,
     kind: txn.type,
