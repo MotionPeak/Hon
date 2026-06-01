@@ -21,6 +21,7 @@ import { dirname, join } from 'node:path';
 import puppeteerVanilla, { type Browser, type Frame, type Page } from 'puppeteer';
 import { addExtra } from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+import { z } from 'zod';
 import type {
   BrokeragePerformanceData, CompanyInfo, NormalizedAccount, NormalizedHolding,
   PerformancePoint, ScrapeOutcome,
@@ -30,6 +31,76 @@ import { persistSession, restoreSession, type SessionHandle } from './session.js
 import { makeLog } from './log.js';
 
 const pensionLog = makeLog('pension');
+
+/**
+ * Meitav's GetCalculatedHerkevNehasim endpoint returns the portfolio's
+ * security-by-security breakdown as a scraped, untyped JSON blob — sometimes a
+ * bare array, sometimes wrapped as `{ t: [...] }`. These two schemas are the
+ * single trust boundary for that data: the envelope tolerates either shape
+ * (anything else → no rows), and the row schema validates + normalizes one
+ * security. The coercion mirrors the original `Number()`/`String()` leniency
+ * exactly — a finite Shovi is kept even when it arrives as a numeric string or
+ * null (→ 0); a non-finite one is dropped, as is a row with no identifier.
+ */
+const HerkevNehasimEnvelope = z
+  .union([
+    z.array(z.unknown()),
+    z.object({ t: z.array(z.unknown()) }).transform((b) => b.t),
+  ])
+  .catch([]);
+
+const HerkevNehasimRow = z
+  .object({
+    MisparTik: z.unknown(),
+    MisparNiar: z.unknown(),
+    TeurNiar: z.unknown(),
+    Shovi: z.unknown(),
+  })
+  .partial()
+  .transform((row) => ({
+    tikKey: row.MisparTik != null ? String(row.MisparTik) : '',
+    symbol: row.MisparNiar != null ? String(row.MisparNiar) : '',
+    description: (row.TeurNiar ?? '').toString().trim(),
+    value: Number(row.Shovi),
+  }))
+  .refine((r) => Number.isFinite(r.value))
+  .refine((r) => r.symbol !== '' || r.description !== '');
+
+/**
+ * Parse a Meitav GetCalculatedHerkevNehasim response body into holdings grouped
+ * by portfolio number (MisparTik). Pure and total: any shape of input yields a
+ * Map (empty when the body isn't usable), never a throw. Rows that fail
+ * validation are counted and logged at debug level rather than silently
+ * dropped, so a missing holding is traceable with HON_LOG_DEBUG=1.
+ */
+export function parseHerkevNehasim(body: unknown): Map<string, NormalizedHolding[]> {
+  const rows = HerkevNehasimEnvelope.parse(body);
+  const holdingsByTik = new Map<string, NormalizedHolding[]>();
+  let skipped = 0;
+  for (const raw of rows) {
+    const parsed = HerkevNehasimRow.safeParse(raw);
+    if (!parsed.success) {
+      skipped += 1;
+      continue;
+    }
+    const { tikKey, symbol, description, value } = parsed.data;
+    const list = holdingsByTik.get(tikKey) ?? [];
+    list.push({
+      symbol: symbol || description,
+      description: description || undefined,
+      // Meitav reports per-security value but no unit count for a discretionary
+      // portfolio (the manager rebalances). The UI uses `value` directly.
+      units: 0,
+      value: Math.round(value * 100) / 100,
+      currency: 'ILS',
+    });
+    holdingsByTik.set(tikKey, list);
+  }
+  if (skipped > 0) {
+    pensionLog.debug('holdings.skipped', { skipped, total: rows.length });
+  }
+  return holdingsByTik;
+}
 
 // Wrap the project's puppeteer with the stealth plugin — it masks the most
 // obvious automation tells, which helps every portal load normally.
@@ -1328,8 +1399,10 @@ async function readClalBalances(page: Page): Promise<NormalizedAccount[]> {
         const row = title.parentElement;
         const sumEl = row ? row.querySelector('.financial-data-sum') : null;
         if (!sumEl) continue;
-        const raw = norm(sumEl.innerText || '').replace(/,/g, '');
-        const value = parseFloat((raw.match(/[\d]+(?:\.[\d]+)?/) || ['0'])[0]);
+        // Spans render the balance split as "₪ 123,456 . 78"; strip everything
+        // but digits and the decimal dot, then parse. An empty/non-numeric sum
+        // becomes NaN and is skipped below — no phantom ₪0 account.
+        const value = parseFloat((sumEl.innerText || '').replace(/[^\d.]/g, ''));
         if (!Number.isFinite(value)) continue;
         // The provider name sits in a `.link-info` within the product card.
         let provider = '';
@@ -1500,32 +1573,9 @@ async function readMeitavBalances(
     const nehasimDump = dump.find((d) =>
       d.url.toLowerCase().endsWith('/manager/getcalculatedherkevnehasim'),
     );
-    const holdingsByTik = new Map<string, NormalizedHolding[]>();
-    if (nehasimDump && nehasimDump.body) {
-      const rows: any[] = Array.isArray(nehasimDump.body)
-        ? nehasimDump.body
-        : Array.isArray(nehasimDump.body?.t) ? nehasimDump.body.t : [];
-      for (const row of rows) {
-        const value = Number(row.Shovi);
-        if (!Number.isFinite(value)) continue;
-        const tikKey = row.MisparTik != null ? String(row.MisparTik) : '';
-        const symbol = row.MisparNiar != null ? String(row.MisparNiar) : '';
-        const description = (row.TeurNiar ?? '').toString().trim();
-        if (!symbol && !description) continue;
-        const list = holdingsByTik.get(tikKey) ?? [];
-        list.push({
-          symbol: symbol || description,
-          description: description || undefined,
-          // Meitav reports per-security value but no unit count for a
-          // discretionary portfolio (the manager rebalances). The UI uses
-          // `value` directly when present, so units stays at 0.
-          units: 0,
-          value: Math.round(value * 100) / 100,
-          currency: 'ILS',
-        });
-        holdingsByTik.set(tikKey, list);
-      }
-    }
+    // Holdings arrive as a scraped, untyped JSON dump — parseHerkevNehasim
+    // (top of file) is the single trust boundary that validates + normalizes it.
+    const holdingsByTik = parseHerkevNehasim(nehasimDump?.body);
     // Portfolio inception — Meitav reports it two ways and we use whichever
     // we get:
     //   • GetTikInfo's `TarichPticha` is the broker-recorded open date of
