@@ -18,3 +18,10 @@ data/
 
 # Local Claude Code session scratch (worktrees, memory) — never track
 .claude/
+
+# Internal dev docs — kept on disk locally, not tracked in the repo.
+# README.md is the only doc the repo ships.
+/CLAUDE.md
+/HANDOFF.md
+/PROJECT-RULES.md
+/docs/
