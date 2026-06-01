@@ -2,42 +2,9 @@
 // /companies, /assets, and /loans endpoints. Kept in lockstep with
 // sidecar/src/repo.ts + sidecar/src/scrapers.ts + sidecar/src/loans.ts.
 
-export type CompanyType = 'bank' | 'card' | 'brokerage' | 'pension';
-
-export interface Company {
-  id: string;
-  name: string;
-  loginFields: string[];
-  type: CompanyType;
-  domain?: string;
-  interactive?: boolean;
-}
-
-export interface Connection {
-  id: string;
-  companyId: string;
-  displayName: string;
-  createdAt: string;
-  lastScrapeAt: string | null;
-  lastStatus: string | null;
-  hasCredentials: boolean;
-  /** Months of transaction history to fetch each sync. Default 12; range [1, 24]. */
-  historyMonths: number;
-}
-
-export interface Account {
-  id: string;
-  connectionId: string;
-  companyId: string;
-  connectionName: string;
-  accountNumber: string;
-  label: string | null;
-  balance: number | null;
-  currency: string;
-  updatedAt: string;
-  excluded: boolean;
-  inceptionDate: string | null;
-}
+export type { CompanyType, Company } from '@hon/shared/company';
+export type { Connection } from '@hon/shared/connection';
+export type { Account } from '@hon/shared/account';
 
 export interface ManualAsset {
   id: string;
