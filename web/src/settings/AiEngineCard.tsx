@@ -72,7 +72,16 @@ export function AiEngineCard() {
   }
 
   const setMode = (mode: LlmMode): void => {
-    setStatus({ ...status, mode });
+    setStatus({ ...status, mode }); // optimistic, for a snappy toggle
+    // Ollama/API persist their mode through their panel's Save (which also
+    // carries the URL/model/key). "On-device" has no separate Save step, so
+    // without this POST the engine kept its old provider and the toggle snapped
+    // back on the next refresh. Persist it, then reconcile from the server.
+    if (mode === 'local') {
+      void api<LlmStatus>('/llm/provider', 'POST', { mode: 'local' })
+        .then(setStatus)
+        .catch(() => { void refresh(); });
+    }
   };
 
   return (
