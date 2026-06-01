@@ -11,7 +11,7 @@
 // migration here, mirror the change in ./schema.ts; the schema-parity test
 // (tests/schema.parity.test.ts) fails if they drift.
 
-export const SCHEMA_VERSION = 38;
+export const SCHEMA_VERSION = 39;
 
 export const MIGRATIONS: { version: number; sql: string }[] = [
   {
@@ -703,5 +703,52 @@ export const MIGRATIONS: { version: number; sql: string }[] = [
     // with excluded_manual (the repo setters enforce that).
     version: 38,
     sql: `ALTER TABLE transactions ADD COLUMN savings INTEGER;`,
+  },
+  {
+    // Recreate txn_effective so a transaction that is BOTH used as a refund
+    // (refund_used) AND itself refunded / Splitwise-reduced (refund_allocs /
+    // splitwise_virtual) reflects ALL of those adjustments. The previous
+    // definition branched exclusively — `WHEN ru.used IS NOT NULL` returned the
+    // refund-side amount and silently ignored r.refunded + sv.virtual — so a
+    // dual-role row showed a wrong effective amount in every spending
+    // aggregate. The combined form adds the expense-side adjustments and
+    // subtracts the amount lent out as a refund (magnitude-wise, toward zero),
+    // and is identical to the old result for every single-role row.
+    version: 39,
+    sql: `
+      DROP VIEW IF EXISTS txn_effective;
+      CREATE VIEW txn_effective AS
+      WITH refund_allocs AS (
+        SELECT expense_id, SUM(amount) AS refunded
+        FROM transaction_links GROUP BY expense_id
+      ),
+      refund_used AS (
+        SELECT refund_id, SUM(amount) AS used
+        FROM transaction_links GROUP BY refund_id
+      ),
+      splitwise_virtual AS (
+        SELECT s.transaction_id AS expense_id,
+               MAX(0, s.owed_to_me - s.paid_amount - COALESCE(r.refunded, 0))
+                 AS virtual
+        FROM splitwise_links s
+        LEFT JOIN refund_allocs r ON r.expense_id = s.transaction_id
+      )
+      SELECT t.id, t.account_id, t.date,
+             t.amount
+               + COALESCE(r.refunded, 0)
+               + COALESCE(sv.virtual, 0)
+               - CASE WHEN t.amount > 0 THEN COALESCE(ru.used, 0)
+                      ELSE -COALESCE(ru.used, 0) END
+               AS amount,
+             t.currency, t.description, t.category
+      FROM transactions t
+      LEFT JOIN refund_allocs r ON r.expense_id = t.id
+      LEFT JOIN refund_used ru ON ru.refund_id = t.id
+      LEFT JOIN splitwise_virtual sv ON sv.expense_id = t.id
+      WHERE NOT EXISTS (
+        SELECT 1 FROM refund_used u
+        WHERE u.refund_id = t.id AND u.used >= ABS(t.amount) - 0.005
+      );
+    `,
   },
 ];

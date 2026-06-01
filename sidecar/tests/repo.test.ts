@@ -276,3 +276,39 @@ describe('savings mark', () => {
     expect(total).toBe(500);
   });
 });
+
+describe('txn_effective — dual-role transaction (migration 39)', () => {
+  it('reflects BOTH the refund it received and the amount it was used as a refund for', () => {
+    const { repo, db } = makeRepo();
+    const conn = repo.createConnection('beinleumi', 'Dual');
+    repo.saveScrapeResult(conn.id, [{
+      accountNumber: '1', currency: 'ILS', balance: 0,
+      transactions: [
+        { externalId: 'E', date: '2026-05-10', amount: -200, currency: 'ILS', description: 'E' },
+        { externalId: 'X', date: '2026-05-10', amount: -100, currency: 'ILS', description: 'X' },
+        { externalId: 'R', date: '2026-05-10', amount: 30, currency: 'ILS', description: 'R' },
+      ],
+    }]);
+    const idOf = (ext: string): string =>
+      repo.listTransactions({}).find((r) => r.externalId === ext)!.id;
+    const e = idOf('E');
+    const x = idOf('X');
+    const r = idOf('R');
+
+    // X is refunded by R (X is the expense side) AND X is itself used as a
+    // refund for E (X is the refund side) — the dual role the old view got wrong.
+    repo.setTransactionLink(x, r, 30);
+    repo.setTransactionLink(e, x, 20);
+
+    const eff = (id: string): number =>
+      (db.prepare('SELECT amount FROM txn_effective WHERE id = ?').get(id) as
+        { amount: number } | undefined)?.amount ?? NaN;
+
+    // X: -100 original + 30 refund received - (-20 used as refund, toward zero
+    // for a negative amount) = -50. The old branch-exclusive view returned -80,
+    // ignoring the 30 refund.
+    expect(eff(x)).toBeCloseTo(-50, 5);
+    // E received a 20 refund from X: -200 + 20 = -180.
+    expect(eff(e)).toBeCloseTo(-180, 5);
+  });
+});
