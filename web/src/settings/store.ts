@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 export interface Settings {
   monthStartDay: number;
   projectRecurring: boolean;
@@ -18,44 +20,29 @@ export const DEFAULT_SETTINGS: Settings = {
   spendingAvgMonths: 12,
 };
 
+// Each field validates against its own rule and `.catch(default)`s back to the
+// default when the stored value is missing or corrupt (hand-edited localStorage,
+// an old shape, a stray string). monthStartDay is clamped to 1..28 because it
+// drives every cycle boundary; spendingAvgMonths to 1..120; cardProviders must
+// be an array of strings (z.array(z.string()) enforces both). Unknown keys are
+// dropped. This replaces the old imperative validate-after-the-fact ladder.
+const settingsSchema = z.object({
+  monthStartDay: z.number().int().min(1).max(28).catch(DEFAULT_SETTINGS.monthStartDay),
+  projectRecurring: z.boolean().catch(DEFAULT_SETTINGS.projectRecurring),
+  hideCardTotals: z.boolean().catch(DEFAULT_SETTINGS.hideCardTotals),
+  cardProviders: z.array(z.string()).catch(() => [...DEFAULT_SETTINGS.cardProviders]),
+  spendingAvgMonths: z.number().min(1).max(120).catch(DEFAULT_SETTINGS.spendingAvgMonths),
+});
+
 export function loadSettings(): Settings {
-  const base: Settings = {
-    ...DEFAULT_SETTINGS,
-    cardProviders: [...DEFAULT_SETTINGS.cardProviders],
-  };
+  let raw: unknown = {};
   try {
-    const raw = JSON.parse(localStorage.getItem('honSettings') ?? '{}');
-    if (raw && typeof raw === 'object') Object.assign(base, raw);
+    const parsed = JSON.parse(localStorage.getItem('honSettings') ?? '{}');
+    if (parsed && typeof parsed === 'object') raw = parsed;
   } catch {
-    // Malformed JSON — keep defaults.
+    // Malformed JSON — parse {} so every field falls back to its default.
   }
-  // Must be an array of strings — a non-array, or array with non-string
-  // elements (hand-edited/corrupted), would break the card-bill exclusion
-  // filter that compares provider names. Reset wholesale on any violation.
-  if (
-    !Array.isArray(base.cardProviders)
-    || !base.cardProviders.every((p) => typeof p === 'string')
-  ) {
-    base.cardProviders = [...DEFAULT_SETTINGS.cardProviders];
-  }
-  if (
-    typeof base.spendingAvgMonths !== 'number'
-    || base.spendingAvgMonths < 1
-    || base.spendingAvgMonths > 120
-  ) {
-    base.spendingAvgMonths = DEFAULT_SETTINGS.spendingAvgMonths;
-  }
-  // monthStartDay drives every cycle boundary — a corrupted/hand-edited value
-  // (31, 0, NaN, a string) would misbucket transactions. Clamp to a valid day.
-  if (
-    typeof base.monthStartDay !== 'number'
-    || !Number.isInteger(base.monthStartDay)
-    || base.monthStartDay < 1
-    || base.monthStartDay > 28
-  ) {
-    base.monthStartDay = DEFAULT_SETTINGS.monthStartDay;
-  }
-  return base;
+  return settingsSchema.parse(raw);
 }
 
 export function saveSettings(s: Settings): void {

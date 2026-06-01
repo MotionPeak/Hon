@@ -105,20 +105,23 @@ export class InsightsGenerator {
   }
 }
 
-function buildPrompt(report: BudgetReport, a: Analytics): string {
-  const trend =
-    a.spendingChangePct == null
-      ? 'no prior month to compare'
-      : `${a.spendingChangePct >= 0 ? 'up' : 'down'} ` +
-        `${Math.abs(Math.round(a.spendingChangePct))}%`;
+/** "up 12%" / "down 5%". */
+function trendPhrase(pct: number | null): string {
+  if (pct == null) return 'no prior month to compare';
+  return `${pct >= 0 ? 'up' : 'down'} ${Math.abs(Math.round(pct))}%`;
+}
 
-  const cats = a.byCategory.slice(0, 8).map((c) => {
-    const move =
-      c.changePct == null
-        ? 'nothing spent here last month'
-        : `${c.changePct >= 0 ? '+' : ''}${Math.round(c.changePct)}% vs last month`;
-    return `- ${c.category}: ${Math.round(c.amount)} ${a.currency} (${move})`;
-  });
+/** "+8% vs last month" / "-3% vs last month" for a single category. */
+function categoryMovePhrase(pct: number | null): string {
+  if (pct == null) return 'nothing spent here last month';
+  return `${pct >= 0 ? '+' : ''}${Math.round(pct)}% vs last month`;
+}
+
+function buildPrompt(report: BudgetReport, a: Analytics): string {
+  const trend = trendPhrase(a.spendingChangePct);
+  const cats = a.byCategory.slice(0, 8).map(
+    (c) => `- ${c.category}: ${Math.round(c.amount)} ${a.currency} (${categoryMovePhrase(c.changePct)})`,
+  );
 
   const essentials = report.essentials.map((line) => {
     const spent = Math.round(line.spent);
