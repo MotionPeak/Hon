@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { LoansView } from './LoansView';
+import { renderWithProviders as render } from '../test/renderWithProviders';
 import { installFetchMock } from '../test/mockFetch';
 import { useUiStore } from '../store/uiStore';
 

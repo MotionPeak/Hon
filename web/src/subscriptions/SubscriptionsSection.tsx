@@ -5,9 +5,6 @@ import {
 } from '../recurring/helpers';
 import type { Transaction } from '../activity/types';
 
-/** Fallback active window for merchants without an explicit frequency. */
-const SUB_ACTIVE_DAYS = 40;
-
 type FreqOrIgnore = Frequency | 'ignore';
 
 interface SubRow {
@@ -56,7 +53,7 @@ function detect(data: SubInput): SubRow[] {
         ? userFreq
         : 'monthly';
     const charge = Math.abs(last.amount);
-    const activeWindow = RECURRENCE_ACTIVE_DAYS[freq] || SUB_ACTIVE_DAYS;
+    const activeWindow = RECURRENCE_ACTIVE_DAYS[freq];
     rows.push({
       key,
       desc: merchantName(last.description),
@@ -140,8 +137,11 @@ export function SubscriptionsSection({ transactions, frequencies, cancelled }: S
   }
 
   const { flagged, active, userCancelled, autoLapsed } = bucket(rows, cancelled);
-  const monthly = active.reduce((s, r) => s + r.monthly, 0);
-  const currency = rows[0]?.currency ?? 'ILS';
+  // Only sum the displayed currency — never add a $ subscription into a ₪ total
+  // under one symbol. (Per-currency breakdown is future work; the common case
+  // is a single currency.)
+  const currency = active[0]?.currency ?? rows[0]?.currency ?? 'ILS';
+  const monthly = active.reduce((s, r) => (r.currency === currency ? s + r.monthly : s), 0);
 
   return (
     <section className="subs-section">

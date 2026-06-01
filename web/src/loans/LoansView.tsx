@@ -1,14 +1,9 @@
 import { useEffect, useState } from 'react';
-import { api } from '../api';
 import { uiActions } from '../store/uiStore';
 import { money } from '../format';
 import type { Loan, RateType } from '../accounts/types';
 import { DelayedLoader } from '../ui/DelayedLoader';
-
-interface LoansResponse {
-  loans: Loan[];
-  rates: { prime: number | null; cpiNow: number | null };
-}
+import { useLoans } from '../api/hooks/useLoans';
 
 const TRACK_LABELS: Record<RateType, string> = {
   fixed: 'Fixed',
@@ -27,13 +22,7 @@ function formatRemainingMonths(monthsRemaining: number): string {
 }
 
 export function LoansView() {
-  const [data, setData] = useState<LoansResponse | null>(null);
-
-  useEffect(() => {
-    api<LoansResponse>('/loans')
-      .then(setData)
-      .catch(() => setData({ loans: [], rates: { prime: null, cpiNow: null } }));
-  }, []);
+  const { data, isLoading, isError } = useLoans();
 
   // Clear the "unseen loan ids" queue the moment the user opens this tab.
   // The durable queue lives in localStorage (AccountsView's detector writes it);
@@ -43,7 +32,18 @@ export function LoansView() {
     uiActions.refreshUnseenLoans();
   }, []);
 
-  if (data === null) return <DelayedLoader />;
+  if (isLoading) return <DelayedLoader />;
+
+  if (isError || !data) {
+    return (
+      <div className="loans-view">
+        <h1>Loans</h1>
+        <p className="blank">
+          ⚠️ Couldn't load your loans. Check the engine is running and try again.
+        </p>
+      </div>
+    );
+  }
 
   if (data.loans.length === 0) {
     return (
