@@ -1080,6 +1080,7 @@ export class Repo {
   saveScrapeResult(
     connectionId: string,
     accounts: NormalizedAccount[],
+    opts?: { reconcileBalances?: boolean },
   ): { accounts: number; transactions: number } {
     const upsertAccount = this.db.prepare(
       `INSERT INTO accounts (id, connection_id, account_number, label, balance, currency, updated_at)
@@ -1313,6 +1314,40 @@ export class Repo {
           if (!scrapedExternalIds.has(sp.external_id)) {
             this.db.prepare('DELETE FROM transactions WHERE id = ?').run(sp.id);
           }
+        }
+      }
+
+      // Stale-account reconciliation (pension only — opts.reconcileBalances).
+      // Pension portals key an account on its rendered display label; when that
+      // text changes between syncs the account upserts under a NEW
+      // account_number, orphaning the old row — which keeps its last balance and
+      // DOUBLE-COUNTS in net worth (audit M6). This method only runs on a
+      // successful scrape, so when the scrape returned at least one account we
+      // null the balance of any of this connection's accounts that weren't in it.
+      // Null, not delete: ON DELETE CASCADE would drop the account's snapshot
+      // history, and a partial-but-successful scrape would lose a real account —
+      // a nulled balance falls out of totals (summary SUMs balance, NULL-safe)
+      // while the row + history survive and the account self-heals (balance
+      // restored by the COALESCE upsert) the next time the provider reports it.
+      // Scoped to pension; banks/cards are excluded (a card's incremental window
+      // legitimately omits accounts, and bank closures are rare + user-visible).
+      if (opts?.reconcileBalances && accounts.length > 0) {
+        const scraped = new Set(accounts.map((a) => a.accountNumber));
+        const existing = this.db
+          .prepare('SELECT account_number FROM accounts WHERE connection_id = ? AND balance IS NOT NULL')
+          .all(connectionId) as { account_number: string }[];
+        const retire = this.db.prepare(
+          'UPDATE accounts SET balance = NULL, updated_at = ? WHERE connection_id = ? AND account_number = ?',
+        );
+        let retired = 0;
+        for (const e of existing) {
+          if (!scraped.has(e.account_number)) {
+            retire.run(now, connectionId, e.account_number);
+            retired += 1;
+          }
+        }
+        if (retired > 0) {
+          repoLog.info('saveScrapeResult.reconciled', { connectionId, retired });
         }
       }
     })();

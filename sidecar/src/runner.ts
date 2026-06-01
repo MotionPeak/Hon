@@ -388,7 +388,13 @@ export class ScrapeRunner {
       });
 
       const persistDone = log.timer('persist', { accounts: outcome.accounts.length });
-      const saved = this.repo.saveScrapeResult(args.connectionId, outcome.accounts);
+      // Pension portals key accounts on a display label, so a relabel can orphan
+      // the old row and double-count it; let the repo null stale balances for
+      // pension connections (see saveScrapeResult). Bank/card/SnapTrade are not
+      // reconciled — their per-scrape account sets aren't authoritative.
+      const saved = this.repo.saveScrapeResult(args.connectionId, outcome.accounts, {
+        reconcileBalances: isPensionCompany(args.companyId),
+      });
       persistDone({ accountsSaved: saved.accounts, transactionsSaved: saved.transactions });
       const txnsFetched = outcome.accounts.reduce((s, a) => s + a.transactions.length, 0);
       log.info('persist.skipped', {

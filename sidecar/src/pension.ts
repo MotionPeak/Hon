@@ -1452,13 +1452,13 @@ async function readMeitavBalances(
     }
     for (const p of byAccount.values()) {
       accounts.push({
-        // Keyed on the display name for backward-compat with already-saved rows.
-        // Switching to the stable AccountNum (p.key) is more robust against a
-        // portal label change, BUT would orphan existing `meitav:<name>` rows on
-        // the next sync — double-counting the balance — until a safe account
-        // reconciliation pass exists (reconcile-by-absence is unsafe against a
-        // partial scrape that could wrongly delete a real account). Deferred:
-        // see HON-AUDIT.md M6. The name still rides along as `label`.
+        // Keyed on the display name. A portal relabel would orphan the old row,
+        // but saveScrapeResult's pension-scoped stale-account reconciliation nulls
+        // an orphaned account's balance on the next successful sync, so it stops
+        // double-counting in net worth and self-heals if it reappears. Keeping the
+        // label key (over the stable AccountNum p.key) avoids a one-time re-key
+        // that would orphan every existing meitav:<name> row at once. The name
+        // also rides along as `label`. (audit M6)
         accountNumber: `meitav:${p.name}`,
         label: p.name,
         balance: Math.round(p.balance * 100) / 100,
