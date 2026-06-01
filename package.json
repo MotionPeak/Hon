@@ -7,6 +7,7 @@
     "dev:engine": "npm --prefix sidecar run web",
     "dev:web": "npm --prefix web run dev",
     "install:all": "npm --prefix sidecar install && npm --prefix web install",
+    "postinstall": "npm --prefix sidecar install && npm --prefix web install",
     "test": "npm --prefix sidecar test && npm --prefix web test -- --run",
     "typecheck": "npm --prefix web run typecheck"
   },
