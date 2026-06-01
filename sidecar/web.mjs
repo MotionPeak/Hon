@@ -56,6 +56,14 @@ if (!process.env.PUPPETEER_EXECUTABLE_PATH) {
 
 const port = process.env.HON_PORT || '4000';
 
+// --skip-web-build: vite is serving the React app on :5173 (with the /api → :4000
+// proxy), so the engine doesn't need a fresh web/dist build. Saves ~2s on every
+// dev launch and — more importantly — lets `npm run dev` boot even when the
+// TypeScript checker is unhappy about something the user hasn't fixed yet. Also
+// flips the auto-opened browser URL from :4000 → :5173 so the user lands on the
+// hot-reloading dev server, not the stale built copy.
+const skipWebBuild = process.argv.includes('--skip-web-build');
+
 // Resolve the OS-default Hon data dir (overridable with HON_DATA_DIR) — same
 // dir the engine uses for the SQLite DB, the vault, and sidecar.log. The
 // persistent dev token lives here too so the URL stays the same across
@@ -91,7 +99,12 @@ function loadOrCreateToken() {
 
 // Token precedence: env override > on-disk persistent > fresh-and-saved.
 const token = process.env.HON_TOKEN || loadOrCreateToken();
-const url = `http://127.0.0.1:${port}/#token=${token}`;
+// In dev mode the user wants vite's hot-reloading server (:5173), not the
+// engine-served built copy (:4000). The token works against either since
+// vite proxies /api/* through to the engine.
+const url = skipWebBuild
+  ? `http://localhost:5173/#token=${token}`
+  : `http://127.0.0.1:${port}/#token=${token}`;
 const isWindows = process.platform === 'win32';
 // Headless hosts (a NAS, a server) have no browser to open.
 const headless = process.env.HON_HEADLESS === '1';
@@ -133,7 +146,9 @@ function buildIsStale() {
   return inputNewest > builtAt;
 }
 
-if (buildIsStale()) {
+if (skipWebBuild) {
+  console.log('Skipping web/dist build (dev mode — vite serves the UI on :5173).');
+} else if (buildIsStale()) {
   console.log('Building the web app (web/dist is missing or out of date)…');
   const build = spawnSync(isWindows ? 'npm.cmd' : 'npm', ['run', 'build'], {
     cwd: webDir,

@@ -4,7 +4,7 @@
   "description": "Top-level orchestrator for Hon — runs the sidecar engine + the React UI together so `cd Hon && npm run dev` is all you need.",
   "scripts": {
     "dev": "concurrently --kill-others --names engine,web --prefix-colors yellow,cyan \"npm:dev:engine\" \"npm:dev:web\"",
-    "dev:engine": "npm --prefix sidecar run web",
+    "dev:engine": "npm --prefix sidecar run web -- --skip-web-build",
     "dev:web": "npm --prefix web run dev",
     "install:all": "npm --prefix sidecar install && npm --prefix web install",
     "postinstall": "npm --prefix sidecar install && npm --prefix web install",
