@@ -110,9 +110,20 @@ export async function restoreSession(
     log.debug('restore.skip', { reason: !session ? 'no-handle' : 'no-cookies' });
     return false;
   }
+  // Drop cookies that already expired (each carries its own `expires`, often
+  // shorter than the 7-day bundle TTL). Replaying a dead auth cookie leaves the
+  // bank half-authenticated — the failure mode the 'max' denylist works around.
+  const nowSec = Date.now() / 1000;
+  const live = cookies.filter(
+    (c) => !(typeof c.expires === 'number' && c.expires > 0 && c.expires < nowSec),
+  );
+  if (live.length === 0) {
+    log.debug('restore.skip', { reason: 'all-expired' });
+    return false;
+  }
   try {
-    await browser.setCookie(...cookies);
-    log.info('restore.ok', { cookieCount: cookies.length });
+    await browser.setCookie(...live);
+    log.info('restore.ok', { cookieCount: live.length });
     return true;
   } catch (err) {
     log.warn('restore.failed', {

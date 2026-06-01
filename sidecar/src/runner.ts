@@ -78,6 +78,10 @@ export class ScrapeRunner {
 
   private readonly runs = new Map<string, RunStatus>();
   private readonly otpResolvers = new Map<string, (code: string) => void>();
+  // The pending OTP-timeout timers, keyed by runId, so a run that ends for any
+  // OTHER reason can clear its timer instead of leaking a 5-minute setTimeout
+  // that later fires a spurious otp.timeout and rejects an abandoned promise.
+  private readonly otpTimers = new Map<string, ReturnType<typeof setTimeout>>();
   // Connection ids with a scrape currently in flight. Guards against a second
   // sync stomping on the same connection's browser/session while the first is
   // still running. Added in start(), cleared in finish() — the single terminal
@@ -146,6 +150,7 @@ export class ScrapeRunner {
         stack: err instanceof Error ? err.stack : undefined,
       });
       this.otpResolvers.delete(status.runId);
+      this.clearOtpTimer(status.runId);
       this.active.delete(args.connectionId);
       // Mirror finish()'s minimal terminal state so the connection/run don't
       // appear stuck running. Wrapped because this runs outside execute()'s
@@ -197,6 +202,15 @@ export class ScrapeRunner {
     }
   }
 
+  /** Clears and forgets the OTP-timeout timer for a run, if one is armed. */
+  private clearOtpTimer(runId: string): void {
+    const timer = this.otpTimers.get(runId);
+    if (timer) {
+      clearTimeout(timer);
+      this.otpTimers.delete(runId);
+    }
+  }
+
   /**
    * Called by the scraper when it needs a 2FA code; resolves when one arrives.
    *
@@ -214,6 +228,7 @@ export class ScrapeRunner {
       status.message = 'Waiting for the verification code…';
       const timer = setTimeout(() => {
         this.otpResolvers.delete(status.runId);
+        this.otpTimers.delete(status.runId);
         runnerLog.warn('otp.timeout', {
           runId: status.runId,
           connectionId: status.connectionId,
@@ -221,8 +236,9 @@ export class ScrapeRunner {
         });
         reject(new Error('otp.timeout'));
       }, timeoutMs);
+      this.otpTimers.set(status.runId, timer);
       this.otpResolvers.set(status.runId, (code) => {
-        clearTimeout(timer);
+        this.clearOtpTimer(status.runId);
         status.status = 'running';
         status.message = 'Submitting the verification code…';
         runnerLog.info('otp.submitted', {
@@ -514,6 +530,9 @@ export class ScrapeRunner {
     message: string,
   ): void {
     this.otpResolvers.delete(status.runId);
+    // Clear any armed OTP-timeout timer so a finished run can't fire a spurious
+    // otp.timeout up to 5 minutes later (only the user-submit path cleared it).
+    this.clearOtpTimer(status.runId);
     // finish() is the single terminal transition for every run (success and
     // every error/exception path routes here), so clearing the per-connection
     // lock here guarantees it is always released — even on failure (H-7).

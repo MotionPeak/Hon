@@ -66,6 +66,9 @@ const TIMEOUT_MS = 8000;
 
 // Resolved logos, including misses (null), so a domain is fetched only once.
 const memCache = new Map<string, CachedLogo | null>();
+// In-flight web resolutions, so concurrent first-time requests for the same id
+// share one fetch (and one disk write) instead of racing.
+const inFlightWeb = new Map<string, Promise<CachedLogo | null>>();
 
 function logosDir(dataDir: string): string {
   const dir = join(dataDir, 'logos');
@@ -174,12 +177,22 @@ export async function getLogo(
     return logo;
   }
 
-  const logo = await resolveFromWeb(domain);
-  memCache.set(companyId, logo);
-  // Only successes are cached to disk, so a failed fetch is retried next launch.
-  if (logo) {
-    writeFileSync(imgPath, logo.body);
-    writeFileSync(typePath, logo.contentType);
+  const existing = inFlightWeb.get(companyId);
+  if (existing) return existing;
+  const fetchPromise = (async () => {
+    const logo = await resolveFromWeb(domain);
+    memCache.set(companyId, logo);
+    // Only successes are cached to disk, so a failed fetch is retried next launch.
+    if (logo) {
+      writeFileSync(imgPath, logo.body);
+      writeFileSync(typePath, logo.contentType);
+    }
+    return logo;
+  })();
+  inFlightWeb.set(companyId, fetchPromise);
+  try {
+    return await fetchPromise;
+  } finally {
+    inFlightWeb.delete(companyId);
   }
-  return logo;
 }

@@ -366,16 +366,17 @@ async function clickByText(page: Page, needle: string, timeoutMs: number): Promi
     ({ n, tag }: { n: string; tag: string }) => {
       const els: any[] = Array.from(document.querySelectorAll('button, a, [role="button"]'));
       let best: any = null;
-      let bestDepth = -1;
       for (const el of els) {
         if (!el.offsetParent) continue;
         if (el.disabled) continue;
         if (el.getAttribute && el.getAttribute('aria-disabled') === 'true') continue;
         const txt = (el.innerText || el.textContent || '').trim();
         if (!txt.includes(n)) continue;
-        let d = 0;
-        for (let p = el; p; p = p.parentElement) d += 1;
-        if (d > bestDepth) { best = el; bestDepth = d; }
+        // First visible, enabled match in document order — biases toward the
+        // real action button over a more-deeply-nested decorative inner
+        // <a>/<span role=button> that happens to carry the same text.
+        best = el;
+        break;
       }
       if (!best) return false;
       try { best.scrollIntoView({ block: 'center', inline: 'center' }); } catch {/* ignore */}
@@ -1006,14 +1007,6 @@ function sweepStaleProfileLocks(profileDir: string): void {
     try { unlinkSync(join(profileDir, rel)); }
     catch (err: any) { if (err?.code !== 'ENOENT') {/* best effort */} }
   }
-}
-
-// Fills `input[name="<name>"]` via the native setter so React's onChange
-// handler picks up the new value. fillVisibleInput picks "any visible
-// input" which is too loose for BuyMe (the page hosts hidden search +
-// marketing email inputs alongside the modal field).
-async function fillNamedInput(page: Page, name: string, value: string): Promise<void> {
-  await fillBySelector(page, `input[name="${name}"]`, value);
 }
 
 // Click the first visible, enabled element matching `childSelector` whose

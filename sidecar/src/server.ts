@@ -972,6 +972,22 @@ app.put(
     const refund = repo.getTransaction(body.refundId);
     if (!refund) return reply.code(404).send({ error: 'refund transaction not found' });
 
+    // txn_effective can't represent a transaction that is BOTH used as a refund
+    // and itself refunded — its refund-side branch ignores the expense-side
+    // adjustment, so such a dual-role row would show a wrong effective amount.
+    // Block creating that shape (the user unlinks the other side first).
+    const links = repo.listTransactionLinks();
+    if (links.some((l) => l.refundId === id)) {
+      return reply.code(409).send({
+        error: 'this transaction is already used as a refund elsewhere — unlink it there first',
+      });
+    }
+    if (links.some((l) => l.expenseId === body.refundId)) {
+      return reply.code(409).send({
+        error: 'this refund is itself refunded elsewhere — unlink it there first',
+      });
+    }
+
     // Validate amount. Omitted → allocate the full unallocated remainder
     // capped at the expense's outstanding magnitude.
     const refundMagnitude = Math.abs(refund.amount);
