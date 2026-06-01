@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Snaptrade } from 'snaptrade-typescript-sdk';
-import type { Position } from 'snaptrade-typescript-sdk';
+import type { Account, Position } from 'snaptrade-typescript-sdk';
 import type {
   BrokeragePerformanceData,
   BrokerageRangeStats,
@@ -331,7 +331,6 @@ export async function runSnapTradeSync(
     // awaiting each account in series (5 accounts × ~3s each would block ~15s).
     // Promise.all preserves order, so the accounts array stays deterministic.
     const accounts: NormalizedAccount[] = await Promise.all(raw.map(async (account) => {
-      const amount = account.balance?.total?.amount;
       const accountId = account.id;
       onProgress?.(`Fetching holdings for ${accountLabel(account)}…`);
       const [holdings, inceptionDate] = await Promise.all([
@@ -340,36 +339,7 @@ export async function runSnapTradeSync(
           ? Promise.resolve(undefined)
           : fetchEarliestActivityDate(snaptrade, userId, userSecret, accountId),
       ]);
-      let balance = typeof amount === 'number' ? amount : undefined;
-      let currency = account.balance?.total?.currency ?? 'USD';
-      // Some brokerages don't populate balance.total (only a per-currency or
-      // positions breakdown). Rather than contribute a silent 0/undefined to
-      // net worth, derive a value from the priced positions when they share a
-      // single currency.
-      if (balance === undefined && holdings.length > 0) {
-        const currencies = new Set(holdings.map((h) => h.currency));
-        if (currencies.size === 1) {
-          const priced = holdings.filter((h) => h.price != null);
-          // Only derive when at least one position is actually priced —
-          // otherwise the reduce sums to a meaningless 0. But once we have
-          // priced positions, accept the result regardless of sign: a 0 net
-          // (fully closed) or a negative net (margin debit / net short) is a
-          // valid balance and must not be silently discarded.
-          if (priced.length > 0) {
-            balance = priced.reduce((s, h) => s + h.units * h.price!, 0);
-            currency = holdings[0]!.currency;
-          }
-        }
-      }
-      return {
-        accountNumber: account.number || account.id,
-        label: accountLabel(account),
-        balance,
-        currency,
-        transactions: [],
-        holdings,
-        inceptionDate,
-      };
+      return normalizeSnapTradeAccount(account, holdings, inceptionDate);
     }));
 
     if (accounts.length === 0) {
@@ -748,6 +718,48 @@ function accountLabel(account: { name?: string | null; institution_name?: string
     return name.includes(institution) ? name : `${institution} · ${name}`;
   }
   return name || institution || 'Brokerage account';
+}
+
+/**
+ * Build a NormalizedAccount from a SnapTrade Account and its already-fetched
+ * holdings. Kept pure (no SDK calls) so the balance-derivation logic is
+ * unit-testable in isolation — the per-account map in runSnapTradeSync owns the
+ * async fetches and delegates the rest here.
+ *
+ * When the brokerage reports a total balance we use it (a reported 0 is real,
+ * so we test for a number, not truthiness). Otherwise we derive one from the
+ * priced positions — but only when they share a single currency, since you
+ * can't sum mixed-currency positions without FX rates, and only when at least
+ * one is priced (else the reduce is a meaningless 0). A derived 0 (fully closed)
+ * or negative (margin debit / net short) net is valid and is kept, not discarded.
+ */
+export function normalizeSnapTradeAccount(
+  account: Account,
+  holdings: NormalizedHolding[],
+  inceptionDate: string | undefined,
+): NormalizedAccount {
+  const amount = account.balance?.total?.amount;
+  let balance = typeof amount === 'number' ? amount : undefined;
+  let currency = account.balance?.total?.currency ?? 'USD';
+  if (balance === undefined && holdings.length > 0) {
+    const currencies = new Set(holdings.map((h) => h.currency));
+    if (currencies.size === 1) {
+      const priced = holdings.filter((h) => h.price != null);
+      if (priced.length > 0) {
+        balance = priced.reduce((s, h) => s + h.units * h.price!, 0);
+        currency = holdings[0]!.currency;
+      }
+    }
+  }
+  return {
+    accountNumber: account.number || account.id,
+    label: accountLabel(account),
+    balance,
+    currency,
+    transactions: [],
+    holdings,
+    inceptionDate,
+  };
 }
 
 function describeSnapTradeError(err: unknown): string {

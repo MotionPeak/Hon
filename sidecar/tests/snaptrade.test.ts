@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { isFeatureDisabled, normalizePosition } from '../src/snaptrade.js';
-import type { Position } from 'snaptrade-typescript-sdk';
+import { isFeatureDisabled, normalizePosition, normalizeSnapTradeAccount } from '../src/snaptrade.js';
+import type { Account, Position } from 'snaptrade-typescript-sdk';
+import type { NormalizedHolding } from '../src/scrapers.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -24,6 +25,36 @@ function makePosition(overrides: Partial<Position> = {}): Position {
     cash_equivalent: false,
     ...overrides,
   };
+}
+
+/** Build a NormalizedHolding fixture (a priced AAPL position in USD by default). */
+function makeHolding(over: Partial<NormalizedHolding> = {}): NormalizedHolding {
+  return { symbol: 'AAPL', units: 10, price: 100, currency: 'USD', ...over };
+}
+
+/**
+ * Build a minimal SnapTrade Account fixture. `noBalanceTotal: true` drops
+ * balance.total entirely (the brokerage-doesn't-report-a-total case); otherwise
+ * amount/currency default to 1000/USD. Uses `in` checks so an explicit `null`
+ * or `''` override is honoured rather than replaced by the default.
+ */
+function makeAccount(opts: {
+  id?: string; number?: string; name?: string | null; institution_name?: string;
+  amount?: number | null; currency?: string | null; noBalanceTotal?: boolean;
+} = {}): Account {
+  const total = opts.noBalanceTotal
+    ? undefined
+    : {
+        amount: 'amount' in opts ? opts.amount : 1000,
+        currency: 'currency' in opts ? opts.currency : 'USD',
+      };
+  return {
+    id: opts.id ?? 'acc-uuid-1',
+    number: 'number' in opts ? opts.number : '999-12345',
+    name: 'name' in opts ? opts.name : 'Margin',
+    institution_name: 'institution_name' in opts ? opts.institution_name : 'Interactive Brokers',
+    balance: { total },
+  } as unknown as Account;
 }
 
 // ---------------------------------------------------------------------------
@@ -165,5 +196,89 @@ describe('isFeatureDisabled', () => {
   it('is false for other errors', () => {
     expect(isFeatureDisabled({ responseBody: { code: '1012', detail: 'nope' } })).toBe(false);
     expect(isFeatureDisabled(new Error('network'))).toBe(false);
+  });
+});
+
+// normalizeSnapTradeAccount is the pure heart of the per-account map in
+// runSnapTradeSync: given a SnapTrade Account + its already-fetched holdings, it
+// produces a NormalizedAccount. These cases pin the balance-derivation logic
+// exactly — reported total wins, otherwise a single-currency priced sum is
+// derived (0/negative kept), and a reported 0 is never overridden.
+describe('normalizeSnapTradeAccount', () => {
+  it('uses the brokerage-reported total balance and currency directly', () => {
+    const result = normalizeSnapTradeAccount(makeAccount({ amount: 1234.5, currency: 'USD' }), [], undefined);
+    expect(result.balance).toBe(1234.5);
+    expect(result.currency).toBe('USD');
+    expect(result.transactions).toEqual([]);
+  });
+
+  it('maps accountNumber, label, holdings and inceptionDate through', () => {
+    const holdings = [makeHolding()];
+    const acct = makeAccount({ number: '111-222', name: 'Roth', institution_name: 'Wealthsimple' });
+    const result = normalizeSnapTradeAccount(acct, holdings, '2021-03-01');
+    expect(result.accountNumber).toBe('111-222');
+    expect(result.label).toBe('Wealthsimple · Roth');
+    expect(result.holdings).toBe(holdings);
+    expect(result.inceptionDate).toBe('2021-03-01');
+  });
+
+  it('falls back to the account id when the number is empty', () => {
+    const acct = makeAccount({ number: '', id: 'uuid-xyz' });
+    expect(normalizeSnapTradeAccount(acct, [], undefined).accountNumber).toBe('uuid-xyz');
+  });
+
+  it('labels with name-only, institution-only, or a default when fields are missing', () => {
+    expect(normalizeSnapTradeAccount(makeAccount({ name: 'Solo', institution_name: '' }), [], undefined).label)
+      .toBe('Solo');
+    expect(normalizeSnapTradeAccount(makeAccount({ name: null, institution_name: 'IBKR' }), [], undefined).label)
+      .toBe('IBKR');
+    expect(normalizeSnapTradeAccount(makeAccount({ name: null, institution_name: '' }), [], undefined).label)
+      .toBe('Brokerage account');
+  });
+
+  it('derives a balance from single-currency priced holdings when no total is reported', () => {
+    const holdings = [
+      makeHolding({ units: 10, price: 100, currency: 'USD' }),
+      makeHolding({ units: 5, price: 20, currency: 'USD' }),
+    ];
+    const result = normalizeSnapTradeAccount(makeAccount({ noBalanceTotal: true }), holdings, undefined);
+    expect(result.balance).toBe(1100);
+    expect(result.currency).toBe('USD');
+  });
+
+  it('does not derive a balance when holdings span multiple currencies', () => {
+    const holdings = [makeHolding({ currency: 'USD' }), makeHolding({ currency: 'EUR' })];
+    const result = normalizeSnapTradeAccount(makeAccount({ noBalanceTotal: true }), holdings, undefined);
+    expect(result.balance).toBeUndefined();
+    expect(result.currency).toBe('USD');
+  });
+
+  it('does not derive a balance when no position is priced', () => {
+    const holdings = [makeHolding({ price: undefined }), makeHolding({ price: undefined })];
+    const result = normalizeSnapTradeAccount(makeAccount({ noBalanceTotal: true }), holdings, undefined);
+    expect(result.balance).toBeUndefined();
+  });
+
+  it('keeps a derived balance of 0 or negative (fully closed / net short / margin debit)', () => {
+    const zero = [makeHolding({ units: 0, price: 100, currency: 'USD' })];
+    expect(normalizeSnapTradeAccount(makeAccount({ noBalanceTotal: true }), zero, undefined).balance).toBe(0);
+    const short = [makeHolding({ units: -10, price: 5, currency: 'USD' })];
+    expect(normalizeSnapTradeAccount(makeAccount({ noBalanceTotal: true }), short, undefined).balance).toBe(-50);
+  });
+
+  it('treats a reported balance of 0 as real and does not derive over it', () => {
+    const holdings = [makeHolding({ units: 10, price: 100, currency: 'USD' })]; // would derive 1000
+    const result = normalizeSnapTradeAccount(makeAccount({ amount: 0, currency: 'USD' }), holdings, undefined);
+    expect(result.balance).toBe(0);
+  });
+
+  it('treats a null total amount as missing and derives instead', () => {
+    const holdings = [makeHolding({ units: 2, price: 50, currency: 'USD' })];
+    expect(normalizeSnapTradeAccount(makeAccount({ amount: null }), holdings, undefined).balance).toBe(100);
+  });
+
+  it('uses the reported total currency when present', () => {
+    expect(normalizeSnapTradeAccount(makeAccount({ amount: 500, currency: 'CAD' }), [], undefined).currency)
+      .toBe('CAD');
   });
 });
