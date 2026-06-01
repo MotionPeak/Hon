@@ -221,12 +221,18 @@ type App = typeof app;
 //                      leaving it token-exempt is low risk in the interim.
 //  - `/snaptrade/done` the post-connection landing page SnapTrade opens in
 //                      a browser, which carries no token.
-const PUBLIC_ROUTE_PREFIXES = ['/logo/', '/snaptrade/done', '/assets/'];
+// Slash-terminated subtrees — startsWith is safe (only their own paths match).
+const PUBLIC_ROUTE_PREFIXES = ['/logo/', '/assets/'];
+// Exact paths — matched against the path only, so a sibling like
+// /snaptrade/donezo or a future /snaptrade/done-export can't inherit exemption.
+const PUBLIC_ROUTE_EXACT = ['/snaptrade/done'];
 
 /** True for the small set of GET routes that are exempt from the token. */
 function isPublicRoute(method: string, url: string): boolean {
   if (method !== 'GET') return false;
   if (url === '/') return true;
+  const path = url.split('?')[0];
+  if (PUBLIC_ROUTE_EXACT.includes(path)) return true;
   return PUBLIC_ROUTE_PREFIXES.some((prefix) => url.startsWith(prefix));
 }
 
@@ -528,6 +534,20 @@ app.post('/snaptrade/portal', async (req, reply) => {
   if (!credentials || typeof credentials !== 'object') {
     return reply.code(400).send({ error: 'credentials are required' });
   }
+  // customRedirect is echoed into the third-party portal URL — constrain it to
+  // the engine's own loopback origin so a malformed/foreign value can't break
+  // the done-callback contract or redirect the browser somewhere unexpected.
+  if (body.customRedirect !== undefined) {
+    let valid = false;
+    try {
+      const u = new URL(body.customRedirect);
+      valid = (u.protocol === 'http:' || u.protocol === 'https:')
+        && (u.hostname === '127.0.0.1' || u.hostname === 'localhost');
+    } catch { valid = false; }
+    if (!valid) {
+      return reply.code(400).send({ error: 'invalid customRedirect' });
+    }
+  }
 
   try {
     const portal = await createPortalLink(
@@ -570,7 +590,10 @@ app.post('/snaptrade/brokerages', async (req, reply) => {
 // an existing connection (count == baseline).
 app.get('/snaptrade/done', async (req, reply) => {
   const q = req.query as { honConn?: string; status?: string } | undefined;
-  if (q?.honConn && typeof q.honConn === 'string') {
+  // Only flip the done flag for a connection that actually exists — this route
+  // is token-exempt, so a bare honConn string shouldn't let any loopback caller
+  // mark an arbitrary id done.
+  if (q?.honConn && typeof q.honConn === 'string' && repo?.getConnection(q.honConn)) {
     snaptradeDoneRegistry.markDone(q.honConn);
   }
   reply.type('text/html; charset=utf-8').send(`<!doctype html>
@@ -707,7 +730,12 @@ app.get('/transactions', async (req, reply) => {
   const q = req.query as { accountId?: string; limit?: string };
   // No limit → full history (the month-by-month UIs window client-side and
   // need every cycle). An explicit limit still paginates.
-  const limit = q.limit ? Math.max(1, Number(q.limit) || 200) : undefined;
+  // Honor an explicit non-negative integer limit exactly (including 0); only
+  // fall back to "no limit" when the param is absent or not a valid count.
+  const limitN = Number(q.limit);
+  const limit = q.limit !== undefined && Number.isInteger(limitN) && limitN >= 0
+    ? limitN
+    : undefined;
   return { transactions: repo.listTransactions({ accountId: q.accountId, limit }) };
 });
 
@@ -949,9 +977,7 @@ app.put(
     const refundMagnitude = Math.abs(refund.amount);
     const expenseMagnitude = Math.abs(expense.amount);
     const remaining = repo.refundRemaining(body.refundId)
-      + (repo.listTransactionLinks().find(
-          (l) => l.expenseId === id && l.refundId === body.refundId,
-        )?.amount ?? 0);
+      + (repo.getTransactionLink(id, body.refundId) ?? 0);
     const amount = typeof body.amount === 'number' ? body.amount : Math.min(remaining, expenseMagnitude);
     if (!Number.isFinite(amount) || amount <= 0) {
       return reply.code(400).send({ error: 'amount must be a positive number' });
@@ -2209,8 +2235,11 @@ app.get('/budget', async (req, reply) => {
       ? { start: q.start, end: q.end, label: q.start.slice(0, 7) }
       : undefined;
   const num = (v: string | undefined): number | undefined => {
+    // Treat an empty value (e.g. `?expectedIncome=`) as absent, not as an
+    // explicit 0 override — Number('') is 0, which would zero the projection.
+    if (v === undefined || v === '') return undefined;
     const n = Number(v);
-    return v !== undefined && Number.isFinite(n) ? n : undefined;
+    return Number.isFinite(n) ? n : undefined;
   };
   const expectedIncome = num(q.expectedIncome);
   const expectedFixed = num(q.expectedFixed);

@@ -728,6 +728,20 @@ export class Repo {
       .all();
   }
 
+  /** The allocated amount for one (expense, refund) link, or undefined if the
+   *  pair isn't linked. Targeted lookup so callers don't materialize the whole
+   *  transaction_links table just to read one row's amount. */
+  getTransactionLink(expenseId: string, refundId: string): number | undefined {
+    return this.orm
+      .select({ amount: transactionLinksT.amount })
+      .from(transactionLinksT)
+      .where(and(
+        eq(transactionLinksT.expenseId, expenseId),
+        eq(transactionLinksT.refundId, refundId),
+      ))
+      .get()?.amount;
+  }
+
   /**
    * Adds (or updates) one allocation: links `amount` of a refund/inflow
    * transaction to an expense. Multiple expenses can share one refund — the
