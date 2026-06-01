@@ -43,6 +43,16 @@ export function loadSettings(): Settings {
   ) {
     base.spendingAvgMonths = DEFAULT_SETTINGS.spendingAvgMonths;
   }
+  // monthStartDay drives every cycle boundary — a corrupted/hand-edited value
+  // (31, 0, NaN, a string) would misbucket transactions. Clamp to a valid day.
+  if (
+    typeof base.monthStartDay !== 'number'
+    || !Number.isInteger(base.monthStartDay)
+    || base.monthStartDay < 1
+    || base.monthStartDay > 28
+  ) {
+    base.monthStartDay = DEFAULT_SETTINGS.monthStartDay;
+  }
   return base;
 }
 

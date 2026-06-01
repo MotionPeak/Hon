@@ -124,10 +124,18 @@ export function CarAssetForm({ onClose, onSaved }: CarAssetFormProps) {
   const openYad2 = () => { window.open(YAD2_PRICE_LIST, '_blank'); };
 
   const submit = handleSubmit(async (values) => {
+    // Blank → null, but a typed 0 (new car: 0 km) is a real value, so don't
+    // let `|| null` swallow it.
+    const numOrNull = (s: string): number | null => {
+      const t = (s ?? '').trim();
+      if (t === '') return null;
+      const n = Number(t);
+      return Number.isFinite(n) ? n : null;
+    };
     const details: CarDetails = {
       plate: cleanPlate(values.plate) || null,
-      year: Number(values.year) || null,
-      km: Number(values.km) || null,
+      year: numOrNull(values.year),
+      km: numOrNull(values.km),
       ownership: values.ownership,
       make: spec?.make ?? null,
       model: spec?.model ?? null,

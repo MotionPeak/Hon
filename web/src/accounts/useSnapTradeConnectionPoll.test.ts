@@ -73,8 +73,8 @@ describe('useSnapTradeConnectionPoll', () => {
     expect(onIncrease).not.toHaveBeenCalled();
   });
 
-  it('tolerates 3 consecutive fetch failures, then surfaces onError', async () => {
-    let failuresLeft = 4;
+  it('surfaces onError on the 3rd consecutive fetch failure', async () => {
+    let failuresLeft = 3;
     installFetchMock({
       'GET /api/snaptrade/connections/conn-1/count': () => {
         if (failuresLeft-- > 0) throw new Error('network down');
@@ -90,9 +90,9 @@ describe('useSnapTradeConnectionPoll', () => {
       }),
     );
 
-    // 4 consecutive failures: ticks at t=0, 3s, 6s, 9s.
+    // Failures at t=0 (1st) and t=3s (2nd) are tolerated; the 3rd at t=6s
+    // surfaces onError — matching the documented "after 3 failures".
     await vi.advanceTimersByTimeAsync(0);
-    await vi.advanceTimersByTimeAsync(3_000);
     await vi.advanceTimersByTimeAsync(3_000);
     expect(onError).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(3_000);

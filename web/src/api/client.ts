@@ -12,4 +12,3 @@
 // and the migration can proceed module by module without a flag day.
 
 export { api, ApiError, hasToken } from '../api';
-export type { } from '../api';

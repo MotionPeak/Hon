@@ -29,6 +29,9 @@ const categoriesResponse = z.object({ categories: z.array(listCategorySchema) })
 // list query that the mutation invalidates. Parse the echo LENIENTLY (passthrough
 // so a partial echo from a test/older engine doesn't reject the mutation).
 const categoryEcho = z.object({ category: z.looseObject({ name: z.string() }) });
+// DELETE echoes how many transactions were reassigned — parse it like the
+// others so a renamed field fails loudly instead of silently showing 0 moved.
+const deleteEcho = z.object({ transactionsMoved: z.number().optional() });
 
 /** GET /categories → the full category set (built-ins + custom). */
 export async function listCategories(): Promise<Category[]> {
@@ -52,9 +55,9 @@ export async function updateCategory(name: string, patch: CategoryUpdate): Promi
 /** DELETE /categories/:name — reassigns its transactions to 'Other'. Returns
  *  how many transactions were moved (for the confirm dialog). */
 export async function deleteCategory(name: string): Promise<{ transactionsMoved: number }> {
-  const data = await api<{ ok: boolean; transactionsMoved?: number }>(
+  const data = await api<unknown>(
     `/categories/${encodeURIComponent(name)}`,
     'DELETE',
   );
-  return { transactionsMoved: data.transactionsMoved ?? 0 };
+  return { transactionsMoved: deleteEcho.parse(data).transactionsMoved ?? 0 };
 }

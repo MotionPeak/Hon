@@ -59,7 +59,7 @@ export function useSnapTradeConnectionPoll(args: Args): void {
       } catch (err) {
         if (cancelled) return;
         consecutiveFailures += 1;
-        if (consecutiveFailures > MAX_CONSECUTIVE_FAILURES) {
+        if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
           const msg = err instanceof Error ? err.message : String(err);
           onErrorRef.current(msg);
           return;

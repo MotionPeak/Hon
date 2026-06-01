@@ -621,17 +621,21 @@ function ProviderSyncDialog({
   useEffect(() => {
     if (!syncId) return;
     let cancelled = false;
+    let handle: ReturnType<typeof setInterval> | undefined;
     const tick = async () => {
       try {
         const s = await api<SyncStatus>(`/vouchers/sync/${cfg.id}/status/${syncId}`);
         if (cancelled) return;
         setStatus(s);
-        if (s.finished) return;
+        // Stop polling once the sync finished — otherwise the interval keeps
+        // hitting the status endpoint every 1.5s for as long as the result
+        // screen stays open.
+        if (s.finished && handle) { clearInterval(handle); handle = undefined; }
       } catch { /* keep polling */ }
     };
     void tick();
-    const handle = setInterval(() => { void tick(); }, 1500);
-    return () => { cancelled = true; clearInterval(handle); };
+    handle = setInterval(() => { void tick(); }, 1500);
+    return () => { cancelled = true; if (handle) clearInterval(handle); };
   }, [syncId, cfg.id]);
 
   const start = async (): Promise<void> => {
@@ -678,9 +682,11 @@ function ProviderSyncDialog({
 
   const submitOtp = async (): Promise<void> => {
     if (!syncId) return;
+    setError(null); // clear any stale "wrong code" before the retry
     setOtpSubmitting(true);
     try {
       await api(`/vouchers/sync/${cfg.id}/otp`, 'POST', { syncId, code: otp.trim() });
+      setOtp(''); // a clean field for the next step
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e));
     } finally {
@@ -842,8 +848,13 @@ function VoucherFormModal({ voucher, onClose, onSaved }: VoucherFormModalProps) 
     setError(null);
     if (!provider.trim()) { setError('Provider is required.'); return; }
     if (!name.trim()) { setError('Name is required.'); return; }
-    const b = Number(balance);
-    if (!Number.isFinite(b)) { setError('Balance must be a number.'); return; }
+    const trimmedBalance = balance.trim();
+    const b = Number(trimmedBalance);
+    // Reject blank (Number('') is 0) and negatives — a voucher balance is a
+    // non-negative amount that feeds net worth and the per-currency total.
+    if (trimmedBalance === '' || !Number.isFinite(b) || b < 0) {
+      setError('Balance must be a non-negative number.'); return;
+    }
     const body = {
       provider: provider.trim(),
       name: name.trim(),
