@@ -191,7 +191,7 @@ export function AccountsView() {
   // forget pending intervals when a sync transitions states.
   const pollTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (): Promise<AccountsData> => {
     try {
       const [c, conn, acc, ast, l, brk] = await Promise.all([
         api<{ companies: Company[] }>('/companies'),
@@ -201,14 +201,18 @@ export function AccountsView() {
         api<{ loans: Loan[] }>('/loans'),
         api<{ holdings: Holding[] }>('/brokerage'),
       ]);
-      setData({
+      const next: AccountsData = {
         companies: c.companies, connections: conn.connections, accounts: acc.accounts,
         assets: ast.assets, loans: l.loans, holdings: brk.holdings,
-      });
+      };
+      setData(next);
+      return next;
     } catch {
-      setData({
+      const empty: AccountsData = {
         companies: [], connections: [], accounts: [], assets: [], loans: [], holdings: [],
-      });
+      };
+      setData(empty);
+      return empty;
     }
   }, []);
 
@@ -593,8 +597,8 @@ export function AccountsView() {
                   onLinked={async () => {
                     const before = data?.accounts.length ?? 0;
                     await api(`/connections/${linkSnapTradeFor.connectionId}/scrape`, 'POST', {});
-                    await refresh();
-                    const after = data?.accounts.length ?? 0;
+                    const next = await refresh();
+                    const after = next.accounts.length;
                     return { accountsAdded: Math.max(0, after - before) };
                   }}
                   onCancel={() => setLinkSnapTradeFor(null)}
@@ -757,12 +761,13 @@ interface ConnectionCardProps {
 
 function ConnectionCard({ connection, company, accounts, callbacks, showHistory }: ConnectionCardProps) {
   const meta = company?.name ?? connection.companyId;
-  const total = accounts.reduce(
-    (sum, a) => a.excluded || a.balance == null ? sum : sum + a.balance,
-    0,
-  );
-  const totalCurrency = accounts.find((a) => !a.excluded && a.balance != null)?.currency ?? 'ILS';
-  const hasBalances = accounts.some((a) => a.balance != null && !a.excluded);
+  const balanceAccounts = accounts.filter((a) => a.balance != null && !a.excluded);
+  const total = balanceAccounts.reduce((sum, a) => sum + (a.balance ?? 0), 0);
+  const totalCurrency = balanceAccounts[0]?.currency ?? 'ILS';
+  // Only a single-currency connection has a meaningful summed total — never add
+  // dollars and shekels into one figure under one symbol.
+  const sameCurrency = new Set(balanceAccounts.map((a) => a.currency)).size === 1;
+  const hasBalances = balanceAccounts.length > 0;
   const syncState = callbacks.syncStates[connection.id] ?? { kind: 'idle' as const };
   const syncing = syncState.kind === 'starting' || syncState.kind === 'running'
     || syncState.kind === 'needs-otp';
@@ -786,8 +791,7 @@ function ConnectionCard({ connection, company, accounts, callbacks, showHistory 
             )}
             {company?.id === 'snaptrade' && (
               <LinkBrokerageButton
-                connectionId={connection.id}
-                accounts={accounts}
+                count={accounts.length}
                 onLink={() => callbacks.onLinkSnapTradeBrokerage(connection.id)}
               />
             )}
@@ -873,7 +877,7 @@ function ConnectionCard({ connection, company, accounts, callbacks, showHistory 
           );
         })}
       </ul>
-      {hasBalances && (
+      {hasBalances && sameCurrency && (
         <footer className="conn-total">
           <span>Total</span>
           <span className="amount">{money(total, totalCurrency)}</span>
@@ -959,15 +963,14 @@ function BalanceModal({ account, onClose, onSaved }: BalanceModalProps) {
 const SNAPTRADE_FREE_TIER_LIMIT = 5;
 
 interface LinkBrokerageButtonProps {
-  connectionId: string;
-  accounts: Account[];
+  // Count of this connection's accounts — ConnectionCard already scoped them.
+  count: number;
   onLink: () => void;
 }
 
-function LinkBrokerageButton({ connectionId, accounts, onLink }: LinkBrokerageButtonProps) {
-  const brokerageAccounts = accounts.filter((a) => a.connectionId === connectionId);
-  const atLimit = brokerageAccounts.length >= SNAPTRADE_FREE_TIER_LIMIT;
-  const label = brokerageAccounts.length === 0 ? 'Link a brokerage' : 'Link another brokerage';
+function LinkBrokerageButton({ count, onLink }: LinkBrokerageButtonProps) {
+  const atLimit = count >= SNAPTRADE_FREE_TIER_LIMIT;
+  const label = count === 0 ? 'Link a brokerage' : 'Link another brokerage';
   return (
     <button
       type="button"
@@ -1152,7 +1155,11 @@ const assetEditFormSchema = z.object({
   name: z.string().trim().min(1, 'Name is required.'),
   value: z
     .string()
-    .refine((s) => Number.isFinite(Number(s)), { message: 'Value must be a number.' }),
+    // Match AddManualAssetForm: a manual asset value must be positive, so a 0 or
+    // negative edit can't slip in and distort net worth.
+    .refine((s) => Number.isFinite(Number(s)) && Number(s) > 0, {
+      message: 'Enter a positive value.',
+    }),
 });
 type AssetEditForm = z.infer<typeof assetEditFormSchema>;
 
