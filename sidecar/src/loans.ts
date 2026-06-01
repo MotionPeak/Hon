@@ -105,12 +105,15 @@ function balanceAfter(
 // days. Cheap and good enough for a balance estimate — banks round to the
 // next billing day, which is itself within ±a few days for any given loan.
 function monthsBetween(fromIso: string, toIso: string): number {
-  const a = new Date(fromIso);
-  const b = new Date(toIso);
-  if (isNaN(a.getTime()) || isNaN(b.getTime())) return 0;
-  const years = b.getFullYear() - a.getFullYear();
-  const months = b.getMonth() - a.getMonth();
-  const days = b.getDate() - a.getDate();
+  // Parse YYYY-MM-DD components directly. `new Date(iso)` parses as UTC midnight
+  // but the getters read local time, so in a negative-UTC zone the day could
+  // shift — drifting monthsElapsed by ~1/30 right at a billing boundary.
+  const a = /^(\d{4})-(\d{2})-(\d{2})/.exec(fromIso);
+  const b = /^(\d{4})-(\d{2})-(\d{2})/.exec(toIso);
+  if (!a || !b) return 0;
+  const years = Number(b[1]) - Number(a[1]);
+  const months = Number(b[2]) - Number(a[2]);
+  const days = Number(b[3]) - Number(a[3]);
   return Math.max(0, years * 12 + months + days / 30);
 }
 
@@ -240,7 +243,6 @@ export async function fetchCpiForMonth(repo: RatesPort, yyyyMm: string): Promise
   // The CBS Index API exposes a series-data endpoint for the general CPI
   // (series id 120010). The response is `{ DataSet: { Series: [{ obs: [...] }] } }`
   // or similar — we walk it tolerantly so a schema tweak does not break us.
-  const date = `${yyyyMm}-15`;
   const url =
     `https://api.cbs.gov.il/index/data/price?id=120010&format=json` +
     `&startPeriod=${yyyyMm}&endPeriod=${yyyyMm}`;

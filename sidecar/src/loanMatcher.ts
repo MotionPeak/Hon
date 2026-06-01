@@ -28,6 +28,20 @@ function nameTokens(name: string): string[] {
     .map((t) => t.toLowerCase());
 }
 
+/** Whether a loan name token appears in a transaction description. Pure-numeric
+ *  tokens are ignored (they false-match dates / reference numbers / account
+ *  suffixes). Latin tokens require a word boundary so "car" doesn't match
+ *  "Carrefour"; Hebrew (and other non-Latin) tokens use bare substring because
+ *  \b is \w-anchored and doesn't bound Hebrew (the documented pitfall). */
+function tokenMatchesDesc(token: string, desc: string, descLower: string): boolean {
+  if (/^\d+$/.test(token)) return false;
+  if (/[a-z]/i.test(token)) {
+    const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`\\b${escaped}\\b`, 'i').test(desc);
+  }
+  return descLower.includes(token);
+}
+
 /** Returns the id of the matching loan, or null. Skips positive amounts
  *  (those are income, not payments). Tries externalId hit → name-token
  *  hit → single-loan stopword fallback, in that order. Multi-loan ties
@@ -53,7 +67,7 @@ export function matchPaymentToLoan(
   // loan whose tokens are uniquely present.
   const tokenHits = loans.filter((l) => {
     const tokens = nameTokens(l.name);
-    return tokens.some((t) => descLower.includes(t));
+    return tokens.some((t) => tokenMatchesDesc(t, desc, descLower));
   });
   if (tokenHits.length === 1) return tokenHits[0]!.id;
   if (tokenHits.length > 1) return null;
