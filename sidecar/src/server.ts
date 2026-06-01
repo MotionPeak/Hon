@@ -2064,6 +2064,15 @@ app.put(
     const { name } = req.params;
     const existing = repo.getCategory(name);
     if (!existing) return reply.code(404).send({ error: 'category not found' });
+    // "Other" is the fallback bucket for deleted/uncategorized transactions —
+    // reclassifying its group would silently pull those into spending totals,
+    // so its group is locked (other edits like emoji/colour are fine). DELETE
+    // guards "Other" too.
+    if (req.body.catGroup !== undefined && name === 'Other' && req.body.catGroup !== existing.catGroup) {
+      return reply.code(400).send({
+        error: '"Other" is the fallback category — its group cannot be changed',
+      });
+    }
     // req.body is already the validated partial — pass it straight through.
     repo.updateCategory(name, req.body);
     return { category: repo.getCategory(name) };
@@ -2313,7 +2322,8 @@ app.put(
   async (req, reply) => {
     if (!repo) return reply.code(503).send({ error: 'database unavailable' });
     const { id } = req.params;
-    if (!repo.getPiggyBank(id)) return reply.code(404).send({ error: 'piggy bank not found' });
+    const existing = repo.getPiggyBank(id);
+    if (!existing) return reply.code(404).send({ error: 'piggy bank not found' });
     const body = req.body;
     const fields: Partial<{
       name: string;
@@ -2328,10 +2338,14 @@ app.put(
     if (body.emoji !== undefined) fields.emoji = body.emoji.trim() || '🐷';
     if (body.targetAmount !== undefined) fields.targetAmount = body.targetAmount;
     if (body.monthlyAmount !== undefined) {
-      if (body.monthlyAmount <= 0) {
+      // Monthly piggies need a positive draw; lump piggies reserve the target
+      // in one shot and don't draw monthly, so 0 is valid for them — mirror
+      // POST /piggy, which forces monthlyAmount to 0 for lump.
+      const effectiveKind = body.kind ?? existing.kind;
+      if (effectiveKind === 'monthly' && body.monthlyAmount <= 0) {
         return reply.code(400).send({ error: 'a positive monthly amount is required' });
       }
-      fields.monthlyAmount = body.monthlyAmount;
+      fields.monthlyAmount = effectiveKind === 'lump' ? 0 : body.monthlyAmount;
     }
     if (body.onHold !== undefined) fields.onHold = body.onHold;
     repo.updatePiggyBank(id, fields);

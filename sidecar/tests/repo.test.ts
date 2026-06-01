@@ -130,6 +130,22 @@ describe('analytics exclude patterns', () => {
     expect(repo.expenseStats('2026-05-01', '2026-06-01').count).toBe(2);
     expect(repo.expenseStats('2026-05-01', '2026-06-01', ['מקס איט']).count).toBe(1);
   });
+
+  it('treats LIKE metacharacters in exclude patterns literally (no wildcard leak)', () => {
+    const { repo } = makeRepo();
+    const conn = repo.createConnection('max', 'Max');
+    repo.saveScrapeResult(conn.id, [{
+      accountNumber: '1', currency: 'ILS', balance: 0,
+      transactions: [
+        { externalId: 'lit', date: '2026-05-02', amount: -100, currency: 'ILS', description: 'visa_direct shop' },
+        { externalId: 'wild', date: '2026-05-03', amount: -50, currency: 'ILS', description: 'visaxdirect shop' },
+      ],
+    }]);
+    const total = (rows: { total: number }[]) => rows.reduce((s, r) => s + r.total, 0);
+    // The '_' in the pattern must match a literal underscore, NOT any single
+    // char — so 'visaxdirect' (50) is NOT excluded; only the literal row (100).
+    expect(total(repo.categorySpending('2026-05-01', '2026-06-01', ['visa_direct']))).toBe(50);
+  });
 });
 
 describe('snaptrade performance-disabled marker', () => {
