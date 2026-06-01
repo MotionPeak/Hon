@@ -164,7 +164,9 @@ export function OverviewView() {
   // essentials. Falls back to the budget's posted committed total when the
   // recurring fetch failed or there is no detected fixed history yet.
   const predictedFixed = recurring
-    ? expectedFixedThisCycle(detectMerchants(recurring).rows, settings.monthStartDay)
+    ? expectedFixedThisCycle(
+        detectMerchants(recurring, settings.monthStartDay).rows, settings.monthStartDay,
+      )
     : null;
   const committedDisplay = (v && predictedFixed !== null)
     ? predictedFixed + (v.essentialSpent ?? 0)

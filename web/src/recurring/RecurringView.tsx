@@ -85,7 +85,10 @@ export function RecurringView() {
     await reload();
   };
 
-  const detected = useMemo(() => data ? detectMerchants(data) : null, [data]);
+  const detected = useMemo(
+    () => data ? detectMerchants(data, settings.monthStartDay) : null,
+    [data, settings.monthStartDay],
+  );
 
   if (!data || !detected) return <DelayedLoader />;
 

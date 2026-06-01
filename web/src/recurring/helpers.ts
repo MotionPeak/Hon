@@ -95,7 +95,7 @@ export interface RecurringData {
  * plus the category→group map so callers can reuse the lookup.
  */
 export function detectMerchants(
-  data: RecurringData,
+  data: RecurringData, monthStartDay: number,
 ): { rows: MerchantRow[]; categoryGroups: Record<string, Category['catGroup']> } {
   const catGroupByName: Record<string, Category['catGroup']> = {};
   for (const c of data.categories) catGroupByName[c.name] = c.catGroup;
@@ -119,7 +119,7 @@ export function detectMerchants(
       };
       merch.set(key, r);
     }
-    r.cycles.add(cycleKey(t.date, 1));
+    r.cycles.add(cycleKey(t.date, monthStartDay));
     r.count += 1;
     const ts = new Date(t.date).getTime();
     if (ts >= r.lastTs) {
