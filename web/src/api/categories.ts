@@ -9,15 +9,22 @@
 import { z } from 'zod';
 import {
   categorySchema,
+  catGroupSchema,
   type Category,
   type CategoryCreate,
   type CategoryUpdate,
 } from '@hon/shared/category';
 import { api } from './client';
 
-// The GET list is the canonical read, so it is parsed STRICTLY through the
-// shared schema — a backend/frontend shape drift there fails loudly in dev.
-const categoriesResponse = z.object({ categories: z.array(categorySchema) });
+// The GET list is the canonical read, parsed STRICTLY through the shared schema
+// so backend/frontend shape drift fails loudly in dev — EXCEPT catGroup, which
+// falls back to 'variable' for any unrecognised value. The DB column is free
+// text, so one legacy/out-of-enum group must degrade one row, not throw and
+// blank the entire categories UI.
+const listCategorySchema = categorySchema.extend({
+  catGroup: catGroupSchema.catch('variable'),
+});
+const categoriesResponse = z.object({ categories: z.array(listCategorySchema) });
 // POST/PUT echo the saved row for convenience, but the source of truth is the
 // list query that the mutation invalidates. Parse the echo LENIENTLY (passthrough
 // so a partial echo from a test/older engine doesn't reject the mutation).

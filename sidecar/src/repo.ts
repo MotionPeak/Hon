@@ -780,11 +780,21 @@ export class Repo {
   }
 
   getTransaction(id: string): TxnRow | undefined {
-    const row = this.orm
-      .select(this.txnColumns())
-      .from(transactionsT)
-      .where(eq(transactionsT.id, id))
-      .get();
+    // Mirror listTransactions: include the scalar refundId/refundForId refund-
+    // link hints so a single-transaction read has the same shape as the list
+    // (the Drizzle txnColumns() variant dropped these, diverging silently).
+    const row = this.db
+      .prepare(
+        `SELECT ${TXN_COLS},
+                (SELECT refund_id FROM transaction_links
+                   WHERE expense_id = transactions.id
+                   ORDER BY amount DESC LIMIT 1) AS refundId,
+                (SELECT expense_id FROM transaction_links
+                   WHERE refund_id = transactions.id
+                   ORDER BY amount DESC LIMIT 1) AS refundForId
+         FROM transactions WHERE id = @id`,
+      )
+      .get({ id });
     return row ? coerceTxnRow(row as TxnRow) : undefined;
   }
 
@@ -1865,8 +1875,11 @@ export class Repo {
     const parts: string[] = [];
     clean.forEach((p, i) => {
       const key = `excl${i}`;
-      params[key] = `%${p}%`;
-      parts.push(`LOWER(description) LIKE @${key}`);
+      // Escape LIKE metacharacters (% _ and the escape char itself) so a
+      // provider name containing them matches literally, not as a wildcard.
+      const escaped = p.replace(/[\\%_]/g, (c) => `\\${c}`);
+      params[key] = `%${escaped}%`;
+      parts.push(`LOWER(description) LIKE @${key} ESCAPE '\\'`);
     });
     return `AND NOT (${parts.join(' OR ')})`;
   }

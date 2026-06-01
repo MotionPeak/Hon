@@ -4,6 +4,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { api, ApiError } from '../api';
+import { uiActions } from '../store/uiStore';
 import { money } from '../format';
 import type {
   Account, AssetSectionKey, BrokerageOption, Company, Connection, Holding, Loan, ManualAsset,
@@ -50,6 +51,10 @@ const readLoanIds = (key: string): string[] => {
 const writeLoanIds = (key: string, ids: string[]): void => {
   window.localStorage.setItem(key, JSON.stringify(Array.from(new Set(ids))));
   window.dispatchEvent(new Event(LOAN_IDS_EVENT));
+  // Same-tab writes don't fire the browser `storage` event (cross-tab only),
+  // so refresh the Zustand nav-badge count directly — otherwise the Loans dot
+  // goes stale after a sync or dismiss until a reload.
+  uiActions.refreshUnseenLoans();
 };
 
 interface RunStatus {
