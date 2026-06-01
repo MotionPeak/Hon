@@ -84,7 +84,7 @@ export function LineChart({ series, currency, tone, showAxis = true }: LineChart
   const hv = activeIndex != null ? series[activeIndex] : null;
   const hp = activeIndex != null ? pts[activeIndex] : null;
   let sinceStart: { text: string; tone: 'good' | 'bad' } | null = null;
-  if (hv && n > 1 && firstValue) {
+  if (hv && n > 1 && firstValue !== 0) {
     const change = hv.value - firstValue;
     const pct = (change / Math.abs(firstValue)) * 100;
     // U+2212 for the minus so both the money and percent share one glyph;

@@ -324,10 +324,14 @@ function holdingStats(h: {
 
 function convertAmount(
   amount: number, from: string, to: string, rates: Record<string, number> | null,
-): number {
+): number | null {
   if (from === to) return amount;
-  const toIls = from === 'ILS' ? 1 : rates?.[from] ?? 1;
-  const fromIls = to === 'ILS' ? 1 : rates?.[to] ?? 1;
+  // Return null (not a 1:1 fallback) when a needed rate is missing or rates
+  // failed to load — callers drop the value rather than mispricing foreign
+  // currency as ILS. Mirrors the engine's totalInILS, which returns null too.
+  const toIls = from === 'ILS' ? 1 : rates?.[from] ?? null;
+  const fromIls = to === 'ILS' ? 1 : rates?.[to] ?? null;
+  if (toIls == null || fromIls == null) return null;
   return (amount * toIls) / fromIls;
 }
 
@@ -530,7 +534,7 @@ function BrokerageSubTab() {
   // filled holding snapshots → local account snapshots), scoped to the
   // selected account. This is what gives the chart real long-range history
   // instead of just the last few local snapshots.
-  const convert = (value: number, currency: string): number =>
+  const convert = (value: number, currency: string): number | null =>
     convertAmount(value, currency, cur, rates);
   const fullSeriesUncapped = buildEquitySeries({
     performance: data.performance,
@@ -568,7 +572,9 @@ function BrokerageSubTab() {
   const currentValue = series.at(-1)?.value ?? 0;
   const startValue = series[0]?.value ?? currentValue;
   const change = currentValue - startValue;
-  const changePct = startValue > 0 ? (change / startValue) * 100 : 0;
+  // Use the magnitude of the (possibly negative) base so a short/margin account
+  // that started below zero still reports a signed percentage move.
+  const changePct = startValue !== 0 ? (change / Math.abs(startValue)) * 100 : 0;
 
   // Holdings + accounts scoped to the selected pill — every metric below
   // follows the active account, not the whole portfolio.
@@ -588,7 +594,9 @@ function BrokerageSubTab() {
   let haveBalance = false;
   for (const a of scopedBrkAccounts) {
     if (a.balance == null) continue;
-    balanceTotal += convertAmount(a.balance, a.currency, cur, rates);
+    const b = convertAmount(a.balance, a.currency, cur, rates);
+    if (b == null) continue; // unknown rate — drop rather than count as 1:1 ILS
+    balanceTotal += b;
     haveBalance = true;
   }
 
@@ -600,9 +608,15 @@ function BrokerageSubTab() {
   let costBasis = 0;
   for (const h of scopedHoldings) {
     const s = holdingStats(h);
-    holdingsValueTotal += convertAmount(s.value ?? 0, h.currency, cur, rates);
-    unrealized        += convertAmount(s.gain ?? 0, h.currency, cur, rates);
-    costBasis         += convertAmount(s.cost ?? 0, h.currency, cur, rates);
+    const v = convertAmount(s.value ?? 0, h.currency, cur, rates);
+    const g = convertAmount(s.gain ?? 0, h.currency, cur, rates);
+    const c = convertAmount(s.cost ?? 0, h.currency, cur, rates);
+    // Same currency→cur rate for all three, so they are null together. Drop an
+    // unconvertible holding entirely rather than pricing it 1:1 with ILS.
+    if (v == null || g == null || c == null) continue;
+    holdingsValueTotal += v;
+    unrealized        += g;
+    costBasis         += c;
   }
   const portfolioValue = haveBalance ? balanceTotal : holdingsValueTotal;
   const returnOnCost = costBasis > 0 ? (unrealized / costBasis) * 100 : 0;
@@ -637,7 +651,7 @@ function BrokerageSubTab() {
     if (typeof w.rateOfReturn === 'number') { rateSum += w.rateOfReturn; rateCount += 1; }
     if (typeof w.dividendIncome === 'number') {
       const v = convertAmount(w.dividendIncome, p.data.currency ?? cur, cur, rates);
-      dividend += v; haveDividend = true;
+      if (v != null) { dividend += v; haveDividend = true; }
     }
   }
   const rateOfReturn = rateCount ? (rateSum / rateCount) * 100 : null;
@@ -649,17 +663,22 @@ function BrokerageSubTab() {
 
   // Consolidate by symbol across in-scope accounts — matches the legacy SPA's
   // holdings panel and lets a symbol's sparkline sum across its accounts.
+  // Key by symbol AND currency: a symbol dual-listed in two currencies (e.g. a
+  // USD listing and an ILS listing) must not sum native values across them and
+  // then render with one currency. Each (symbol,currency) bucket is internally
+  // single-currency, so HoldingRow converts it correctly.
   const consolidatedMap = new Map<string, ConsolidatedHolding>();
   for (const h of scopedHoldings) {
     const s = holdingStats(h);
-    let e = consolidatedMap.get(h.symbol);
+    const ckey = `${h.symbol}:${h.currency}`;
+    let e = consolidatedMap.get(ckey);
     if (!e) {
       e = {
         symbol: h.symbol, description: h.description, units: 0, price: h.price,
         currency: h.currency, value: null, cost: null, gain: null,
         gainPct: null, accountIds: [],
       };
-      consolidatedMap.set(h.symbol, e);
+      consolidatedMap.set(ckey, e);
     }
     e.units += h.units;
     if (s.value != null) e.value = (e.value ?? 0) + s.value;
@@ -851,7 +870,7 @@ function HoldingRow({
 }) {
   const dot = HOLDING_PALETTE[index % HOLDING_PALETTE.length];
   const valCur = convertAmount(row.value ?? 0, row.currency, displayCur, rates);
-  const weight = portfolioValue > 0 ? (valCur / portfolioValue) * 100 : 0;
+  const weight = valCur != null && portfolioValue > 0 ? (valCur / portfolioValue) * 100 : 0;
   const pnlCur = convertAmount(row.gain ?? 0, row.currency, displayCur, rates);
   const pnlPct = row.gainPct ?? 0;
   return (
@@ -876,7 +895,7 @@ function HoldingRow({
           {money(valCur, displayCur)}
           <div className="bh-weight-pct">{weight.toFixed(1)}%</div>
         </div>
-        {row.gain != null && (
+        {row.gain != null && pnlCur != null && (
           <span className={`brk-pnl ${pnlCur >= 0 ? 'good' : 'bad'}`}>
             {pnlCur >= 0 ? '▲' : '▼'} {Math.abs(pnlPct).toFixed(2)}%{' '}
             {pnlCur >= 0 ? '+' : '−'}{money(Math.abs(pnlCur), displayCur)}
@@ -911,6 +930,7 @@ function HoldingDetail({
   );
   const gainTone: 'good' | 'bad' | '' = row.gain == null ? '' : row.gain >= 0 ? 'good' : 'bad';
   const m = (v: number | null) => v == null ? '—' : money(conv(v, row.currency), displayCur);
+  const gainConv = row.gain != null ? conv(row.gain, row.currency) : null;
   return (
     <div className="hp-detail" data-testid={`holding-detail-${row.symbol}`}>
       <div className="hd-stats">
@@ -920,8 +940,8 @@ function HoldingDetail({
         {stat('Market value', m(row.value))}
         {stat('Total cost', m(row.cost))}
         {stat('Unrealized · ALL',
-          row.gain == null ? '—'
-            : `${row.gain >= 0 ? '+' : '−'}${money(Math.abs(conv(row.gain, row.currency)), displayCur)}`,
+          row.gain == null || gainConv == null ? '—'
+            : `${row.gain >= 0 ? '+' : '−'}${money(Math.abs(gainConv), displayCur)}`,
           gainTone)}
       </div>
       <HoldingSparkline

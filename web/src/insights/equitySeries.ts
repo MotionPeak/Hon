@@ -237,7 +237,10 @@ export function sliceRange(
     cutoff = new Date(now.getFullYear(), 0, 1);
   } else {
     const months = range === '1M' ? 1 : range === '3M' ? 3 : 12;
-    cutoff = new Date(now);
+    // Anchor to the 1st before shifting months so setMonth can't overflow a
+    // short month (e.g. May 31 → "Feb 31" rolling to Mar 2/3 and dropping
+    // late-Feb points). The cutoff is only used as a YYYY-MM-DD lower bound.
+    cutoff = new Date(now.getFullYear(), now.getMonth(), 1);
     cutoff.setMonth(cutoff.getMonth() - months);
   }
   const iso = cutoff.toISOString().slice(0, 10);
