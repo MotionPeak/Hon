@@ -126,7 +126,7 @@ export async function listBrokerages(
 ): Promise<BrokerageOption[]> {
   const snaptrade = makeClient(creds);
   const res = await snaptrade.referenceData.listAllBrokerages();
-  return (res.data ?? [])
+  return res.data
     .filter((b) => b.enabled !== false && !!b.slug)
     .map((b) => ({
       slug: b.slug as string,
@@ -179,7 +179,7 @@ async function registerFreshUser(
 
   // Clear whatever orphaned user holds the key's single slot.
   const list = await snaptrade.authentication.listSnapTradeUsers();
-  const orphans = Array.isArray(list.data) ? list.data : [];
+  const orphans = list.data;
   for (const orphan of orphans) {
     if (typeof orphan === 'string') {
       await snaptrade.authentication.deleteSnapTradeUser({ userId: orphan });
@@ -202,7 +202,7 @@ async function registerFreshUser(
 async function userIsRegistered(snaptrade: Snaptrade, userId: string): Promise<boolean> {
   try {
     const list = await snaptrade.authentication.listSnapTradeUsers();
-    return Array.isArray(list.data) && list.data.includes(userId);
+    return list.data.includes(userId);
   } catch {
     // Can't verify — assume valid rather than needlessly re-registering.
     return true;
@@ -322,7 +322,10 @@ export async function runSnapTradeSync(
   try {
     onProgress?.('Fetching your brokerage accounts from SnapTrade…');
     const res = await snaptrade.accountInformation.listUserAccounts({ userId, userSecret });
-    const raw = Array.isArray(res.data) ? res.data : [];
+    if (res.status !== 200) {
+      throw new Error(`SnapTrade returned HTTP ${res.status} listing accounts.`);
+    }
+    const raw = res.data;
 
     // Fan out per-account holdings + activity fetches concurrently instead of
     // awaiting each account in series (5 accounts × ~3s each would block ~15s).
@@ -405,7 +408,7 @@ export async function countConnections(
 ): Promise<number> {
   try {
     const res = await snaptrade.connections.listBrokerageAuthorizations({ userId, userSecret });
-    return Array.isArray(res.data) ? res.data.length : 0;
+    return res.data.length;
   } catch {
     return 0;
   }
@@ -607,7 +610,7 @@ async function fetchEarliestActivityDate(
       startDate: fmt(start),
       endDate: fmt(end),
     });
-    const rows = Array.isArray(res.data) ? res.data : [];
+    const rows = res.data;
     let earliest: string | undefined;
     let sampleKeys: string[] = [];
     for (const r of rows) {
@@ -708,7 +711,7 @@ async function fetchHoldings(
       userSecret,
       accountId,
     });
-    const positions = Array.isArray(res.data) ? res.data : [];
+    const positions = res.data;
     const normalized = positions
       .map(normalizePosition)
       .filter((h): h is NormalizedHolding => h !== null);
