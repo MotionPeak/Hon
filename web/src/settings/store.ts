@@ -1,9 +1,6 @@
-export type IncomeAvgMonths = 1 | 2 | 3 | 6;
-
 export interface Settings {
   monthStartDay: number;
   projectRecurring: boolean;
-  incomeAvgMonths: IncomeAvgMonths;
   hideCardTotals: boolean;
   cardProviders: string[];
   spendingAvgMonths: number;
@@ -12,7 +9,6 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Settings = {
   monthStartDay: 1,
   projectRecurring: true,
-  incomeAvgMonths: 3,
   hideCardTotals: true,
   cardProviders: [
     'מקס', 'ישראכרט', 'כאל', 'ויזה כאל', 'אמריקן אקספרס',
@@ -33,7 +29,13 @@ export function loadSettings(): Settings {
   } catch {
     // Malformed JSON — keep defaults.
   }
-  if (!Array.isArray(base.cardProviders)) {
+  // Must be an array of strings — a non-array, or array with non-string
+  // elements (hand-edited/corrupted), would break the card-bill exclusion
+  // filter that compares provider names. Reset wholesale on any violation.
+  if (
+    !Array.isArray(base.cardProviders)
+    || !base.cardProviders.every((p) => typeof p === 'string')
+  ) {
     base.cardProviders = [...DEFAULT_SETTINGS.cardProviders];
   }
   if (

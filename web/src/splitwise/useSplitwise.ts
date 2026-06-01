@@ -95,7 +95,10 @@ export function useSplitwise(): UseSplitwise {
   const [vaultLocked, setVaultLocked] = useState(false);
 
   useEffect(() => {
-    const onChange = (): void => force((n) => n + 1);
+    // useVault.unlock() dispatches CHANGED after a successful unlock, so clear
+    // the stale "vault locked" flag here — otherwise it stuck true forever once
+    // a 409 set it, even after the user unlocked.
+    const onChange = (): void => { setVaultLocked(false); force((n) => n + 1); };
     window.addEventListener(CHANGED, onChange);
     ensureLoaded();
     return () => window.removeEventListener(CHANGED, onChange);

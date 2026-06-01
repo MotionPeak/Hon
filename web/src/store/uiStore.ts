@@ -35,15 +35,14 @@ interface UiState {
   setTab: (tab: Tab) => void;
 
   /**
-   * One-shot intent for a tab to act on when it mounts — e.g. the empty Loans
-   * tab asks to jump to Assets AND open the add-loan form. Replaces the
-   * `hon.go-to-assets` + `hon.pendingAddLoan` event/flag pair. The target tab
-   * reads then clears it.
+   * One-shot intent carried alongside a tab switch — e.g. the empty Loans tab
+   * jumps to Assets with 'add-loan'. The durable handoff that AccountsView
+   * actually consumes is the `hon.pendingAddLoan` localStorage flag; this field
+   * mirrors it for store-level introspection (asserted by LoansView's test).
    */
   pendingAction: 'add-loan' | null;
   /** Navigate to a tab, optionally carrying a pending action for it. */
   goTo: (tab: Tab, action?: 'add-loan') => void;
-  clearPendingAction: () => void;
 
   /** Count of loans the user hasn't acknowledged — drives the Loans nav dot. */
   unseenLoanCount: number;
@@ -58,7 +57,6 @@ export const useUiStore = create<UiState>((set) => ({
 
   pendingAction: null,
   goTo: (tab, action) => set({ tab, pendingAction: action ?? null }),
-  clearPendingAction: () => set({ pendingAction: null }),
 
   unseenLoanCount: readUnseenLoanCount(),
   refreshUnseenLoans: () => set({ unseenLoanCount: readUnseenLoanCount() }),

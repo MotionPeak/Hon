@@ -116,21 +116,51 @@ export function buildEquitySeries(input: BuildEquityInput): SeriesPoint[] {
     : snapshots.filter((s) => s.accountId === acctFilter);
 
   // --- Tier 1: broker-reported performance timeline ----------------------
-  const fromPerf = new Map<string, number>();
+  // Forward-fill across connections (like Tier 2 does across symbols): each
+  // connection reports on its own cadence (daily IBKR vs monthly Meitav), so
+  // summing on the raw date would zero out every connection that didn't report
+  // that exact day — a sawtooth. Instead build a per-connection sorted series,
+  // take the union of dates, and at each date sum the most-recent value
+  // at-or-before that date per connection. A connection with no point yet at
+  // a given date contributes 0 (not-yet-started), so the line only ramps up as
+  // each connection comes online rather than dipping when one is silent.
+  const perfByConn = new Map<string, Map<string, number>>();
   for (const p of scopedPerf) {
     const pts = p.data?.totalEquity ?? [];
     const pcur = p.data?.currency ?? 'USD';
     const inception = inceptionFor(p.connectionId);
+    const byDate = perfByConn.get(p.connectionId) ?? new Map<string, number>();
     for (const pt of pts) {
       if (inception && pt.date < inception) continue;
       const v = convert(pt.value, pt.currency ?? pcur);
       if (v == null) continue;
-      fromPerf.set(pt.date, (fromPerf.get(pt.date) ?? 0) + v);
+      byDate.set(pt.date, (byDate.get(pt.date) ?? 0) + v);
     }
+    if (byDate.size) perfByConn.set(p.connectionId, byDate);
   }
-  const brokerSeries: SeriesPoint[] = [...fromPerf.entries()]
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([date, value]) => ({ date, value }));
+  const connSeries = [...perfByConn.values()].map((byDate) =>
+    [...byDate.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([date, value]) => ({ date, value })),
+  );
+  const perfDateSet = new Set<string>();
+  for (const s of connSeries) for (const pt of s) perfDateSet.add(pt.date);
+  const perfDates = [...perfDateSet].sort((a, b) => a.localeCompare(b));
+  const perfCursor = connSeries.map(() => 0);
+  const brokerSeries: SeriesPoint[] = [];
+  for (const d of perfDates) {
+    let sum = 0;
+    for (let i = 0; i < connSeries.length; i++) {
+      const arr = connSeries[i]!;
+      let ci = perfCursor[i]!;
+      while (ci + 1 < arr.length && arr[ci + 1]!.date <= d) ci += 1;
+      perfCursor[i] = ci;
+      // Only count a connection once its first point is at-or-before `d`;
+      // before that it hasn't started, so it adds 0 rather than its later value.
+      if (arr[ci]!.date <= d) sum += arr[ci]!.value;
+    }
+    brokerSeries.push({ date: d, value: sum });
+  }
 
   // --- Tier 2: per-holding snapshots, forward-filled ---------------------
   let snapshotSeries: SeriesPoint[] = [];
@@ -232,16 +262,20 @@ export function sliceRange(
   now: Date = new Date(),
 ): SeriesPoint[] {
   if (!series.length || range === 'ALL') return series;
+  // Build the cutoff in UTC so toISOString() doesn't drift the YYYY-MM-DD
+  // lower bound a day earlier in positive-UTC zones (a local Jan 1 in UTC+2 is
+  // Dec 31 22:00Z → "…-12-31"). `now`'s local calendar fields are the user's
+  // intended "today"; mirror them into a UTC date.
   let cutoff: Date;
   if (range === 'YTD') {
-    cutoff = new Date(now.getFullYear(), 0, 1);
+    cutoff = new Date(Date.UTC(now.getFullYear(), 0, 1));
   } else {
     const months = range === '1M' ? 1 : range === '3M' ? 3 : 12;
-    // Anchor to the 1st before shifting months so setMonth can't overflow a
+    // Anchor to the 1st before shifting months so setUTCMonth can't overflow a
     // short month (e.g. May 31 → "Feb 31" rolling to Mar 2/3 and dropping
     // late-Feb points). The cutoff is only used as a YYYY-MM-DD lower bound.
-    cutoff = new Date(now.getFullYear(), now.getMonth(), 1);
-    cutoff.setMonth(cutoff.getMonth() - months);
+    cutoff = new Date(Date.UTC(now.getFullYear(), now.getMonth(), 1));
+    cutoff.setUTCMonth(cutoff.getUTCMonth() - months);
   }
   const iso = cutoff.toISOString().slice(0, 10);
   const inside = series.filter((p) => p.date >= iso);

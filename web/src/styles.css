@@ -1957,6 +1957,10 @@ button.bh-row:active { transform: none; }        /* suppress global scale(.97) *
   color: var(--text); letter-spacing: 0; text-transform: none;
 }
 .cat-head-act .cat-total.pos { color: var(--green); }
+/* Secondary per-currency amounts shown next to a group total when the group
+ * mixes currencies (M12) — muted so the dominant figure stays the headline. */
+.cat-total-others { color: var(--faint); }
+.cat-total-other { color: var(--faint); font-weight: 400; font-size: 0.9em; }
 .cat-emoji {
   width: 26px; height: 26px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;

@@ -8,9 +8,13 @@
  *
  * `predictedFixed` is the merchant-rollup's `expectedFixedThisCycle` (the same
  * number the Fixed-bills tab and the Overview headline use). When it's null
- * (projection off, or no recurring history yet) we fall back to the posted
- * `fixedSpent`, and `projected` flips to false so the card drops its
- * "Projected — …" note.
+ * (no recurring history yet) we fall back to the posted `fixedSpent`, and
+ * `projected` flips to false so the card drops its "Projected — …" note.
+ *
+ * `projectRecurring` is the user's master switch (Settings → Spending
+ * projection). When false we force the posted-figure branch regardless of any
+ * detected recurring history — so the in-app "Turn off in Settings" copy is
+ * honest.
  */
 export interface VariableInput {
   income: number;
@@ -48,11 +52,15 @@ export function projectVariable(
   v: VariableInput,
   essentialBudgetTotal: number,
   predictedFixed: number | null,
+  projectRecurring = true,
 ): ProjectedVariable {
+  // The master switch overrides any detected recurring history: when off we
+  // reserve only what has posted, and the card drops its "Projected — …" note.
+  const projected = projectRecurring && predictedFixed != null;
   const income = v.income || 0;
   const essentialSpent = v.essentialSpent || 0;
   const essential = essentialReserve(essentialBudgetTotal, essentialSpent);
-  const fixed = predictedFixed != null ? predictedFixed : (v.fixedSpent || 0);
+  const fixed = projected && predictedFixed != null ? predictedFixed : (v.fixedSpent || 0);
   const committed = fixed + essential;
   const piggy = Math.max(0, v.piggyFunded || 0);
   const savings = Math.max(0, v.savings || 0);
@@ -68,6 +76,6 @@ export function projectVariable(
     savings,
     disposable,
     allowed,
-    projected: predictedFixed != null,
+    projected,
   };
 }

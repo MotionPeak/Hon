@@ -49,7 +49,10 @@ describe('buildEquitySeries — tier 1: performance', () => {
     }));
     expect(out).toEqual([
       { date: '2025-01-01', value: 110 }, // 100 USD + 40 ILS/4
-      { date: '2025-02-01', value: 110 },
+      // c-mt reports only on 01-01; forward-filled at its last value (10) so the
+      // 02-01 total is c-st(110) + c-mt(10) rather than dropping the silent
+      // connection — the combined line, not a sawtooth (M13).
+      { date: '2025-02-01', value: 120 },
       { date: '2025-03-01', value: 999 }, // snapshot tail past broker's last point
     ]);
   });
@@ -250,6 +253,50 @@ describe('buildEquitySeries stitches broker history with newer snapshots', () =>
       { date: '2024-01-01', value: 100 },
       { date: '2024-06-01', value: 120 },
       { date: '2024-07-01', value: 150 },
+    ]);
+  });
+});
+
+describe('buildEquitySeries — tier 1 forward-fill across connection cadences (M13)', () => {
+  it('carries each connection forward instead of dropping the silent one (no sawtooth)', () => {
+    // Daily IBKR vs monthly Meitav. Pre-fix this produced a sawtooth — each
+    // date held only the connection that reported that exact day. Now every
+    // connection is forward-filled at its last value, so the total is the
+    // smooth sum (~110) rather than alternating between ~100 and ~10.
+    const out = buildEquitySeries(base({
+      performance: [
+        { connectionId: 'c-st', data: { currency: 'USD', totalEquity: [
+          { date: '2025-01-01', value: 100 },
+          { date: '2025-01-02', value: 101 },
+          { date: '2025-01-03', value: 105 },
+        ] } },
+        { connectionId: 'c-mt', data: { currency: 'USD', totalEquity: [
+          { date: '2025-01-01', value: 10 }, // reports only on day 1
+        ] } },
+      ],
+    }));
+    expect(out).toEqual([
+      { date: '2025-01-01', value: 110 }, // 100 + 10
+      { date: '2025-01-02', value: 111 }, // 101 + 10 (Meitav forward-filled)
+      { date: '2025-01-03', value: 115 }, // 105 + 10 (Meitav forward-filled)
+    ]);
+  });
+
+  it('treats a not-yet-started connection as 0 until its first reported date', () => {
+    const out = buildEquitySeries(base({
+      performance: [
+        { connectionId: 'c-st', data: { currency: 'USD', totalEquity: [
+          { date: '2025-01-01', value: 100 },
+          { date: '2025-02-01', value: 120 },
+        ] } },
+        { connectionId: 'c-mt', data: { currency: 'USD', totalEquity: [
+          { date: '2025-02-01', value: 30 }, // joins later
+        ] } },
+      ],
+    }));
+    expect(out).toEqual([
+      { date: '2025-01-01', value: 100 }, // c-mt not started yet → adds 0
+      { date: '2025-02-01', value: 150 }, // 120 + 30
     ]);
   });
 });

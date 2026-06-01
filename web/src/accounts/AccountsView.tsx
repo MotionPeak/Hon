@@ -253,6 +253,21 @@ export function AccountsView() {
     };
   }, []);
 
+  // Store a connection's pending timer, cancelling any handle already in the
+  // slot first. Without this, overwriting pollTimers.current[id] by direct
+  // assignment leaves the prior setTimeout scheduled — most dangerously the
+  // 5s success auto-clear, which would fire on a re-started sync and force the
+  // live run back to idle (and leak timers besides).
+  const schedule = useCallback((connectionId: string, fn: () => void, ms: number) => {
+    clearTimeout(pollTimers.current[connectionId]);
+    pollTimers.current[connectionId] = setTimeout(fn, ms);
+  }, []);
+  // Cancel a connection's pending timer and free the slot.
+  const clearScheduled = useCallback((connectionId: string) => {
+    clearTimeout(pollTimers.current[connectionId]);
+    delete pollTimers.current[connectionId];
+  }, []);
+
   const setSyncForConnection = useCallback((connectionId: string, next: SyncState) => {
     setSyncStates((prev) => ({ ...prev, [connectionId]: next }));
   }, []);
@@ -264,18 +279,12 @@ export function AccountsView() {
       const { run } = await api<{ run: RunStatus }>(`/scrape/${encodeURIComponent(runId)}`);
       if (run.status === 'running') {
         setSyncForConnection(connectionId, { kind: 'running', runId, message: run.message });
-        pollTimers.current[connectionId] = setTimeout(
-          () => void pollRun(connectionId, runId),
-          SCRAPE_POLL_INTERVAL_MS,
-        );
+        schedule(connectionId, () => void pollRun(connectionId, runId), SCRAPE_POLL_INTERVAL_MS);
       } else if (run.status === 'needs-otp') {
         setSyncForConnection(connectionId, { kind: 'needs-otp', runId, message: run.message });
         // Keep polling — the OTP modal posts the code, then the run goes
         // back to running and eventually success/error.
-        pollTimers.current[connectionId] = setTimeout(
-          () => void pollRun(connectionId, runId),
-          SCRAPE_POLL_INTERVAL_MS,
-        );
+        schedule(connectionId, () => void pollRun(connectionId, runId), SCRAPE_POLL_INTERVAL_MS);
       } else if (run.status === 'success') {
         setSyncForConnection(connectionId, {
           kind: 'success',
@@ -294,7 +303,7 @@ export function AccountsView() {
         await refresh();
         // Auto-clear after 5s. Stash the timer in pollTimers so the
         // existing unmount-cleanup catches it.
-        pollTimers.current[connectionId] = setTimeout(() => {
+        schedule(connectionId, () => {
           setSyncForConnection(connectionId, { kind: 'idle' });
         }, 5000);
       } else {
@@ -318,9 +327,13 @@ export function AccountsView() {
         return next;
       });
     }
-  }, [refresh, setSyncForConnection]);
+  }, [refresh, setSyncForConnection, schedule]);
 
   const startSync = useCallback(async (connectionId: string) => {
+    // Cancel any lingering timer for this connection (e.g. the 5s success
+    // auto-clear from a just-finished run) so it can't fire mid-flight and
+    // knock this fresh run back to idle.
+    clearScheduled(connectionId);
     setSyncForConnection(connectionId, { kind: 'starting' });
     try {
       // interactive=true picks the engine's runInteractiveScrape path,
@@ -342,7 +355,7 @@ export function AccountsView() {
         message: e instanceof ApiError ? e.message : String(e),
       });
     }
-  }, [pollRun, setSyncForConnection]);
+  }, [pollRun, setSyncForConnection, clearScheduled]);
 
   const setHistoryMonths = useCallback(async (connection: Connection, months: number) => {
     // Optimistic update.
@@ -647,6 +660,12 @@ export function AccountsView() {
         return (
           <Suspense fallback={null}>
             <InteractiveSignInModal
+              // Scope the modal to its connection so that when the chosen
+              // running connection changes (multiple interactive syncs in
+              // flight), React remounts a fresh modal instead of reusing the
+              // previous connection's instance — which otherwise flickers /
+              // briefly shows the wrong company in the header.
+              key={connectionId}
               company={company}
               onClose={() => {
                 setDismissedInteractiveRunIds((prev) => {
@@ -2034,11 +2053,14 @@ function AddManualLoanForm({ onClose, onSaved }: AddManualLoanFormProps) {
 function HoldingsList({ holdings }: { holdings: Holding[] }) {
   return (
     <div className="holds-list">
-      {holdings.map((h) => {
+      {holdings.map((h, i) => {
         const s = holdingStats(h);
         const gainCls = s.gain == null ? 'flat' : s.gain >= 0 ? 'good' : 'bad';
         return (
-          <div key={h.symbol} className="hold-row">
+          // Composite key: the same symbol can appear more than once within an
+          // account (multiple lots, or distinct currencies), so symbol alone
+          // collides. Index disambiguates remaining duplicates.
+          <div key={`${h.symbol}-${h.currency}-${i}`} className="hold-row">
             <div className="hold-sym">
               <span className="hold-tk">{h.symbol}</span>
               {h.description && <span className="hold-desc">{h.description}</span>}

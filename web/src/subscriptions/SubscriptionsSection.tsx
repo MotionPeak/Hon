@@ -137,11 +137,19 @@ export function SubscriptionsSection({ transactions, frequencies, cancelled }: S
   }
 
   const { flagged, active, userCancelled, autoLapsed } = bucket(rows, cancelled);
+  // Everything that's still charging you each month: the Active set plus any
+  // flagged (cancelled-but-charged-again) row whose latest charge is still
+  // inside its active window — those are real ongoing costs the total must not
+  // omit. A flagged row that's since gone quiet (active=false) is left out.
+  const billing = active.concat(flagged.filter((r) => r.active));
   // Only sum the displayed currency — never add a $ subscription into a ₪ total
   // under one symbol. (Per-currency breakdown is future work; the common case
-  // is a single currency.)
-  const currency = active[0]?.currency ?? rows[0]?.currency ?? 'ILS';
-  const monthly = active.reduce((s, r) => (r.currency === currency ? s + r.monthly : s), 0);
+  // is a single currency.) The count below reflects the SAME single-currency
+  // set so the headline number and "N subscriptions" always reconcile.
+  const currency = billing[0]?.currency ?? rows[0]?.currency ?? 'ILS';
+  const billingThisCurrency = billing.filter((r) => r.currency === currency);
+  const monthly = billingThisCurrency.reduce((s, r) => s + r.monthly, 0);
+  const activeCount = billingThisCurrency.length;
 
   return (
     <section className="subs-section">
@@ -151,7 +159,7 @@ export function SubscriptionsSection({ transactions, frequencies, cancelled }: S
           {money(monthly, currency)}<span className="sub-per"> / month</span>
         </div>
         <div className="sub-meta">
-          {active.length} active subscription{active.length === 1 ? '' : 's'}
+          {activeCount} active subscription{activeCount === 1 ? '' : 's'}
           {userCancelled.length > 0 && <> · {userCancelled.length} cancelled</>}
           {autoLapsed.length > 0 && <> · {autoLapsed.length} likely cancelled</>}
         </div>

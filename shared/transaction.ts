@@ -1,7 +1,36 @@
-// Per-transaction mutation schemas — the small PATCH bodies the Activity view
-// sends. Shared so the API library and engine agree on shapes.
+// Transaction row + per-transaction mutation schemas. Shared so the API
+// library and engine agree on shapes.
 
 import { z } from 'zod';
+
+/** A transaction row as returned by GET /transactions. Mirrors `TxnRow` in
+ *  sidecar/src/repo.ts. The trailing fields are optional/nullable — they are
+ *  only present on some rows (refund links, loan link, tri-state overrides). */
+export const transactionSchema = z.object({
+  id: z.string(),
+  accountId: z.string(),
+  externalId: z.string(),
+  date: z.string(),
+  processedDate: z.string().nullable(),
+  amount: z.number(),
+  currency: z.string(),
+  description: z.string(),
+  memo: z.string().nullable(),
+  kind: z.string().nullable(),
+  status: z.string().nullable(),
+  category: z.string().nullable(),
+  createdAt: z.string(),
+  refundId: z.string().nullable().optional(),
+  refundForId: z.string().nullable().optional(),
+  loanId: z.string().nullable().optional(),
+  excludedManual: z.boolean().nullable().optional(),
+  savings: z.boolean().nullable().optional(),
+});
+export type Transaction = z.infer<typeof transactionSchema>;
+
+export const transactionsResponseSchema = z.object({
+  transactions: z.array(transactionSchema),
+});
 
 /** PATCH /transactions/:id/category */
 export const txnCategorySchema = z.object({

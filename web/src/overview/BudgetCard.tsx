@@ -18,8 +18,12 @@ interface BudgetCardProps {
   variable: VariableInput;
   essentials: BudgetLine[];
   categories: Category[];
-  /** Merchant-rollup `expectedFixedThisCycle`; null when projection is off. */
+  /** Merchant-rollup `expectedFixedThisCycle`; null when there's no recurring
+   *  history yet (the caller also passes null when projection is off). */
   predictedFixed: number | null;
+  /** Settings master switch — when false the allowance reserves only what has
+   *  posted and the "Projected — …" note is dropped. */
+  projectRecurring: boolean;
   /** This cycle's total ILS spend — the donut total, so the two reconcile. */
   totalSpent: number;
   currency: string;
@@ -35,11 +39,12 @@ interface BudgetCardProps {
  * card rather than living in a separate one).
  */
 export function BudgetCard({
-  variable, essentials, categories, predictedFixed, totalSpent, currency, monthStartDay, onSaved,
+  variable, essentials, categories, predictedFixed, projectRecurring,
+  totalSpent, currency, monthStartDay, onSaved,
 }: BudgetCardProps) {
   const [editing, setEditing] = useState(false);
   const essentialBudgetTotal = essentials.reduce((s, l) => s + (l.budget ?? 0), 0);
-  const v = projectVariable(variable, essentialBudgetTotal, predictedFixed);
+  const v = projectVariable(variable, essentialBudgetTotal, predictedFixed, projectRecurring);
   const monthLabel = cycleLabel(currentCycleKey(monthStartDay));
 
   const styleByName = new Map<string, Category>();
@@ -155,8 +160,8 @@ function VariableAllowance({ v, currency }: { v: ProjectedVariable; currency: st
         </div>
         {v.projected && (
           <div className="bgt-var-note">
-            Projected — fixed bills reserved every cycle and income averaged over
-            recent months. Turn off in Settings.
+            Projected — monthly and bimonthly fixed bills reserved every cycle,
+            not only what has posted. Turn off in Settings.
           </div>
         )}
       </div>

@@ -35,7 +35,13 @@ export function money(amount: number | null | undefined, currency: string = 'ILS
 export function moneyShort(value: number, currency: string = 'ILS'): string {
   const sym = SYMBOLS[(currency || '').toUpperCase()] || '';
   const abs = Math.abs(value);
-  const sign = value < 0 ? '−' : '';
-  if (abs >= 1000) return sign + sym + (abs / 1000).toFixed(abs >= 10000 ? 0 : 1) + 'k';
-  return sign + sym + Math.round(abs);
+  if (abs >= 1000) {
+    const sign = value < 0 ? '−' : '';
+    return sign + sym + (abs / 1000).toFixed(abs >= 10000 ? 0 : 1) + 'k';
+  }
+  // Under 1k rounds to whole units; derive the sign from the ROUNDED magnitude
+  // so a tiny negative that rounds to 0 (e.g. −0.3) renders "₪0", not "−₪0".
+  const rounded = Math.round(abs);
+  const sign = value < 0 && rounded !== 0 ? '−' : '';
+  return sign + sym + rounded;
 }

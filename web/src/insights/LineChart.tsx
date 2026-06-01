@@ -21,7 +21,13 @@ const PAD = 14;
 
 /** Short axis date like the legacy fmtDate: "Jan 1". */
 function fmtAxisDate(iso: string): string {
-  const d = new Date(iso);
+  // Parse a YYYY-MM-DD calendar string as a LOCAL date. `new Date(iso)` reads
+  // the bare date as UTC midnight, which toLocaleDateString then renders back
+  // in local time — shifting the day to "Dec 31" for negative-UTC users.
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  const d = m
+    ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+    : new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }

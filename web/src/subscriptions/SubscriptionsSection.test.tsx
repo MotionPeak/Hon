@@ -68,4 +68,27 @@ describe('SubscriptionsSection', () => {
     const summary = screen.getByTestId('sub-summary');
     expect(within(summary).getByText(/100/)).toBeInTheDocument();
   });
+
+  it('counts only the summed currency so the count reconciles with the total', () => {
+    // 2 ILS subs (₪55 + ₪45 = ₪100) + 1 USD sub. The headline sums the
+    // dominant ILS currency, so the count must be 2 — not 3.
+    render_([
+      txn({ id: 't1', description: 'Netflix', date: daysAgo(5), amount: -55 }),
+      txn({ id: 't2', description: 'Disney Plus', date: daysAgo(10), amount: -45 }),
+      { ...txn({ id: 't3', description: 'Github', date: daysAgo(7), amount: -8 }), currency: 'USD' },
+    ]);
+    const summary = screen.getByTestId('sub-summary');
+    expect(within(summary).getByText(/₪100/)).toBeInTheDocument();
+    expect(summary.querySelector('.sub-meta')?.textContent).toMatch(/2 active subscriptions/);
+  });
+
+  it('includes a charge that arrived after cancellation (still within active window) in the total', () => {
+    // Marked cancelled 20d ago but charged again 5d ago → flagged, yet still
+    // an ongoing ₪45/mo cost that the headline total must include.
+    render_([txn({ id: 't1', description: 'YouTube Premium', date: daysAgo(5), amount: -45 })],
+      {}, { 'youtube premium': daysAgo(20) });
+    const summary = screen.getByTestId('sub-summary');
+    expect(within(summary).getByText(/₪45/)).toBeInTheDocument();
+    expect(summary.querySelector('.sub-meta')?.textContent).toMatch(/1 active subscription/);
+  });
 });

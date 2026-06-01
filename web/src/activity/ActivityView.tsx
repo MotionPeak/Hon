@@ -75,10 +75,14 @@ function txnMatchesSearch(
 }
 
 /** Sums only the dominant currency's rows so a card never adds different
- *  currencies into one figure under one symbol. `abs` sums magnitudes. */
+ *  currencies into one figure under one symbol. `abs` sums magnitudes.
+ *  `others` carries the per-currency totals for every NON-dominant currency
+ *  present, so the header can reconcile with the rows it lists below (a card
+ *  with 3 ILS + 2 USD charges shows the ILS headline plus a muted "· +$X")
+ *  rather than silently dropping the minority currency. */
 function singleCurrencyTotal(
   txns: { amount: number; currency: string }[], abs = false,
-): { total: number; currency: string } {
+): { total: number; currency: string; others: { total: number; currency: string }[] } {
   const byCur = new Map<string, { total: number; count: number }>();
   for (const t of txns) {
     const e = byCur.get(t.currency) ?? { total: 0, count: 0 };
@@ -92,7 +96,30 @@ function singleCurrencyTotal(
   for (const [cur, e] of byCur) {
     if (e.count > bestCount) { currency = cur; bestCount = e.count; total = e.total; }
   }
-  return { total, currency };
+  const others = Array.from(byCur.entries())
+    .filter(([cur]) => cur !== currency)
+    .map(([cur, e]) => ({ total: e.total, currency: cur }));
+  return { total, currency, others };
+}
+
+/** Muted "· +$42" run rendered next to a header's dominant-currency total for
+ *  every other currency present in the group, so the displayed total reconciles
+ *  with the listed rows (money() carries the currency via its symbol). Renders
+ *  nothing when the group is single-currency. `abs` matches the totalling mode
+ *  (savings sums magnitudes, so the sign is forced positive there too). */
+function OtherCurrencyTotals(
+  { others, abs = false }: { others: { total: number; currency: string }[]; abs?: boolean },
+) {
+  if (others.length === 0) return null;
+  return (
+    <span className="cat-total-others">
+      {others.map((o) => (
+        <span key={o.currency} className="cat-total-other">
+          {' · '}{abs || o.total >= 0 ? '+' : ''}{money(o.total, o.currency)}
+        </span>
+      ))}
+    </span>
+  );
 }
 
 export function ActivityView() {
@@ -344,12 +371,16 @@ export function ActivityView() {
             ),
           );
           await refresh(); // reflect whatever actually applied
-          const failed = results.filter((r) => r.status === 'rejected').length;
-          if (failed) {
+          // allSettled preserves order, so results[i] is ids[i]. Keep only the
+          // ids that failed selected — a retry then re-PATCHes just those, not
+          // the ones that already moved.
+          const failedIds = ids.filter((_, i) => results[i]?.status === 'rejected');
+          if (failedIds.length) {
+            setSelectedIds(new Set(failedIds));
             // Don't close — surface the partial failure so the user can retry
             // the rest instead of silently leaving some unmoved.
             throw new Error(
-              `${ids.length - failed} of ${ids.length} moved. ${failed} failed — try again.`,
+              `${ids.length - failedIds.length} of ${ids.length} moved. ${failedIds.length} failed — try again.`,
             );
           }
           setBulkPickOpen(false);
@@ -603,9 +634,8 @@ function UmbrellaSections({
         // Umbrella total: sum across every category under this group.
         // Income contributes positively, expenses negative. Dominant-currency
         // only, so a foreign charge isn't added into an ILS figure.
-        const { total: umbrellaTotal, currency: umbrellaCur } = singleCurrencyTotal(
-          cats.flatMap((c) => grouped.get(c) ?? []),
-        );
+        const { total: umbrellaTotal, currency: umbrellaCur, others: umbrellaOthers } =
+          singleCurrencyTotal(cats.flatMap((c) => grouped.get(c) ?? []));
         const positive = umbrellaTotal >= 0;
         return (
           <section key={g} className="act-umbrella">
@@ -614,6 +644,7 @@ function UmbrellaSections({
               <span className="umbrella-line" />
               <span className={`umbrella-total${positive ? ' pos' : ''}`}>
                 {money(umbrellaTotal, umbrellaCur)}
+                <OtherCurrencyTotals others={umbrellaOthers} />
               </span>
             </h2>
             <div className="act-cols">
@@ -652,7 +683,7 @@ function ExcludedSection({
   transactions, accountById, onPickTxn, selectedIds,
 }: ExcludedSectionProps) {
   const [open, setOpen] = useState(false);
-  const { total, currency: cur } = singleCurrencyTotal(transactions);
+  const { total, currency: cur, others } = singleCurrencyTotal(transactions);
   return (
     <section className="act-excluded">
       <button
@@ -666,7 +697,10 @@ function ExcludedSection({
           Excluded from cycle ({transactions.length})
         </span>
         <span className="act-excluded-line" />
-        <span className="act-excluded-total">{money(total, cur)}</span>
+        <span className="act-excluded-total">
+          {money(total, cur)}
+          <OtherCurrencyTotals others={others} />
+        </span>
       </button>
       {open && (
         <ul className="txn-list">
@@ -731,7 +765,7 @@ function SavingsSection({
   transactions, accountById, onPickTxn, selectedIds,
 }: SavingsSectionProps) {
   const [open, setOpen] = useState(false);
-  const { total, currency: cur } = singleCurrencyTotal(transactions, true);
+  const { total, currency: cur, others } = singleCurrencyTotal(transactions, true);
   return (
     <section className="act-savings">
       <button
@@ -745,7 +779,10 @@ function SavingsSection({
           Savings ({transactions.length})
         </span>
         <span className="act-savings-line" />
-        <span className="act-savings-total">{money(total, cur)}</span>
+        <span className="act-savings-total">
+          {money(total, cur)}
+          <OtherCurrencyTotals others={others} abs />
+        </span>
       </button>
       {open && (
         <ul className="txn-list">
@@ -809,7 +846,7 @@ interface CatCardProps {
 function CatCard({
   catName, cat, rows, accountById, loans, onPickTxn, selectedIds,
 }: CatCardProps) {
-  const { total, currency: cur } = singleCurrencyTotal(rows);
+  const { total, currency: cur, others } = singleCurrencyTotal(rows);
   return (
     <article className="cat-card-act">
       <h3 className="cat-head-act">
@@ -823,6 +860,7 @@ function CatCard({
         <span className="cat-count">{rows.length}</span>
         <span className={`cat-total${total >= 0 ? ' pos' : ''}`}>
           {money(total, cur)}
+          <OtherCurrencyTotals others={others} />
         </span>
       </h3>
       <ul className="txn-list">
@@ -991,6 +1029,23 @@ function CategoryPickerSidebar(
       setError(e instanceof ApiError ? e.message : String(e));
     }
   };
+  // Exclude/Savings toggles persist immediately (no Save button). Surface a
+  // rejection inline instead of swallowing it — the checkbox is controlled by
+  // the parent's `excluded`/`savings` props, which only flip after the PATCH
+  // resolves, so on failure it self-reverts to the real state on re-render.
+  // Unlike `save`, these don't close the sidebar, so busy must always reset.
+  const runToggle = async (fn: () => void | Promise<void>) => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await fn();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
   const cat = categories.find((c) => c.name === current);
   return (
     <ModalPortal>
@@ -1134,7 +1189,7 @@ function CategoryPickerSidebar(
                   type="checkbox"
                   checked={excluded}
                   disabled={busy}
-                  onChange={(e) => { void onSetExcluded(e.target.checked); }}
+                  onChange={(e) => { const v = e.target.checked; void runToggle(() => onSetExcluded(v)); }}
                   aria-label="Exclude from cycle calculations"
                 />
               </label>
@@ -1151,7 +1206,7 @@ function CategoryPickerSidebar(
                   type="checkbox"
                   checked={savings}
                   disabled={busy}
-                  onChange={(e) => { void onSetSavings(e.target.checked); }}
+                  onChange={(e) => { const v = e.target.checked; void runToggle(() => onSetSavings(v)); }}
                   aria-label="Mark as savings transfer"
                 />
               </label>
