@@ -46,6 +46,19 @@ function SplitwiseNote({ txnId }: { txnId: string }) {
 
 /** Match a transaction against a lowercase search query. Mirrors the legacy
  *  txnMatchesSearch — description, category, date, account label, or amount. */
+/** ± window so a search for "100" finds charges of 99.6–100.4. */
+const AMOUNT_SEARCH_TOLERANCE = 0.5;
+
+/** Whether a transaction amount matches a numeric search query, sign-agnostic
+ *  and within a small rounding window. Returns false for a non-numeric query
+ *  (a literal "0" IS searchable — it matches amounts near zero). Shared by the
+ *  activity search and the refund picker so the tolerance can't drift. */
+export function amountMatches(amount: number, query: string): boolean {
+  const num = parseFloat(query.replace(/[^0-9.\-]/g, ''));
+  if (!Number.isFinite(num)) return false;
+  return Math.abs(Math.abs(amount) - Math.abs(num)) < AMOUNT_SEARCH_TOLERANCE;
+}
+
 function txnMatchesSearch(
   t: Transaction, accounts: Map<string, Account>, q: string,
 ): boolean {
@@ -58,11 +71,28 @@ function txnMatchesSearch(
     if ((acct.label || '').toLowerCase().includes(q)) return true;
     if ((acct.connectionName || '').toLowerCase().includes(q)) return true;
   }
-  const num = parseFloat(q.replace(/[^0-9.\-]/g, ''));
-  if (Number.isFinite(num) && num !== 0) {
-    if (Math.abs(Math.abs(t.amount) - Math.abs(num)) < 0.5) return true;
+  return amountMatches(t.amount, q);
+}
+
+/** Sums only the dominant currency's rows so a card never adds different
+ *  currencies into one figure under one symbol. `abs` sums magnitudes. */
+function singleCurrencyTotal(
+  txns: { amount: number; currency: string }[], abs = false,
+): { total: number; currency: string } {
+  const byCur = new Map<string, { total: number; count: number }>();
+  for (const t of txns) {
+    const e = byCur.get(t.currency) ?? { total: 0, count: 0 };
+    e.total += abs ? Math.abs(t.amount) : t.amount;
+    e.count += 1;
+    byCur.set(t.currency, e);
   }
-  return false;
+  let currency = 'ILS';
+  let bestCount = -1;
+  let total = 0;
+  for (const [cur, e] of byCur) {
+    if (e.count > bestCount) { currency = cur; bestCount = e.count; total = e.total; }
+  }
+  return { total, currency };
 }
 
 export function ActivityView() {
@@ -135,6 +165,79 @@ export function ActivityView() {
     return monthsWithTxns[0] ?? currentCycleKey(settings.monthStartDay);
   }, [month, monthsWithTxns, transactions, settings.monthStartDay]);
 
+  const exclusionSettings = useMemo(() => ({
+    hideCardTotals: settings.hideCardTotals,
+    cardProviders: settings.cardProviders,
+  }), [settings.hideCardTotals, settings.cardProviders]);
+
+  // All derivations below are memoized so a keystroke in the search box (or any
+  // unrelated re-render) doesn't re-walk the whole transaction history. They run
+  // before the early returns to keep hook order stable; `transactions ?? []`
+  // covers the null/loading case the guards handle just after.
+  const accountById = useMemo(() => {
+    const m = new Map<string, Account>();
+    for (const a of accounts) m.set(a.id, a);
+    return m;
+  }, [accounts]);
+  const categoryByName = useMemo(() => {
+    const m = new Map<string, Category>();
+    for (const c of categories) m.set(c.name, c);
+    return m;
+  }, [categories]);
+
+  const searchQ = search.trim().toLowerCase();
+  const inSearchMode = searchQ.length > 0;
+
+  // Search mode: flat cross-month list, newest first, with the same
+  // refundForId / card-bill folding as the grouped view.
+  const searchResults = useMemo(() => inSearchMode
+    ? (transactions ?? [])
+        .filter((t) => !t.refundForId && txnMatchesSearch(t, accountById, searchQ))
+        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+    : [], [inSearchMode, transactions, accountById, searchQ]);
+
+  const monthTxnsAll = useMemo(() => (transactions ?? []).filter((t) =>
+    !t.refundForId && cycleKey(t.date, settings.monthStartDay) === activeMonth,
+  ), [transactions, settings.monthStartDay, activeMonth]);
+
+  // Split into "counted toward the cycle", "excluded", and "savings" buckets.
+  // Savings is checked FIRST so savings rows never land in the excluded bucket
+  // (isExcludedFromCycle returns true for savings rows). Excluded rows skip the
+  // regular category grouping and render in a dedicated section at the bottom —
+  // visible, manageable, but out of the totals.
+  const { monthTxns, excludedTxns, savingsTxns } = useMemo(() => {
+    const month: Transaction[] = [];
+    const excluded: Transaction[] = [];
+    const savings: Transaction[] = [];
+    for (const t of monthTxnsAll) {
+      if (t.savings) savings.push(t);
+      else if (isExcludedFromCycle(t, exclusionSettings)) excluded.push(t);
+      else month.push(t);
+    }
+    return { monthTxns: month, excludedTxns: excluded, savingsTxns: savings };
+  }, [monthTxnsAll, exclusionSettings]);
+
+  // Group by category. The category order comes from the engine's sortOrder,
+  // then any extras alphabetically.
+  const { grouped, orderedCats } = useMemo(() => {
+    const g = new Map<string, Transaction[]>();
+    for (const t of monthTxns) {
+      const cat = t.category || 'Other';
+      const arr = g.get(cat) ?? [];
+      arr.push(t);
+      g.set(cat, arr);
+    }
+    const catalog = categories
+      .slice()
+      .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name))
+      .map((c) => c.name);
+    const ordered = [
+      ...catalog.filter((n) => g.has(n)),
+      ...Array.from(g.keys()).filter((n) => !catalog.includes(n)).sort(),
+    ];
+    return { grouped: g, orderedCats: ordered };
+  }, [monthTxns, categories]);
+
   if (transactions === null) return <DelayedLoader />;
 
   if (transactions.length === 0) {
@@ -145,64 +248,6 @@ export function ActivityView() {
       </div>
     );
   }
-
-  const accountById = new Map<string, Account>();
-  for (const a of accounts) accountById.set(a.id, a);
-  const categoryByName = new Map<string, Category>();
-  for (const c of categories) categoryByName.set(c.name, c);
-
-  const searchQ = search.trim().toLowerCase();
-  const inSearchMode = searchQ.length > 0;
-
-  // Search mode: flat cross-month list, newest first, with the same
-  // refundForId / card-bill folding as the grouped view.
-  const searchResults = inSearchMode
-    ? transactions
-        .filter((t) => !t.refundForId && txnMatchesSearch(t, accountById, searchQ))
-        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-    : [];
-
-  const monthTxnsAll = transactions.filter((t) =>
-    !t.refundForId && cycleKey(t.date, settings.monthStartDay) === activeMonth,
-  );
-
-  // Split into "counted toward the cycle", "excluded", and "savings" buckets.
-  // Savings is checked FIRST so savings rows never land in the excluded bucket
-  // (isExcludedFromCycle returns true for savings rows). Excluded rows skip the
-  // regular category grouping and render in a dedicated section at the bottom —
-  // visible, manageable, but out of the totals.
-  const exclusionSettings = {
-    hideCardTotals: settings.hideCardTotals,
-    cardProviders: settings.cardProviders,
-  };
-  const monthTxns: Transaction[] = [];
-  const excludedTxns: Transaction[] = [];
-  const savingsTxns: Transaction[] = [];
-  for (const t of monthTxnsAll) {
-    if (t.savings) savingsTxns.push(t);
-    else if (isExcludedFromCycle(t, exclusionSettings)) excludedTxns.push(t);
-    else monthTxns.push(t);
-  }
-
-  // Group by category. The category order comes from the engine's sortOrder.
-  const grouped = new Map<string, Transaction[]>();
-  for (const t of monthTxns) {
-    const cat = t.category || 'Other';
-    const arr = grouped.get(cat) ?? [];
-    arr.push(t);
-    grouped.set(cat, arr);
-  }
-  // Order: categories in catalog order, then any extras alphabetically.
-  const catalog = categories
-    .slice()
-    .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name))
-    .map((c) => c.name);
-  const orderedCats = [
-    ...catalog.filter((n) => grouped.has(n)),
-    ...Array.from(grouped.keys())
-      .filter((n) => !catalog.includes(n))
-      .sort(),
-  ];
 
   const monthIdx = activeMonth ? monthsWithTxns.indexOf(activeMonth) : -1;
   const canPrev = monthIdx >= 0 && monthIdx < monthsWithTxns.length - 1;
@@ -292,15 +337,24 @@ export function ActivityView() {
         categories={categories}
         onClose={() => setBulkPickOpen(false)}
         onPick={async (cat) => {
-          await Promise.all(
-            Array.from(selectedIds).map((id) =>
+          const ids = Array.from(selectedIds);
+          const results = await Promise.allSettled(
+            ids.map((id) =>
               api(`/transactions/${encodeURIComponent(id)}/category`, 'PATCH', { category: cat }),
             ),
           );
+          await refresh(); // reflect whatever actually applied
+          const failed = results.filter((r) => r.status === 'rejected').length;
+          if (failed) {
+            // Don't close — surface the partial failure so the user can retry
+            // the rest instead of silently leaving some unmoved.
+            throw new Error(
+              `${ids.length - failed} of ${ids.length} moved. ${failed} failed — try again.`,
+            );
+          }
           setBulkPickOpen(false);
           setBatchMode(false);
           setSelectedIds(new Set());
-          await refresh();
         }}
       />
       {inSearchMode ? (
@@ -547,15 +601,11 @@ function UmbrellaSections({
         const cats = byGroup.get(g) ?? [];
         if (cats.length === 0) return null;
         // Umbrella total: sum across every category under this group.
-        // Income contributes positively, expenses negative.
-        let umbrellaTotal = 0;
-        let umbrellaCur = 'ILS';
-        for (const c of cats) {
-          for (const t of grouped.get(c) ?? []) {
-            umbrellaTotal += t.amount;
-            umbrellaCur = t.currency;
-          }
-        }
+        // Income contributes positively, expenses negative. Dominant-currency
+        // only, so a foreign charge isn't added into an ILS figure.
+        const { total: umbrellaTotal, currency: umbrellaCur } = singleCurrencyTotal(
+          cats.flatMap((c) => grouped.get(c) ?? []),
+        );
         const positive = umbrellaTotal >= 0;
         return (
           <section key={g} className="act-umbrella">
@@ -602,8 +652,7 @@ function ExcludedSection({
   transactions, accountById, onPickTxn, selectedIds,
 }: ExcludedSectionProps) {
   const [open, setOpen] = useState(false);
-  const total = transactions.reduce((s, t) => s + t.amount, 0);
-  const cur = transactions[0]?.currency ?? 'ILS';
+  const { total, currency: cur } = singleCurrencyTotal(transactions);
   return (
     <section className="act-excluded">
       <button
@@ -682,8 +731,7 @@ function SavingsSection({
   transactions, accountById, onPickTxn, selectedIds,
 }: SavingsSectionProps) {
   const [open, setOpen] = useState(false);
-  const total = transactions.reduce((s, t) => s + Math.abs(t.amount), 0);
-  const cur = transactions[0]?.currency ?? 'ILS';
+  const { total, currency: cur } = singleCurrencyTotal(transactions, true);
   return (
     <section className="act-savings">
       <button
@@ -761,9 +809,7 @@ interface CatCardProps {
 function CatCard({
   catName, cat, rows, accountById, loans, onPickTxn, selectedIds,
 }: CatCardProps) {
-  let total = 0;
-  let cur = 'ILS';
-  for (const t of rows) { total += t.amount; cur = t.currency; }
+  const { total, currency: cur } = singleCurrencyTotal(rows);
   return (
     <article className="cat-card-act">
       <h3 className="cat-head-act">
@@ -1236,6 +1282,7 @@ function BulkCategoryDialog({
   open, count, categories, onClose, onPick,
 }: BulkCategoryDialogProps) {
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const groupOrder: Category['catGroup'][] = ['income', 'essential', 'fixed', 'variable'];
   const grouped: Record<Category['catGroup'], Category[]> = {
     income: [], essential: [], fixed: [], variable: [],
@@ -1246,7 +1293,7 @@ function BulkCategoryDialog({
   }
 
   return (
-    <Dialog.Root open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+    <Dialog.Root open={open} onOpenChange={(o) => { if (!o) { setError(null); onClose(); } }}>
       <Dialog.Portal>
         <Dialog.Overlay className="rx-overlay" />
         <Dialog.Content
@@ -1274,7 +1321,9 @@ function BulkCategoryDialog({
                       disabled={busy}
                       onClick={async () => {
                         setBusy(true);
+                        setError(null);
                         try { await onPick(c.name); }
+                        catch (e) { setError(e instanceof Error ? e.message : String(e)); }
                         finally { setBusy(false); }
                       }}
                     >
@@ -1286,6 +1335,7 @@ function BulkCategoryDialog({
               </div>
             ))}
           </div>
+          {error && <div className="modal-err">{error}</div>}
           <div className="form-actions">
             <Dialog.Close asChild>
               <button type="button" className="btn-ghost">Cancel</button>
@@ -1382,14 +1432,11 @@ function RefundPicker({
   const candidates = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return baseCandidates;
-    const num = parseFloat(q.replace(/[^0-9.\-]/g, ''));
-    const numValid = Number.isFinite(num) && num !== 0;
     return baseCandidates.filter((t) => {
       if ((t.description || '').toLowerCase().includes(q)) return true;
       if ((t.category || '').toLowerCase().includes(q)) return true;
       if (t.date && t.date.includes(q)) return true;
-      if (numValid && Math.abs(Math.abs(t.amount) - Math.abs(num)) < 0.5) return true;
-      return false;
+      return amountMatches(t.amount, q);
     });
   }, [baseCandidates, query]);
 
