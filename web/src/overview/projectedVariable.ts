@@ -34,6 +34,16 @@ export interface ProjectedVariable {
   projected: boolean;
 }
 
+/**
+ * Essential reserve: hold the planned essential budget (so the leftover stays
+ * stable as the budget gets used), but never less than what's already spent.
+ * Computed from GROUP totals (Σ budget vs Σ spent), NOT per-row — shared by
+ * projectVariable and the budget editor's live preview so the two can't drift.
+ */
+export function essentialReserve(budgetTotal: number, spentTotal: number): number {
+  return budgetTotal > 0 ? Math.max(budgetTotal, spentTotal) : spentTotal;
+}
+
 export function projectVariable(
   v: VariableInput,
   essentialBudgetTotal: number,
@@ -41,11 +51,7 @@ export function projectVariable(
 ): ProjectedVariable {
   const income = v.income || 0;
   const essentialSpent = v.essentialSpent || 0;
-  // Reserve the planned essential budget (so the leftover stays stable as the
-  // budget gets used), but never less than what's already been spent.
-  const essential = essentialBudgetTotal > 0
-    ? Math.max(essentialBudgetTotal, essentialSpent)
-    : essentialSpent;
+  const essential = essentialReserve(essentialBudgetTotal, essentialSpent);
   const fixed = predictedFixed != null ? predictedFixed : (v.fixedSpent || 0);
   const committed = fixed + essential;
   const piggy = Math.max(0, v.piggyFunded || 0);

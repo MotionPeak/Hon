@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import { money } from '../format';
 import type { Account, Company } from '../accounts/types';
@@ -136,6 +136,25 @@ export function OverviewView() {
     }).catch(() => setRecurring(null));
   }, [budgetPath, refreshKey]);
 
+  // This cycle's spend (donut + "Spent this month") and savings tally. Memoized
+  // so an unrelated re-render doesn't re-scan the whole transaction array 3x.
+  // Hoisted above the early return to keep hook order stable.
+  const { spend, saved } = useMemo(() => {
+    const ck = currentCycleKey(settings.monthStartDay);
+    const excluded = (t: Transaction): boolean => isExcludedFromCycle(t, {
+      hideCardTotals: settings.hideCardTotals,
+      cardProviders: settings.cardProviders,
+    });
+    if (!recurring) return { spend: { cats: [], total: 0, prevTotal: 0 }, saved: 0 };
+    return {
+      spend: buildPieCats(
+        recurring.transactions, recurring.categories, settings.monthStartDay,
+        excluded, ck, prevCycleKey(ck),
+      ),
+      saved: savedThisCycle(recurring.transactions, ck, settings.monthStartDay),
+    };
+  }, [recurring, settings.monthStartDay, settings.hideCardTotals, settings.cardProviders]);
+
   if (summary === null) return <DelayedLoader />;
 
   const v = budget?.variable;
@@ -172,27 +191,16 @@ export function OverviewView() {
     ? predictedFixed + (v.essentialSpent ?? 0)
     : (v?.committed ?? 0);
 
-  // This cycle's spend, grouped by category, for the donut + the budget card's
-  // "Spent this month" total. Same card-bill / refund filter the Activity and
-  // Insights tabs use, so the donut total reconciles with both. Falls back to
-  // empty when the transactions fetch hasn't landed (or failed).
+  // Same card-bill / refund filter the Activity and Insights tabs use, so the
+  // donut total reconciles with both. (spend + saved are computed in the memo
+  // above; this predicate is also passed to the donut.)
   const isExcluded = (t: Transaction): boolean => isExcludedFromCycle(t, {
     hideCardTotals: settings.hideCardTotals,
     cardProviders: settings.cardProviders,
   });
-  const curKey = currentCycleKey(settings.monthStartDay);
-  const spend = recurring
-    ? buildPieCats(
-        recurring.transactions, recurring.categories, settings.monthStartDay,
-        isExcluded, curKey, prevCycleKey(curKey),
-      )
-    : { cats: [], total: 0, prevTotal: 0 };
   const spendChangePct = spend.prevTotal > 0
     ? ((spend.total - spend.prevTotal) / spend.prevTotal) * 100
     : null;
-  const saved = recurring
-    ? savedThisCycle(recurring.transactions, curKey, settings.monthStartDay)
-    : 0;
 
   return (
     <div className="overview-view">

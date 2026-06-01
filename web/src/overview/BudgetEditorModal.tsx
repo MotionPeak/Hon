@@ -4,7 +4,7 @@ import { api } from '../api';
 import { money } from '../format';
 import { currentCycleKey } from '../cycle';
 import type { Category } from '../settings/CategoriesPanel';
-import type { VariableInput } from './projectedVariable';
+import { essentialReserve, type VariableInput } from './projectedVariable';
 import type { BudgetLine } from './BudgetCard';
 
 interface BudgetEditorModalProps {
@@ -113,14 +113,15 @@ export function BudgetEditorModal({
 
   const num = (s: string): number => (s.trim() === '' ? 0 : Number(s) || 0);
   const incomeNum = income.trim() === '' ? (variable.income || 0) : num(income);
-  const essentialReserve = rows.reduce((s, r) => {
-    const amt = num(r.value);
-    return s + (amt > 0 ? Math.max(amt, r.spent) : r.spent);
-  }, 0);
+  // Reserve from GROUP totals (Σ budget vs Σ spent) via the shared helper, so
+  // this live preview matches what BudgetCard renders after Save — the old
+  // per-row max() summed differently and the number jumped on save.
   const totalBudgeted = rows.reduce((s, r) => s + Math.max(0, num(r.value)), 0);
-  const capBeforeSavings = Math.max(0, incomeNum - fixed - essentialReserve - piggy - variableSpent);
+  const essentialSpentTotal = rows.reduce((s, r) => s + r.spent, 0);
+  const reserve = essentialReserve(totalBudgeted, essentialSpentTotal);
+  const capBeforeSavings = Math.max(0, incomeNum - fixed - reserve - piggy - variableSpent);
   const savingsApplied = Math.min(num(savings), capBeforeSavings);
-  const committed = fixed + essentialReserve;
+  const committed = fixed + reserve;
   const disposable = incomeNum - committed - piggy - savingsApplied;
   const allowed = disposable - variableSpent;
 
@@ -132,19 +133,24 @@ export function BudgetEditorModal({
     setSaving(true);
     setErr(null);
     try {
+      // The writes target distinct endpoints/categories with no ordering
+      // dependency — fire them concurrently instead of N+1 sequential
+      // round-trips. (A single batch endpoint would also make this atomic.)
+      const writes: Promise<unknown>[] = [];
       // One PUT per essential whose limit changed (0/blank deletes the limit).
       for (const r of rows) {
         if (r.value.trim() === r.initial.trim()) continue;
-        await api('/budgets', 'PUT', { category: r.category, monthlyAmount: num(r.value) });
+        writes.push(api('/budgets', 'PUT', { category: r.category, monthlyAmount: num(r.value) }));
       }
       if (income.trim() !== incomeInitial.trim()) {
-        await api('/budget/income-override', 'PUT', {
+        writes.push(api('/budget/income-override', 'PUT', {
           value: income.trim() === '' ? null : num(income),
-        });
+        }));
       }
       if (savings.trim() !== savingsInitial.trim() || transferred !== transferredInitial) {
-        await api('/budget/savings', 'PUT', { month, amount: num(savings), transferred });
+        writes.push(api('/budget/savings', 'PUT', { month, amount: num(savings), transferred }));
       }
+      await Promise.all(writes);
       onSaved();
       onClose();
     } catch {
