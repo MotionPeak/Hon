@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
+import { useSummary } from '../api/hooks/useSummary';
+import { type Summary, type CurrencyTotal } from '@hon/shared/summary';
 import { money } from '../format';
 import type { Account, Company } from '../accounts/types';
 import { DelayedLoader } from '../ui/DelayedLoader';
@@ -40,21 +42,13 @@ function budgetPathFor(
   return `/budget?${params.toString()}`;
 }
 
-interface CurrencyTotal { currency: string; total: number; accountCount: number }
-
-/** One net-worth source bucket from /summary (bank, card, pension, brokerage,
- *  loan, or an `asset:<kind>`); already converted to ILS by the engine.
- *  Negative for debt (cards, loans). */
-interface NetWorthSource { key: string; amount: number }
-
-interface Summary {
-  byCurrency: CurrencyTotal[];
-  accountCount: number;
-  connectionCount: number;
-  manualAssetCount?: number;
-  netWorthILS: number | null;
-  sources?: NetWorthSource[];
-}
+/** Shown when the /summary fetch fails — the dashboard degrades to an empty
+ *  net worth rather than spinning on the loader forever (matches the
+ *  pre-Query catch that set a zeroed summary). */
+const EMPTY_SUMMARY: Summary = {
+  connectionCount: 0, accountCount: 0, manualAssetCount: 0, voucherCount: 0,
+  byCurrency: [], netWorthILS: 0, sources: [],
+};
 
 interface BudgetVariable {
   income: number;
@@ -81,7 +75,9 @@ interface BudgetResponse {
 
 export function OverviewView() {
   const [settings] = useSettings();
-  const [summary, setSummary] = useState<Summary | null>(null);
+  const summaryQuery = useSummary();
+  const summary: Summary | null =
+    summaryQuery.data ?? (summaryQuery.isError ? EMPTY_SUMMARY : null);
   const [budget, setBudget] = useState<BudgetResponse | null>(null);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -99,20 +95,22 @@ export function OverviewView() {
   );
 
   useEffect(() => {
+    // Guard against a stale response overwriting fresher state: when the cycle
+    // window or refreshKey changes mid-flight, this effect re-runs and the prior
+    // run's `ignore` flips true so its late `.then` is a no-op.
+    let ignore = false;
+
     Promise.all([
-      // The engine wraps it as `{ summary: {...} }` (the legacy SPA unwraps
-      // `r.summary`); reading it flat left net worth permanently "—".
-      api<{ summary: Summary }>('/summary'),
       api<BudgetResponse>(budgetPath),
       api<{ companies: Company[] }>('/companies').catch(() => ({ companies: [] })),
       api<{ accounts: Account[] }>('/accounts').catch(() => ({ accounts: [] })),
-    ]).then(([s, b, c, a]) => {
-      setSummary(s.summary);
+    ]).then(([b, c, a]) => {
+      if (ignore) return;
       setBudget(b);
       setCompanies(c.companies ?? []);
       setAccounts(a.accounts ?? []);
     }).catch(() => {
-      setSummary({ byCurrency: [], accountCount: 0, connectionCount: 0, netWorthILS: 0 });
+      if (ignore) return;
       setBudget(null);
     });
 
@@ -128,12 +126,18 @@ export function OverviewView() {
       api<{ cancelled: Record<string, string> }>('/subscriptions/cancelled')
         .catch(() => ({ cancelled: {} as Record<string, string> })),
     ]).then(([t, c, f, s, sub]) => {
+      if (ignore) return;
       setRecurring({
         transactions: t.transactions, categories: c.categories,
         frequencies: f.frequencies ?? {}, splits: s.splits ?? {},
         cancelled: sub.cancelled ?? {},
       });
-    }).catch(() => setRecurring(null));
+    }).catch(() => {
+      if (ignore) return;
+      setRecurring(null);
+    });
+
+    return () => { ignore = true; };
   }, [budgetPath, refreshKey]);
 
   // This cycle's spend (donut + "Spent this month") and savings tally. Memoized
@@ -154,6 +158,21 @@ export function OverviewView() {
       saved: savedThisCycle(recurring.transactions, ck, settings.monthStartDay),
     };
   }, [recurring, settings.monthStartDay, settings.hideCardTotals, settings.cardProviders]);
+
+  // Predicted fixed-this-cycle (same source as the Fixed bills tab). Null when
+  // the recurring fetch failed, there's no detected history yet, or the user
+  // turned projection off — driving the headline, BudgetCard and bank
+  // projection back to posted figures so the master switch is honoured
+  // everywhere. Memoized so it doesn't re-run the merchant rollup each render.
+  const predictedFixed = useMemo(
+    () =>
+      recurring && settings.projectRecurring
+        ? expectedFixedThisCycle(
+            detectMerchants(recurring, settings.monthStartDay).rows, settings.monthStartDay,
+          )
+        : null,
+    [recurring, settings.monthStartDay, settings.projectRecurring],
+  );
 
   if (summary === null) return <DelayedLoader />;
 
@@ -179,14 +198,10 @@ export function OverviewView() {
     (l) => (l.budget ?? 0) > 0 || l.spent > 0,
   );
 
-  // Predicted fixed-this-cycle (same source as the Fixed bills tab) + posted
-  // essentials. Falls back to the budget's posted committed total when the
-  // recurring fetch failed or there is no detected fixed history yet.
-  const predictedFixed = recurring
-    ? expectedFixedThisCycle(
-        detectMerchants(recurring, settings.monthStartDay).rows, settings.monthStartDay,
-      )
-    : null;
+  // Headline "Expected fixed + essentials": the memoized predicted fixed plus
+  // posted essentials. Falls back to the budget's posted committed total when
+  // predictedFixed is null — i.e. the recurring fetch failed, there is no
+  // detected fixed history yet, or the user turned projection off in Settings.
   const committedDisplay = (v && predictedFixed !== null)
     ? predictedFixed + (v.essentialSpent ?? 0)
     : (v?.committed ?? 0);
@@ -232,6 +247,7 @@ export function OverviewView() {
               essentials={essentials}
               categories={recurring?.categories ?? []}
               predictedFixed={predictedFixed}
+              projectRecurring={settings.projectRecurring}
               totalSpent={spend.total}
               currency={budget!.currency}
               monthStartDay={settings.monthStartDay}

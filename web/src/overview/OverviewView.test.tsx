@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { screen, within } from '@testing-library/react';
+import { renderWithProviders } from '../test/renderWithProviders';
 import { OverviewView } from './OverviewView';
 import { installFetchMock } from '../test/mockFetch';
 import { __resetSplitwiseCache } from '../splitwise/useSplitwise';
@@ -12,7 +13,7 @@ afterEach(() => { __resetSplitwiseCache(); localStorage.clear(); });
 // must mount inside a SettingsProvider. Default settings have hideCardTotals on
 // and a cardProviders list that includes 'מקס' (Max).
 function renderOverview() {
-  return render(
+  return renderWithProviders(
     <SettingsProvider>
       <OverviewView />
     </SettingsProvider>,
@@ -27,6 +28,7 @@ const FULL_SUMMARY = {
   accountCount: 4,
   connectionCount: 3,
   manualAssetCount: 1,
+  voucherCount: 2,
   netWorthILS: 92000,
   // Net-worth source buckets (already ILS), the shape the engine returns.
   sources: [
@@ -104,8 +106,8 @@ const ACCOUNTS = {
 };
 
 const EMPTY_SUMMARY = {
-  byCurrency: [], accountCount: 0, connectionCount: 0, netWorthILS: 0,
-  breakdown: {},
+  byCurrency: [], accountCount: 0, connectionCount: 0, manualAssetCount: 0,
+  voucherCount: 0, netWorthILS: 0, sources: [],
 };
 const EMPTY_BUDGET = {
   currency: 'ILS',
