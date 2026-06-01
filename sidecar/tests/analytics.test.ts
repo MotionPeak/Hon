@@ -1,7 +1,7 @@
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { openDatabase } from '../src/db.js';
 import { Repo } from '../src/repo.js';
 import { buildAnalytics } from '../src/analytics.js';
@@ -27,6 +27,15 @@ function seedThisMonth(repo: Repo) {
 }
 
 describe('buildAnalytics cardProviders', () => {
+  // Freeze the clock to a fixed mid-month date so the seeded day-2/day-3 rows
+  // and buildAnalytics's "this month" window always agree — otherwise the exact
+  // assertions below can break when the suite runs on a month boundary.
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-06-15T12:00:00Z'));
+  });
+  afterEach(() => { vi.useRealTimers(); });
+
   it('excludes matching card-bill lump sums from this-month spending', () => {
     const repo = makeRepo();
     seedThisMonth(repo);

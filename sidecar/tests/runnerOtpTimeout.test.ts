@@ -1,7 +1,7 @@
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 // Mock the scraper layer so the interactive path just awaits the OTP callback
 // (which rejects on timeout) instead of launching a real Puppeteer browser.
@@ -60,7 +60,7 @@ describe('OTP wait timeout (H-5)', () => {
     // Locked while the (mocked) scrape is awaiting the OTP.
     expect(runner.isActive(conn.id)).toBe(true);
 
-    // After the 60ms timeout, the rejection propagates through execute()'s catch
+    // After the 150ms timeout, the rejection propagates through execute()'s catch
     // → finish('error', 'otp.timeout') and the per-connection lock is released.
     await vi.waitFor(
       () => {

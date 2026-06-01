@@ -57,4 +57,27 @@ describe('allocatePayments', () => {
     expect(out[0].paidState).toBe('partial');
     expect(out[0].counterparties.find((c) => c.id === 3)?.paid).toBe(20);
   });
+
+  // Boundary cases for the 0.01 tolerance — these guard against a refactor of
+  // the rounding/threshold silently flipping a fully-repaid expense to partial
+  // (or a dust residual to partial).
+  it('marks paid at the rounding tolerance edge (59.995 of 60)', () => {
+    const out = allocatePayments([link({})], new Map([['2|ILS', 59.995]]));
+    expect(out[0].paidState).toBe('paid');
+  });
+
+  it('leaves a sub-cent residual open, not partial', () => {
+    const out = allocatePayments([link({})], new Map([['2|ILS', 0.005]]));
+    expect(out[0].paidState).toBe('open');
+  });
+
+  it('marks paid when the summed payment reaches owedToMe - 0.01', () => {
+    const out = allocatePayments(
+      [link({ owedToMe: 60, counterparties: [
+        { id: 2, name: 'A', owed: 30 }, { id: 3, name: 'B', owed: 30 },
+      ] })],
+      new Map([['2|ILS', 30], ['3|ILS', 29.99]]),
+    );
+    expect(out[0].paidState).toBe('paid');
+  });
 });

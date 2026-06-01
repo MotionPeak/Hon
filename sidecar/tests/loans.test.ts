@@ -24,15 +24,18 @@ const baseLoan = (overrides: Partial<Loan> = {}): Loan => ({
   principal: 100_000,
   startDate: '2020-01-01', // ~5 years before today's test date
   termMonths: 120,         // 10-year loan
-  rateType: 'fixed',
   rateValue: 5,            // 5% annual
   isPrime: false,
   isCpiLinked: false,
   cpiStart: null,
-  excluded: 0,
+  excluded: false,
   notes: '',
   currency: 'ILS',
+  connectionId: null,
   externalId: null,
+  nameOverridden: false,
+  createdAt: '2020-01-01',
+  updatedAt: '2020-01-01',
   ...overrides,
 });
 
@@ -229,13 +232,13 @@ describe('per-account sync — matcher', () => {
           {
             externalId: 'txn-new',
             date: new Date().toISOString().slice(0, 10),
-            processedDate: null,
+            processedDate: undefined,
             amount: -1747.17,
             currency: 'ILS',
             description: 'הלואה-תשלום 12345678',
-            memo: null,
-            kind: null,
-            status: null,
+            memo: undefined,
+            kind: undefined,
+            status: undefined,
             raw: null,
           },
         ],
