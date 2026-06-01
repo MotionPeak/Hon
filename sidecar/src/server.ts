@@ -2391,11 +2391,15 @@ app.delete('/piggy/:id', async (req, reply) => {
 
 app.post('/insights', async (req, reply) => {
   if (!insights) return reply.code(503).send({ error: 'database unavailable' });
-  const body = (req.body ?? {}) as { cardProviders?: unknown };
+  const body = (req.body ?? {}) as { cardProviders?: unknown; start?: string; end?: string };
   const cardProviders = Array.isArray(body.cardProviders)
     ? body.cardProviders.filter((p): p is string => typeof p === 'string')
     : [];
-  insights.start(cardProviders);
+  const iso = /^\d{4}-\d{2}-\d{2}$/;
+  const range = body.start && body.end && iso.test(body.start) && iso.test(body.end)
+    ? { start: body.start, end: body.end, label: body.start.slice(0, 7) }
+    : undefined;
+  insights.start(cardProviders, range);
   return { ok: true };
 });
 

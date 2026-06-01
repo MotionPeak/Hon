@@ -604,7 +604,15 @@ export class LlmManager {
 
   private restoreState(): void {
     if (!existsSync(this.stateFile)) return;
-    const saved = JSON.parse(readFileSync(this.stateFile, 'utf8')) as PersistedModel;
+    let saved: PersistedModel;
+    try {
+      // Guard the parse like restoreProvider does — a truncated/corrupt
+      // active-model.json (e.g. a crash mid-write) should degrade to "no model
+      // auto-loaded", not throw out of the constructor.
+      saved = JSON.parse(readFileSync(this.stateFile, 'utf8')) as PersistedModel;
+    } catch {
+      return;
+    }
     if (!saved.filePath || !existsSync(saved.filePath)) return;
 
     this.modelPath = saved.filePath;

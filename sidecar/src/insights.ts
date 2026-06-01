@@ -1,4 +1,4 @@
-import { buildBudgetReport, type BudgetReport } from './budget.js';
+import { buildBudgetReport, type BudgetReport, type MonthRange } from './budget.js';
 import { buildAnalytics, type Analytics } from './analytics.js';
 import type { LlmManager } from './llm.js';
 import type { Repo } from './repo.js';
@@ -37,6 +37,7 @@ export class InsightsGenerator {
     message: 'No insights generated yet.',
   };
   private cardProviders: string[] = [];
+  private range: MonthRange | undefined;
 
   constructor(
     private readonly repo: Repo,
@@ -47,9 +48,10 @@ export class InsightsGenerator {
     return this.status;
   }
 
-  start(cardProviders: string[] = []): void {
+  start(cardProviders: string[] = [], range?: MonthRange): void {
     if (this.status.state === 'generating') return;
     this.cardProviders = cardProviders;
+    this.range = range;
     this.status = { ...this.status, state: 'generating', message: 'Generating insights…' };
     void this.run();
   }
@@ -61,7 +63,10 @@ export class InsightsGenerator {
         return;
       }
 
-      const report = buildBudgetReport(this.repo, undefined, { cardProviders: this.cardProviders });
+      // Use the user's billing-cycle range (when the client supplied it) so the
+      // insight's "this month" figures match the Budget tab instead of diverging
+      // on a calendar month near a custom cycle boundary.
+      const report = buildBudgetReport(this.repo, this.range, { cardProviders: this.cardProviders });
       if (report.totalSpent <= 0) {
         this.fail('No spending this month yet — sync and categorize transactions first.');
         return;

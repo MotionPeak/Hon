@@ -110,12 +110,13 @@ export function buildBudgetReport(
   const essentialSet = new Set(essentialCategories);
   const variableSet = new Set(variableCategories);
 
-  // Split this month's expenses into the three umbrellas.
-  let essentialSpent = 0;
+  // Split this month's non-essential expenses into the variable / fixed
+  // umbrellas. Essential spend is derived from the essentials lines below so
+  // the per-line figures and the umbrella total can't drift.
   let variableSpent = 0;
   let fixedSpent = 0;
   for (const [category, total] of spending) {
-    if (essentialSet.has(category)) essentialSpent += total;
+    if (essentialSet.has(category)) continue;
     else if (variableSet.has(category)) variableSpent += total;
     else fixedSpent += total;
   }
@@ -130,6 +131,7 @@ export function buildBudgetReport(
       spent: spending.get(category) ?? 0,
     }))
     .sort((a, b) => b.spent - a.spent);
+  const essentialSpent = essentials.reduce((s, l) => s + l.spent, 0);
 
   const income = repo.monthlyInflow(start, end, cardProviders);
   const committed = fixedSpent + essentialSpent;

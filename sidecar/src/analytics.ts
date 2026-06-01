@@ -34,8 +34,14 @@ const monthKey = (d: Date): string => `${d.getFullYear()}-${pad(d.getMonth() + 1
  * Hon stores is ILS (brokerage syncs carry balances, not transactions).
  */
 export function buildAnalytics(repo: Repo, cardProviders: string[] = []): Analytics {
-  const now = new Date();
-  const month = (offset: number) => new Date(now.getFullYear(), now.getMonth() + offset, 1);
+  // Anchor "now" on the Israel calendar month so the JS month bounds match the
+  // SQL substr(date,1,7) buckets (transactions are stored in Israel time) —
+  // otherwise a server running UTC/US time disagrees near a month boundary and
+  // "this month" can read 0 or fold in a neighbouring month.
+  const [iy, im] = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit',
+  }).format(new Date()).split('-').map(Number);
+  const month = (offset: number) => new Date(iy!, (im! - 1) + offset, 1);
   const thisStart = firstOfMonth(month(0));
   const lastStart = firstOfMonth(month(-1));
   const nextStart = firstOfMonth(month(1));

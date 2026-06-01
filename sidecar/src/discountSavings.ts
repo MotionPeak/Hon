@@ -189,7 +189,10 @@ function parseHoldings(root: unknown): DiscountKerenHolding[] {
     ]);
     const marketValue = pickNumber(row, ['Tmura', 'TmuraTitan', 'TmuraInCurrency']);
 
-    if (marketValue == null || marketValue === 0) continue;
+    // Drop only rows we couldn't price (parse failed) or that hold nothing at
+    // all — keep a real position whose market value is transiently 0 but still
+    // holds units (e.g. a just-opened money-market fund).
+    if (marketValue == null || (marketValue === 0 && (units ?? 0) === 0)) continue;
     out.push({
       symbol: symbol.trim(),
       paperName: name.trim(),

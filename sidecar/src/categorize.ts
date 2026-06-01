@@ -286,6 +286,7 @@ export class Categorizer {
         this.repo.listMerchantRules().map((r) => [r.description, r.category]),
       );
       let byRule = 0;
+      let byUser = 0;
       let byLlm = 0;
       let byCache = 0;
 
@@ -299,7 +300,7 @@ export class Categorizer {
           if (userRule && allowedSet.has(userRule)) {
             category = userRule;
             source = 'user';
-            byRule += 1;
+            byUser += 1;
           }
           if (!category) {
             const cached = this.repo.getCachedCategory(key);
@@ -334,11 +335,14 @@ export class Categorizer {
       }
 
       const note = classifier ? '' : ' Download the AI model to categorize the rest.';
+      // Report your own merchant rules distinctly from the built-in substring
+      // rules instead of lumping both under "by rules".
+      const yourRules = byUser > 0 ? `${byUser} by your rules, ` : '';
       this.status = {
         state: 'done',
         total: this.status.total,
         done: this.status.done,
-        message: `Done — ${byRule} by rules, ${byLlm} by AI, ${byCache} from cache.${note}`,
+        message: `Done — ${yourRules}${byRule} by rules, ${byLlm} by AI, ${byCache} from cache.${note}`,
       };
     } catch (err) {
       this.status = {

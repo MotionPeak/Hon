@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import { DelayedLoader } from '../ui/DelayedLoader';
-import { cycleKey, cycleLabel } from '../cycle';
+import { cycleKey, cycleLabel, currentCycleRange } from '../cycle';
 import { money } from '../format';
 import { useSettings } from '../settings/useSettings';
 import type { Category } from '../settings/CategoriesPanel';
@@ -186,7 +186,10 @@ function AiAnalysisCard() {
   const generate = async (): Promise<void> => {
     try {
       const cardProviders = settings.hideCardTotals ? settings.cardProviders : [];
-      await api('/insights', 'POST', { cardProviders });
+      // Send the billing-cycle window so the engine's insight figures align
+      // with the Budget tab instead of a calendar month.
+      const { start, end } = currentCycleRange(settings.monthStartDay);
+      await api('/insights', 'POST', { cardProviders, start, end });
       // Optimistically flip to generating so the shimmer renders
       // immediately; the first poll will pick up the real state.
       setStatus((s) => ({

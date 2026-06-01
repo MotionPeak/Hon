@@ -387,7 +387,9 @@ describe('InsightsView — AI analysis card', () => {
     const card = await screen.findByTestId('ai-analysis');
     await user.click(within(card).getByRole('button', { name: /^Generate$/i }));
     await waitFor(() => expect(capturedBody).toBeDefined());
-    expect(capturedBody).toEqual({ cardProviders: ['מקס איט'] });
+    expect(capturedBody).toMatchObject({ cardProviders: ['מקס איט'] });
+    expect(capturedBody).toHaveProperty('start');
+    expect(capturedBody).toHaveProperty('end');
     localStorage.removeItem('honSettings');
   });
 
@@ -415,7 +417,7 @@ describe('InsightsView — AI analysis card', () => {
     const card = await screen.findByTestId('ai-analysis');
     await user.click(within(card).getByRole('button', { name: /^Generate$/i }));
     await waitFor(() => expect(capturedBody).toBeDefined());
-    expect(capturedBody).toEqual({ cardProviders: [] });
+    expect(capturedBody).toMatchObject({ cardProviders: [] });
     localStorage.removeItem('honSettings');
   });
 });
