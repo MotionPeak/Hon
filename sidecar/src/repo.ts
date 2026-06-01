@@ -1123,7 +1123,10 @@ export class Repo {
 
     let txnCount = 0;
     const now = new Date().toISOString();
-    const today = now.slice(0, 10);
+    // Snapshot date keys must be the Israel calendar day (transactions are
+    // stored in Israel time too) — a UTC slice files a late-evening Israeli
+    // sync under the wrong day and collides/overwrites the prior snapshot.
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem' }).format(new Date());
 
     // Sets the provider-discovered inception date only when the account
     // doesn't already have one (SET ... WHERE inception_date IS NULL). A
@@ -1649,11 +1652,9 @@ export class Repo {
    * categories the user set by hand (H-4).
    */
   applyMerchantRule(description: string, category: string): number {
-    return this.orm
-      .update(transactionsT)
-      .set({ category })
-      .where(and(eq(transactionsT.description, description), isNull(transactionsT.category)))
-      .run().changes;
+    // Same behaviour as applyCategory — delegate so the `category IS NULL`
+    // guard lives in one place and the two can't drift.
+    return this.applyCategory(description, category);
   }
 
   // --- Merchant recurrence --------------------------------------------------
@@ -1932,6 +1933,7 @@ export class Repo {
                 SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) AS income
          FROM txn_effective
          WHERE currency = 'ILS' AND date >= @start ${exclude}
+           AND id NOT IN (SELECT id FROM transactions WHERE savings = 1)
          GROUP BY substr(date, 1, 7)
          ORDER BY month`,
       )
@@ -1951,6 +1953,7 @@ export class Repo {
         `SELECT COALESCE(category, 'Uncategorized') AS category, SUM(-amount) AS total
          FROM txn_effective
          WHERE amount < 0 AND currency = 'ILS' AND date >= @start AND date < @end ${exclude}
+           AND id NOT IN (SELECT id FROM transactions WHERE savings = 1)
          GROUP BY COALESCE(category, 'Uncategorized')`,
       )
       .all(params) as { category: string; total: number }[];
@@ -1968,7 +1971,8 @@ export class Repo {
       .prepare(
         `SELECT COUNT(*) AS count, COALESCE(AVG(-amount), 0) AS avg
          FROM txn_effective
-         WHERE amount < 0 AND currency = 'ILS' AND date >= @start AND date < @end ${exclude}`,
+         WHERE amount < 0 AND currency = 'ILS' AND date >= @start AND date < @end ${exclude}
+           AND id NOT IN (SELECT id FROM transactions WHERE savings = 1)`,
       )
       .get(params) as { count: number; avg: number };
   }
@@ -2368,7 +2372,15 @@ export class Repo {
   }
 
   deleteLoan(id: string): void {
-    this.orm.delete(loansT).where(eq(loansT.id, id)).run();
+    this.orm.transaction((tx) => {
+      // Null out the FK-less loan_id on this loan's transactions BEFORE deleting
+      // the loan row. transactions.loan_id is plain TEXT with no cascade
+      // (migration v33 documents this delete-time null-out), so without this the
+      // payments keep a dangling id and the matcher/backfill (which only touch
+      // rows where loan_id IS NULL) can never re-link them to a future loan.
+      tx.update(transactionsT).set({ loanId: null }).where(eq(transactionsT.loanId, id)).run();
+      tx.delete(loansT).where(eq(loansT.id, id)).run();
+    });
   }
 
   setLoanExcluded(id: string, excluded: boolean): void {
@@ -2484,6 +2496,10 @@ export class Repo {
       tx.update(categoryCacheT).set({ category: 'Other' }).where(eq(categoryCacheT.category, name)).run();
       tx.update(merchantRulesT).set({ category: 'Other' }).where(eq(merchantRulesT.category, name)).run();
       tx.delete(budgetsT).where(eq(budgetsT.category, name)).run();
+      // category_splits is keyed by category name with no FK — without this the
+      // split row survives and a later category created with the same name
+      // silently inherits the old roommate divisor.
+      tx.delete(categorySplitsT).where(eq(categorySplitsT.category, name)).run();
       tx.delete(categoriesT).where(eq(categoriesT.name, name)).run();
     });
   }
