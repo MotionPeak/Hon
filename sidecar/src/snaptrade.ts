@@ -324,8 +324,10 @@ export async function runSnapTradeSync(
     const res = await snaptrade.accountInformation.listUserAccounts({ userId, userSecret });
     const raw = Array.isArray(res.data) ? res.data : [];
 
-    const accounts: NormalizedAccount[] = [];
-    for (const account of raw) {
+    // Fan out per-account holdings + activity fetches concurrently instead of
+    // awaiting each account in series (5 accounts × ~3s each would block ~15s).
+    // Promise.all preserves order, so the accounts array stays deterministic.
+    const accounts: NormalizedAccount[] = await Promise.all(raw.map(async (account) => {
       const amount = account.balance?.total?.amount;
       const accountId = account.id;
       onProgress?.(`Fetching holdings for ${accountLabel(account)}…`);
@@ -335,16 +337,31 @@ export async function runSnapTradeSync(
           ? Promise.resolve(undefined)
           : fetchEarliestActivityDate(snaptrade, userId, userSecret, accountId),
       ]);
-      accounts.push({
+      let balance = typeof amount === 'number' ? amount : undefined;
+      let currency = account.balance?.total?.currency ?? 'USD';
+      // Some brokerages don't populate balance.total (only a per-currency or
+      // positions breakdown). Rather than contribute a silent 0/undefined to
+      // net worth, derive a value from the priced positions when they share a
+      // single currency.
+      if (balance === undefined && holdings.length > 0) {
+        const currencies = new Set(holdings.map((h) => h.currency));
+        if (currencies.size === 1) {
+          const derived = holdings.reduce(
+            (s, h) => s + (h.price != null ? h.units * h.price : 0), 0,
+          );
+          if (derived > 0) { balance = derived; currency = holdings[0]!.currency; }
+        }
+      }
+      return {
         accountNumber: account.number || account.id,
         label: accountLabel(account),
-        balance: typeof amount === 'number' ? amount : undefined,
-        currency: account.balance?.total?.currency ?? 'USD',
+        balance,
+        currency,
         transactions: [],
         holdings,
         inceptionDate,
-      });
-    }
+      };
+    }));
 
     if (accounts.length === 0) {
       return {
@@ -482,14 +499,18 @@ async function fetchPerformanceHistory(
       [r, await fetchRangeReport(snaptrade, userId, userSecret, r, end)] as const),
   );
 
-  // The feature is reported disabled only when every range hit the 403/1141
-  // wall — a single transient failure shouldn't suppress future calls.
-  const disabled = fetched.every(([, res]) => res.disabled);
-
   // ALL anchors the equity series; if it failed, the chart has nothing to
   // draw and we report the whole fetch as a miss. Yahoo backfill will pick
   // up the slack downstream.
   const allEntry = fetched.find(([r]) => r === 'ALL');
+
+  // Report the feature disabled when the ALL range specifically hit the
+  // 403/1141 wall (it's the range that anchors the chart). Requiring EVERY
+  // range to fail meant a plan that disables only the ALL/detailed window
+  // never persisted the flag and re-hit the dead endpoint every sync.
+  const disabled = allEntry
+    ? allEntry[1].disabled
+    : fetched.every(([, res]) => res.disabled);
   const allData = allEntry ? (allEntry[1].raw as
     {
       totalEquityTimeframe?: unknown;

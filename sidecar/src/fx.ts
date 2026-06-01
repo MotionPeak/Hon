@@ -95,9 +95,25 @@ export async function totalInILS(
 
   let sum = 0;
   for (const { currency, total } of byCurrency) {
-    const rate = rates[normalizeCurrency(currency)];
+    // Some brokerages report sub-unit codes (GBp/GBX = UK pence, ZAc = SA
+    // cents). Frankfurter only quotes the major unit, so convert to it before
+    // lookup — otherwise a perfectly convertible GBP holding would read as an
+    // unknown currency and null out the entire portfolio sum.
+    const sub = SUBUNIT_CURRENCIES[currency];
+    const code = sub ? sub.major : currency;
+    const amount = sub ? total * sub.factor : total;
+    const rate = rates[normalizeCurrency(code)];
     if (rate == null) return null;
-    sum += total * rate;
+    sum += amount * rate;
   }
   return sum;
 }
+
+/** Sub-unit currency codes mapped to their major unit + conversion factor.
+ *  Case-sensitive (GBp ≠ GBP), so this must run before any upper-casing. */
+const SUBUNIT_CURRENCIES: Record<string, { major: string; factor: number }> = {
+  GBp: { major: 'GBP', factor: 0.01 },
+  GBX: { major: 'GBP', factor: 0.01 },
+  ZAc: { major: 'ZAR', factor: 0.01 },
+  ILA: { major: 'ILS', factor: 0.01 },
+};
