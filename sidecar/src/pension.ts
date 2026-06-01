@@ -853,7 +853,13 @@ async function prefillCredentials(
     .catch(() => false);
   if (!formAppeared) return;
   await delay(900); // let the form settle
+  // The waitForSelector above can span minutes; by now the user may have
+  // finished signing in and the scrape may be tearing the page down. Bail
+  // before each write so a fire-and-forget prefill can't run against a closed
+  // page (noisy "Execution context destroyed" rejections).
+  if (page.isClosed()) return;
   await fillField(page, fund.idSelector, id).catch(() => false);
+  if (page.isClosed()) return;
   await fillPhone(page, fund, credentials.phone ?? '');
 }
 
@@ -1027,8 +1033,14 @@ async function readMigdalBalances(page: Page): Promise<NormalizedAccount[]> {
             prev = prev.previousElementSibling;
           }
           if (!isBalanceLabel(label)) continue;
-          const value = parseFloat(norm(strong.innerText).replace(/[^\d.]/g, ''));
-          if (Number.isFinite(value) && value > balance) balance = value;
+          // Match a full money token then strip only thousands commas, so a
+          // nearby "12.5%" yield can't be read as a balance and decimals
+          // survive. Take the FIRST balance-labelled value rather than the max
+          // across the block (max conflated deposits/projections with the
+          // redemption value, overstating the balance).
+          const token = norm(strong.innerText).match(/[\d][\d,]*(?:\.\d+)?/);
+          const value = token ? parseFloat(token[0].replace(/,/g, '')) : NaN;
+          if (Number.isFinite(value)) { balance = value; break; }
         }
         if (balance > 0) out.push({ name, balance });
       }
@@ -1550,7 +1562,10 @@ async function readMeitavBalances(
         cutoff.setUTCMonth(cutoff.getUTCMonth() - n);
         return d > cutoff;
       });
-      const yearStart = `${lastDate.getUTCFullYear()}-01-01`;
+      // Anchor YTD on the ACTUAL current year, not the latest data row's year —
+      // otherwise a portfolio whose last reported month is in a prior year shows
+      // that whole year's return under a "YTD" label.
+      const yearStart = `${new Date().getUTCFullYear()}-01-01`;
       const ytd = rows.filter((r) => r.date >= yearStart);
       const byRange: BrokeragePerformanceData['byRange'] = {
         '1M':  { rateOfReturn: compound(monthsBack(1)),  contributions: sumContrib(monthsBack(1)),  dividendIncome: null },

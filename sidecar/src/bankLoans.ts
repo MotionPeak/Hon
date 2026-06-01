@@ -254,8 +254,7 @@ function parseRow(row: RawRow): ScrapedLoan | null {
   const nameCell = cells[0] || '';
   const nameMatch = nameCell.match(/^(.*?)\s+(\d{2,}[\d-]+)\s*$/);
   const name = (nameMatch ? nameMatch[1] : nameCell).trim();
-  const externalId = nameMatch ? nameMatch[2] : nameCell;
-  if (!externalId) return null;
+  const subId = nameMatch ? nameMatch[2] : null;
 
   const principal = parseMoney(cells[1]);
   const startDate = parseDate(cells[2]);
@@ -265,6 +264,13 @@ function parseRow(row: RawRow): ScrapedLoan | null {
   const nextPayment = cells.length > 6 ? parseMoney(cells[6]) : null;
 
   if (!Number.isFinite(principal) || !startDate || !finalDate) return null;
+
+  // Prefer the parsed sub-id. When the row has none, a bare name would collide
+  // for two same-named loans (and shift if the bank tweaks the label), so use a
+  // deterministic composite of name+start+principal instead — mirrors
+  // parseHapoalimRow's `hapoalim-${name}-${startDate}`.
+  const externalId = subId ?? `fibi-${name}-${startDate}-${principal}`;
+  if (!externalId) return null;
 
   return {
     externalId,
@@ -283,10 +289,17 @@ function parseRow(row: RawRow): ScrapedLoan | null {
 
 function parseMoney(s: string | undefined): number {
   if (!s) return NaN;
-  // Strip everything but digits, dot, minus. Hebrew amount cells often wrap
-  // in directional marks and a "ש"ח" suffix.
-  const cleaned = s.replace(/[^\d.\-]/g, '');
-  return cleaned ? parseFloat(cleaned) : NaN;
+  // Hebrew amount cells wrap in directional marks and a "ש"ח" suffix and may
+  // render a trailing (accounting-style) minus. Detect the sign first, then
+  // keep only digits + the dot decimal (comma is a thousands separator in the
+  // current FIBI/Hapoalim NIS format).
+  const negative = /-/.test(s);
+  const cleaned = s.replace(/[^\d.]/g, '');
+  // Reject anything that isn't a clean number (e.g. a stray second dot from a
+  // European comma-decimal) rather than silently mis-parsing the principal.
+  if (!cleaned || !/^\d+(\.\d+)?$/.test(cleaned)) return NaN;
+  const n = parseFloat(cleaned);
+  return negative ? -n : n;
 }
 
 function parseDate(s: string | undefined): string | null {
