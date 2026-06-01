@@ -1714,6 +1714,62 @@ export class Repo {
       .run().changes;
   }
 
+  /**
+   * Applies the built-in substring rules (the `category_rules` table) to every
+   * still-uncategorized transaction in ONE set-based SQL pass — the database
+   * equivalent of the retired `categorizeByRule` JS loop. Raw SQL is the
+   * documented escape hatch for set work the ORM can't express (a correlated
+   * subquery over an INSTR substring match).
+   *
+   * `INSTR(LOWER(description), pattern) > 0` is exactly
+   * `description.toLowerCase().includes(pattern)`: SQLite's LOWER folds ASCII
+   * only, which is what we want here — the needles are lowercase Latin and
+   * Hebrew has no case. `ORDER BY priority LIMIT 1` is first-match-wins
+   * (specific brands before broad words, e.g. "amazon prime" before "amazon").
+   * The `category IS NULL` guard preserves manual overrides / merchant-rule /
+   * cache results (same guard as applyCategory); `category IN (SELECT name FROM
+   * categories)` skips a rule whose target category the user has since deleted.
+   *
+   * Returns the number of DISTINCT descriptions newly categorized — the figure
+   * the categorizer reports as "N by rules".
+   */
+  applyBuiltinRules(): number {
+    const matchable = this.db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM (
+           SELECT t.description
+           FROM transactions t
+           WHERE t.category IS NULL
+             AND EXISTS (
+               SELECT 1 FROM category_rules r
+               WHERE INSTR(LOWER(t.description), r.pattern) > 0
+                 AND r.category IN (SELECT name FROM categories)
+             )
+           GROUP BY t.description
+         )`,
+      )
+      .get() as { n: number };
+    this.db
+      .prepare(
+        `UPDATE transactions
+            SET category = (
+              SELECT r.category FROM category_rules r
+              WHERE INSTR(LOWER(transactions.description), r.pattern) > 0
+                AND r.category IN (SELECT name FROM categories)
+              ORDER BY r.priority
+              LIMIT 1
+            )
+          WHERE category IS NULL
+            AND EXISTS (
+              SELECT 1 FROM category_rules r
+              WHERE INSTR(LOWER(transactions.description), r.pattern) > 0
+                AND r.category IN (SELECT name FROM categories)
+            )`,
+      )
+      .run();
+    return matchable.n;
+  }
+
   // --- Merchant rules -------------------------------------------------------
   // A user-set rule mapping an exact transaction description to a category, so
   // future transactions from that business categorize the same way.

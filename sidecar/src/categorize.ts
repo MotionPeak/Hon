@@ -24,202 +24,6 @@ export const CATEGORIES = [
 
 export type Category = (typeof CATEGORIES)[number];
 
-const CATEGORY_SET = new Set<string>(CATEGORIES);
-
-interface Rule {
-  match: string;
-  category: Category;
-}
-
-// Substring rules, checked in order — specific brands first, broad words last.
-// `match` strings are lowercase; Hebrew is unaffected by case folding.
-const RULES: Rule[] = [
-  // Subscriptions (specific brands before the broad "amazon" Shopping rule)
-  { match: 'netflix', category: 'Subscriptions' },
-  { match: 'נטפליקס', category: 'Subscriptions' },
-  { match: 'spotify', category: 'Subscriptions' },
-  { match: 'ספוטיפיי', category: 'Subscriptions' },
-  { match: 'youtube', category: 'Subscriptions' },
-  { match: 'disney', category: 'Subscriptions' },
-  { match: 'apple.com', category: 'Subscriptions' },
-  { match: 'icloud', category: 'Subscriptions' },
-  { match: 'openai', category: 'Subscriptions' },
-  { match: 'chatgpt', category: 'Subscriptions' },
-  { match: 'amazon prime', category: 'Subscriptions' },
-  { match: 'מנוי', category: 'Subscriptions' },
-
-  // Insurance
-  { match: 'ביטוח', category: 'Insurance' },
-  { match: 'insurance', category: 'Insurance' },
-  { match: 'הראל', category: 'Insurance' },
-  { match: 'כלל ביטוח', category: 'Insurance' },
-  { match: 'מגדל', category: 'Insurance' },
-  { match: 'פניקס', category: 'Insurance' },
-
-  // Fuel
-  { match: 'סונול', category: 'Fuel' },
-  { match: 'דור אלון', category: 'Fuel' },
-  { match: 'תחנת דלק', category: 'Fuel' },
-  { match: 'דלקן', category: 'Fuel' },
-  { match: 'פז יב', category: 'Fuel' },
-
-  // Groceries
-  { match: 'שופרסל', category: 'Groceries' },
-  { match: 'רמי לוי', category: 'Groceries' },
-  { match: 'ויקטורי', category: 'Groceries' },
-  { match: 'יוחננוף', category: 'Groceries' },
-  { match: 'אושר עד', category: 'Groceries' },
-  { match: 'טיב טעם', category: 'Groceries' },
-  { match: 'יינות ביתן', category: 'Groceries' },
-  { match: 'מגה בעיר', category: 'Groceries' },
-  { match: 'סופרמרקט', category: 'Groceries' },
-  { match: 'carrefour', category: 'Groceries' },
-  { match: 'קרפור', category: 'Groceries' },
-  { match: 'am:pm', category: 'Groceries' },
-
-  // Dining
-  { match: 'מקדונלד', category: 'Dining' },
-  { match: 'ארומה', category: 'Dining' },
-  { match: 'קפה קפה', category: 'Dining' },
-  { match: 'רולדין', category: 'Dining' },
-  { match: 'פיצה האט', category: 'Dining' },
-  { match: 'דומינוס', category: 'Dining' },
-  { match: 'בורגר', category: 'Dining' },
-  { match: 'מסעד', category: 'Dining' },
-  { match: 'וולט', category: 'Dining' },
-  { match: 'wolt', category: 'Dining' },
-  { match: '10bis', category: 'Dining' },
-  { match: 'תן ביס', category: 'Dining' },
-  { match: 'לנדוור', category: 'Dining' },
-  { match: 'kfc', category: 'Dining' },
-
-  // Transport
-  { match: 'רכבת ישראל', category: 'Transport' },
-  { match: 'רב קו', category: 'Transport' },
-  { match: 'רב-קו', category: 'Transport' },
-  { match: 'gett', category: 'Transport' },
-  { match: 'yango', category: 'Transport' },
-  { match: 'moovit', category: 'Transport' },
-  { match: 'אגד', category: 'Transport' },
-  { match: 'מטרופולין', category: 'Transport' },
-  { match: 'חניון', category: 'Transport' },
-  { match: 'pango', category: 'Transport' },
-  { match: 'פנגו', category: 'Transport' },
-  { match: 'סלופארק', category: 'Transport' },
-  { match: 'cellopark', category: 'Transport' },
-  { match: 'כביש 6', category: 'Transport' },
-  { match: 'נתיבי איילון', category: 'Transport' },
-
-  // Utilities
-  { match: 'חברת חשמל', category: 'Utilities' },
-  { match: 'בזק', category: 'Utilities' },
-  { match: 'הוט', category: 'Utilities' },
-  { match: 'partner', category: 'Utilities' },
-  { match: 'פרטנר', category: 'Utilities' },
-  { match: 'סלקום', category: 'Utilities' },
-  { match: 'cellcom', category: 'Utilities' },
-  { match: 'פלאפון', category: 'Utilities' },
-  { match: 'גולן טלקום', category: 'Utilities' },
-  { match: 'מי אביבים', category: 'Utilities' },
-  { match: 'מקורות', category: 'Utilities' },
-  { match: 'תאגיד המים', category: 'Utilities' },
-
-  // Housing
-  { match: 'שכר דירה', category: 'Housing' },
-  { match: 'ארנונה', category: 'Housing' },
-  { match: 'ועד בית', category: 'Housing' },
-  { match: 'משכנתא', category: 'Housing' },
-  { match: 'עיריית', category: 'Housing' },
-  { match: 'עירית', category: 'Housing' },
-
-  // Health
-  { match: 'סופר פארם', category: 'Health' },
-  { match: 'super-pharm', category: 'Health' },
-  { match: 'ניו פארם', category: 'Health' },
-  { match: 'בית מרקחת', category: 'Health' },
-  { match: 'מכבי', category: 'Health' },
-  { match: 'כללית', category: 'Health' },
-  { match: 'מאוחדת', category: 'Health' },
-  { match: 'קופת חולים', category: 'Health' },
-
-  // Entertainment
-  { match: 'סינמה סיטי', category: 'Entertainment' },
-  { match: 'יס פלאנט', category: 'Entertainment' },
-  { match: 'רב חן', category: 'Entertainment' },
-  { match: 'סינמטק', category: 'Entertainment' },
-  { match: 'תיאטר', category: 'Entertainment' },
-  { match: 'steam', category: 'Entertainment' },
-  { match: 'playstation', category: 'Entertainment' },
-
-  // Travel
-  { match: 'בית מלון', category: 'Travel' },
-  { match: 'airbnb', category: 'Travel' },
-  { match: 'booking.com', category: 'Travel' },
-  { match: 'אל על', category: 'Travel' },
-  { match: 'אלעל', category: 'Travel' },
-  { match: 'el al', category: 'Travel' },
-  { match: 'ארקיע', category: 'Travel' },
-  { match: 'wizz', category: 'Travel' },
-  { match: 'נמל תעופה', category: 'Travel' },
-  { match: 'expedia', category: 'Travel' },
-  { match: 'פתאל', category: 'Travel' },
-
-  // Education
-  { match: 'אוניברסיט', category: 'Education' },
-  { match: 'מכלל', category: 'Education' },
-  { match: 'בית ספר', category: 'Education' },
-  { match: 'צהרון', category: 'Education' },
-  { match: 'udemy', category: 'Education' },
-  { match: 'coursera', category: 'Education' },
-  { match: 'שכר לימוד', category: 'Education' },
-
-  // Shopping ("amazon" here — after "amazon prime" above)
-  { match: 'ikea', category: 'Shopping' },
-  { match: 'איקאה', category: 'Shopping' },
-  { match: 'קסטרו', category: 'Shopping' },
-  { match: 'רנואר', category: 'Shopping' },
-  { match: 'מקס סטוק', category: 'Shopping' },
-  { match: 'הום סנטר', category: 'Shopping' },
-  { match: 'aliexpress', category: 'Shopping' },
-  { match: 'עלי אקספרס', category: 'Shopping' },
-  { match: 'amazon', category: 'Shopping' },
-  { match: 'אמזון', category: 'Shopping' },
-  { match: 'ebay', category: 'Shopping' },
-  { match: 'shein', category: 'Shopping' },
-  { match: 'טרמינל איקס', category: 'Shopping' },
-
-  // Income
-  { match: 'משכורת', category: 'Income' },
-  { match: 'שכר עבודה', category: 'Income' },
-  { match: 'זיכוי', category: 'Income' },
-  { match: 'דיבידנד', category: 'Income' },
-
-  // Transfers (broad — kept late)
-  { match: 'paybox', category: 'Transfers' },
-  { match: 'פייבוקס', category: 'Transfers' },
-  { match: 'משיכת מזומן', category: 'Transfers' },
-  { match: 'כספומט', category: 'Transfers' },
-  { match: 'הפקדה', category: 'Transfers' },
-  { match: 'העברה', category: 'Transfers' },
-  { match: 'העברת', category: 'Transfers' },
-
-  // Fees (broad — kept last)
-  { match: 'דמי כרטיס', category: 'Fees' },
-  { match: 'דמי ניהול', category: 'Fees' },
-  { match: 'דמי טיפול', category: 'Fees' },
-  { match: 'עמלת', category: 'Fees' },
-  { match: 'עמלה', category: 'Fees' },
-];
-
-/** Categorizes a description with the rule map; null if no rule matches. */
-export function categorizeByRule(description: string): Category | null {
-  const haystack = description.toLowerCase();
-  for (const rule of RULES) {
-    if (haystack.includes(rule.match)) return rule.category;
-  }
-  return null;
-}
-
 function normalizeKey(description: string): string {
   return description.trim().toLowerCase().replace(/\s+/g, ' ');
 }
@@ -238,8 +42,14 @@ const SYSTEM_PROMPT =
   'when nothing else fits.';
 
 /**
- * Categorizes uncategorized transactions: a cache lookup, then the rule map,
- * then the on-device LLM (if a model is loaded). Runs as a background job.
+ * Categorizes uncategorized transactions through four tiers, in precedence
+ * order — each only touches what the previous one left `category IS NULL`:
+ *   1. the user's merchant rules (exact description),
+ *   2. the description cache,
+ *   3. the built-in substring rules — one set-based SQL pass in the DB
+ *      (`repo.applyBuiltinRules`) rather than a per-transaction JS loop,
+ *   4. the on-device LLM, for whatever is left.
+ * Runs as a background job.
  */
 export class Categorizer {
   private status: CategorizeStatus = {
@@ -266,87 +76,90 @@ export class Categorizer {
 
   private async run(): Promise<void> {
     try {
-      const descriptions = this.repo.uncategorizedDescriptions();
-      this.status.total = descriptions.length;
-      if (descriptions.length === 0) {
+      const pending = this.repo.uncategorizedDescriptions();
+      this.status.total = pending.length;
+      if (pending.length === 0) {
         this.status = { state: 'done', total: 0, done: 0, message: 'Everything is categorized.' };
         return;
       }
 
-      // The live category set comes from the DB so user-added categories
-      // count for both the whitelist and the LLM enum. Falls back to the
-      // hardcoded seed list if the table somehow comes back empty.
+      // The live category set comes from the DB so user-added categories count
+      // for both the whitelist and the LLM enum. Falls back to the hardcoded
+      // seed list if the table somehow comes back empty.
       const liveNames = this.repo.listCategories().map((c) => c.name);
       const allowedNames = liveNames.length > 0 ? liveNames : [...CATEGORIES];
       const allowedSet = new Set<string>(allowedNames);
 
-      const classifier = await this.createLlmClassifier(allowedNames, allowedSet);
       // User-set merchant rules take priority over everything else.
       const userRules = new Map(
         this.repo.listMerchantRules().map((r) => [r.description, r.category]),
       );
-      let byRule = 0;
       let byUser = 0;
-      let byLlm = 0;
       let byCache = 0;
+      let byRule = 0;
+      let byLlm = 0;
 
-      try {
-        for (const description of descriptions) {
-          const key = normalizeKey(description);
-          let category: string | null = null;
-          let source = 'rule';
+      // Tiers 1 + 2: the user's merchant rules, then the description cache —
+      // both exact-description lookups, walked per distinct description.
+      for (const description of pending) {
+        const key = normalizeKey(description);
+        let category: string | null = null;
+        let source = '';
 
-          const userRule = userRules.get(description);
-          if (userRule && allowedSet.has(userRule)) {
-            category = userRule;
-            source = 'user';
-            byUser += 1;
-          }
-          if (!category) {
-            const cached = this.repo.getCachedCategory(key);
-            if (cached && allowedSet.has(cached.category)) {
-              category = cached.category;
-              source = cached.source;
-              byCache += 1;
-            }
-          }
-          if (!category) {
-            const ruled = categorizeByRule(description);
-            if (ruled && allowedSet.has(ruled)) {
-              category = ruled;
-              source = 'rule';
-              byRule += 1;
-            }
-          }
-          // A confident in-set LLM classification is cached like the others; a
-          // null result (parse error / throw / out-of-set) is NOT — we still
-          // display 'Other' for this run but never persist a fallback, so one
-          // transient hiccup can't pin a merchant to 'Other' forever and a
-          // later/stronger model gets to retry. (M2)
-          let cacheable = true;
-          if (!category && classifier) {
-            const classified = await classifier.classify(description);
-            if (classified) {
-              category = classified;
-              source = 'llm';
-              byLlm += 1;
-            } else {
-              category = 'Other';
-              cacheable = false;
-            }
-          }
-          if (category) {
-            this.repo.applyCategory(description, category);
-            if (cacheable) this.repo.cacheCategory(key, category, source);
-          }
-          this.status.done += 1;
-          this.status.message = `Categorized ${this.status.done} of ${this.status.total}…`;
+        const userRule = userRules.get(description);
+        if (userRule && allowedSet.has(userRule)) {
+          category = userRule;
+          source = 'user';
+          byUser += 1;
         }
-      } finally {
-        classifier?.dispose();
+        if (!category) {
+          const cached = this.repo.getCachedCategory(key);
+          if (cached && allowedSet.has(cached.category)) {
+            category = cached.category;
+            source = cached.source;
+            byCache += 1;
+          }
+        }
+        if (category) {
+          this.repo.applyCategory(description, category);
+          this.repo.cacheCategory(key, category, source);
+          this.status.done += 1;
+        }
       }
 
-      const note = classifier ? '' : ' Download the AI model to categorize the rest.';
+      // Tier 3: the built-in substring rules, applied to every still-
+      // uncategorized transaction in one set-based SQL pass (INSTR + priority,
+      // run inside SQLite) rather than a JS loop over each description.
+      byRule = this.repo.applyBuiltinRules();
+      this.status.done = Math.min(this.status.total, this.status.done + byRule);
+      this.status.message = `Categorized ${this.status.done} of ${this.status.total}…`;
+
+      // Tier 4: the on-device LLM, for whatever the deterministic tiers left
+      // behind. Only spin up a model when there is leftover work.
+      const remaining = this.repo.uncategorizedDescriptions();
+      const classifier =
+        remaining.length > 0 ? await this.createLlmClassifier(allowedNames, allowedSet) : null;
+      if (classifier) {
+        try {
+          for (const description of remaining) {
+            const key = normalizeKey(description);
+            const category = await classifier.classify(description);
+            this.repo.applyCategory(description, category);
+            this.repo.cacheCategory(key, category, 'llm');
+            byLlm += 1;
+            this.status.done = Math.min(this.status.total, this.status.done + 1);
+            this.status.message = `Categorized ${this.status.done} of ${this.status.total}…`;
+          }
+        } finally {
+          classifier.dispose();
+        }
+      }
+
+      // A trailing note only when work is genuinely stranded for lack of a model.
+      const note =
+        this.repo.uncategorizedDescriptions().length > 0
+          ? ' Download the AI model to categorize the rest.'
+          : '';
       // Report your own merchant rules distinctly from the built-in substring
       // rules instead of lumping both under "by rules".
       const yourRules = byUser > 0 ? `${byUser} by your rules, ` : '';
@@ -373,7 +186,7 @@ export class Categorizer {
     allowedNames: string[],
     allowedSet: Set<string>,
   ): Promise<{
-    classify: (description: string) => Promise<string | null>;
+    classify: (description: string) => Promise<string>;
     dispose: () => void;
   } | null> {
     if (!this.llm.isReady()) return null;
@@ -388,25 +201,17 @@ export class Categorizer {
       properties: { category: { enum: allowedNames } },
     };
 
-    // Returns a confident in-set category, or null when the result can't be
-    // trusted (parse error, prompt throw/timeout, or an out-of-set value). The
-    // caller treats null as "couldn't classify" and must NOT cache it. (M2)
-    const classify = async (description: string): Promise<string | null> => {
+    const classify = async (description: string): Promise<string> => {
       try {
-        // Bound the input: a merchant string this long is already unambiguous,
-        // and an unbounded description shouldn't blow up the prompt. The output
-        // is a single category name, so a small token cap is plenty.
-        const text = description.slice(0, 200);
-        const response = await session.prompt(`Transaction: "${text}"`, {
+        const response = await session.prompt(`Transaction: "${description}"`, {
           jsonSchema: schema,
-          maxTokens: 32,
         });
         const parsed = JSON.parse(response) as { category?: string };
         return parsed.category && allowedSet.has(parsed.category)
           ? parsed.category
-          : null;
+          : 'Other';
       } catch {
-        return null;
+        return 'Other';
       }
     };
 

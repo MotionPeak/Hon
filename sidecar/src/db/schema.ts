@@ -111,6 +111,20 @@ export const merchantRules = sqliteTable('merchant_rules', {
   createdAt: text('created_at').notNull(),
 });
 
+// Built-in substring categorization rules (migration v41). `pattern` is a
+// lowercase needle matched via INSTR(LOWER(description), pattern); `priority`
+// ascending is first-match-wins; `source` distinguishes 'builtin' from a
+// future user-added 'user'. Created + seeded by migrations.ts — this is the
+// typed query layer over it.
+export const categoryRules = sqliteTable('category_rules', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  pattern: text('pattern').notNull(),
+  category: text('category').notNull(),
+  priority: integer('priority').notNull(),
+  source: text('source').notNull().default('builtin'),
+  createdAt: text('created_at').notNull(),
+});
+
 export const manualAssets = sqliteTable('manual_assets', {
   id: text('id').primaryKey(),
   kind: text('kind').notNull(),
