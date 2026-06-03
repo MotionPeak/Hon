@@ -4,8 +4,21 @@
 // to the engine (see vite.config.ts); in production the engine serves
 // the React bundle directly and /api/* hits the same origin.
 
+const TOKEN_KEY = 'hon.token';
+
 function getToken(): string | null {
-  return new URLSearchParams(window.location.hash.slice(1)).get('token');
+  // 1. URL fragment (#token=…) — the canonical source, as bookmarked.
+  const fromHash = new URLSearchParams(window.location.hash.slice(1)).get('token');
+  if (fromHash) {
+    // Persist so a standalone PWA launch (start_url has no fragment) still
+    // authenticates. The token already lives in the user's bookmarked URL;
+    // localStorage on the same device is no more exposure, and the engine is
+    // loopback/Tailscale-gated regardless.
+    try { window.localStorage.setItem(TOKEN_KEY, fromHash); } catch { /* private mode */ }
+    return fromHash;
+  }
+  // 2. Fall back to a previously-persisted token (home-screen launch).
+  try { return window.localStorage.getItem(TOKEN_KEY); } catch { return null; }
 }
 
 export function hasToken(): boolean {

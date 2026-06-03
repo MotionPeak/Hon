@@ -19,3 +19,22 @@ describe('hasToken', () => {
     expect(hasToken()).toBe(true);
   });
 });
+
+describe('token persistence (PWA standalone launch)', () => {
+  it('reads the token from the URL fragment and persists it', () => {
+    window.location.hash = 'token=abc-123';
+    expect(hasToken()).toBe(true);
+    expect(window.localStorage.getItem('hon.token')).toBe('abc-123');
+  });
+
+  it('falls back to the persisted token when the fragment is empty', () => {
+    window.localStorage.setItem('hon.token', 'persisted-xyz');
+    window.location.hash = '';
+    expect(hasToken()).toBe(true);
+  });
+
+  it('is false when neither fragment nor storage has a token', () => {
+    window.location.hash = '';
+    expect(hasToken()).toBe(false);
+  });
+});
