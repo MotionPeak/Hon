@@ -133,7 +133,12 @@ export function buildBudgetReport(
     .sort((a, b) => b.spent - a.spent);
   const essentialSpent = essentials.reduce((s, l) => s + l.spent, 0);
 
-  const income = repo.monthlyInflow(start, end, cardProviders);
+  // A manual "Expected income" override (when the caller supplies one) replaces
+  // the posted inflow as the figure the whole variable budget is built on — so
+  // the dashboard reflects what the user expects to earn this cycle, not only
+  // what has landed so far. Absent → fall back to the posted inflow.
+  const actualInflow = repo.monthlyInflow(start, end, cardProviders);
+  const income = projection?.expectedIncome ?? actualInflow;
   const committed = fixedSpent + essentialSpent;
 
   // Piggy-bank set-asides draw from whatever income is left after the month's
@@ -145,7 +150,7 @@ export function buildBudgetReport(
   const useProjection =
     projection !== undefined &&
     (projection.expectedIncome !== undefined || projection.expectedFixed !== undefined);
-  const piggyIncome = projection?.expectedIncome ?? income;
+  const piggyIncome = income; // already folds in the expected-income override above
   const piggyFixed = projection?.expectedFixed ?? fixedSpent;
   const piggy = settlePiggyBanks(
     repo,

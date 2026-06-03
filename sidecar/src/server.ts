@@ -2267,6 +2267,15 @@ app.get('/budget', async (req, reply) => {
     q.start && q.end && iso.test(q.start) && iso.test(q.end)
       ? { start: q.start, end: q.end, label: q.start.slice(0, 7) }
       : undefined;
+  // Whether the requested window is the cycle in progress. Drives BOTH the
+  // stored income-override fallback (just below) and the piggy-ledger persist
+  // (further down). Local-time "today" matches currentMonthRange and the
+  // client's cycle math, avoiding a near-midnight UTC off-by-one at the boundary.
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(
+    now.getDate(),
+  ).padStart(2, '0')}`;
+  const isCurrentCycle = !range || (range.start <= today && today < range.end);
   const num = (v: string | undefined): number | undefined => {
     // Treat an empty value (e.g. `?expectedIncome=`) as absent, not as an
     // explicit 0 override — Number('') is 0, which would zero the projection.
@@ -2274,7 +2283,14 @@ app.get('/budget', async (req, reply) => {
     const n = Number(v);
     return Number.isFinite(n) ? n : undefined;
   };
-  const expectedIncome = num(q.expectedIncome);
+  // An explicit ?expectedIncome= query param wins (legacy client-supplied
+  // projection); otherwise fall back to the user's saved manual "Expected
+  // income" override. That override is a single global figure ("what I expect
+  // to earn"), so it only applies to the cycle in progress — never a past or
+  // future window.
+  const expectedIncome =
+    num(q.expectedIncome) ??
+    (isCurrentCycle ? repo.getExpectedIncomeOverride() ?? undefined : undefined);
   const expectedFixed = num(q.expectedFixed);
   // Repeated ?cardProvider=… params arrive as a string or an array; normalise.
   const cardProviders = Array.isArray(q.cardProvider)
@@ -2289,20 +2305,11 @@ app.get('/budget', async (req, reply) => {
   const report = buildBudgetReport(repo, range, projection);
   // `/budget` is the one caller that commits the piggy ledger — so a report
   // built elsewhere (insights) cannot overwrite it with stale figures. But the
-  // ledger may only be written for the CURRENT cycle: persistPiggyMonth keys
-  // rows on the caller-supplied month label, so a request for a past (or future)
-  // cycle would otherwise overwrite that month's frozen contributions with
-  // figures recomputed from today's data. Persist only when today falls inside
-  // the requested [start, end) window. No range = the calendar-month fallback,
-  // which is always the current cycle. The window comes from the client's
-  // local-time cycle math, so we compare against a local-time "today" (same
-  // basis as currentMonthRange), not a UTC date, to avoid a near-midnight
-  // off-by-one at the boundary.
-  const now = new Date();
-  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(
-    now.getDate(),
-  ).padStart(2, '0')}`;
-  const isCurrentCycle = !range || (range.start <= today && today < range.end);
+  // ledger may only be written for the CURRENT cycle (isCurrentCycle, computed
+  // above): persistPiggyMonth keys rows on the caller-supplied month label, so a
+  // request for a past (or future) cycle would otherwise overwrite that month's
+  // frozen contributions with figures recomputed from today's data. No range =
+  // the calendar-month fallback, which is always the current cycle.
   if (isCurrentCycle) {
     persistPiggyMonth(repo, report.piggy);
   }
