@@ -1,6 +1,7 @@
 /// <reference types="vitest/config" />
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { VitePWA } from 'vite-plugin-pwa';
 import { fileURLToPath } from 'node:url';
 
 // Dev-server config tuned for Hon's engine-on-loopback architecture.
@@ -21,7 +22,38 @@ import { fileURLToPath } from 'node:url';
 // serves this build from web/dist and rewrites /api/* to /<route>
 // (see sidecar/src/server.ts).
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    VitePWA({
+      registerType: 'autoUpdate',
+      includeAssets: ['icon.svg', 'apple-touch-icon-180x180.png', 'favicon.ico'],
+      manifest: {
+        name: 'Hon',
+        short_name: 'Hon',
+        description: 'Personal finance, on your phone.',
+        start_url: '/',
+        scope: '/',
+        display: 'standalone',
+        background_color: '#1a1612',
+        theme_color: '#1a1612',
+        icons: [
+          { src: 'pwa-192x192.png', sizes: '192x192', type: 'image/png' },
+          { src: 'pwa-512x512.png', sizes: '512x512', type: 'image/png' },
+          { src: 'maskable-icon-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+        ],
+      },
+      workbox: {
+        globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}'],
+        navigateFallback: '/index.html',
+        // Never cache the API — financial data is always fresh from the engine.
+        navigateFallbackDenylist: [/^\/api/],
+        runtimeCaching: [
+          { urlPattern: /^.*\/api\/.*$/, handler: 'NetworkOnly' },
+        ],
+      },
+      devOptions: { enabled: false },
+    }),
+  ],
   resolve: {
     alias: {
       // Single source of truth for the zod schemas shared with the engine.
