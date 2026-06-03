@@ -3773,3 +3773,14 @@ body.drawer-open { overflow: hidden; }
   .nw-bd-amt { white-space: nowrap; flex: none; }
 }
 /* ============ END NET-WORTH ============ */
+
+/* ============ Fixed bills merchant row (mobile) ============
+   .rec-name is a flex row [merchant name + status badge]; at 393px a long
+   (Hebrew) merchant name eats the line and the badge's text ("Not yet billed")
+   wraps INSIDE the pill into a cramped circle. Let the row wrap so the badge
+   drops to its own line, and never let the badge text wrap. */
+@media (max-width: 768px) {
+  .rec-name { flex-wrap: wrap; row-gap: 5px; }
+  .rec-tag { flex: none; white-space: nowrap; }
+}
+/* ============ END FIXED BILLS ============ */
