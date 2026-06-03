@@ -3526,3 +3526,111 @@ button.bh-row:active { transform: none; }        /* suppress global scale(.97) *
   font-size: 18px; line-height: 1; padding: 0 4px;
 }
 .vault-banner-x:hover { color: var(--text); }
+
+/* ===================================================================
+   MOBILE SHELL — phone tier (≤768px). Added by the mobile redesign
+   (Phase 1). Desktop (≥769px) is untouched: every layout rule here is
+   inside a max-width media query, and the new shell components are
+   display:none above the breakpoint. Uses the app's own dark-only
+   theme tokens (--bg / --card / --hairline / --text / --accent).
+   =================================================================== */
+
+/* New shell components: hidden on desktop; scroll wrapper transparent. */
+.mobile-appbar { display: none; }
+.app-scroll { display: contents; }
+
+.appbar-hamburger {
+  width: 40px; height: 40px; border: 0; background: transparent;
+  display: grid; place-items: center; border-radius: 10px; cursor: pointer;
+  color: var(--text);
+}
+.appbar-hamburger:active { background: var(--card); }
+.appbar-hamburger-lines,
+.appbar-hamburger-lines::before,
+.appbar-hamburger-lines::after {
+  content: ""; display: block; width: 19px; height: 2px; border-radius: 2px;
+  background: currentColor; position: relative;
+}
+.appbar-hamburger-lines::before { position: absolute; top: -6px; }
+.appbar-hamburger-lines::after  { position: absolute; top: 6px; }
+.appbar-brand { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.appbar-brand .brand-mark { width: 26px; height: 26px; display: inline-grid; place-items: center; }
+.appbar-brand .brand-mark svg { width: 100%; height: 100%; }
+.appbar-brand-word { font-weight: 800; font-size: 18px; letter-spacing: .2px; color: var(--text); }
+.appbar-spacer { flex: 1; }
+.appbar-theme { width: 40px; height: 40px; }
+
+/* Drawer scrim + panel (off-canvas; animate via transform). */
+.nav-scrim {
+  position: fixed; inset: 0; z-index: 40; background: var(--scrim);
+  opacity: 0; pointer-events: none; transition: opacity .25s;
+}
+.nav-scrim.open { opacity: 1; pointer-events: auto; }
+.nav-drawer {
+  position: fixed; top: 0; bottom: 0; left: 0; z-index: 50;
+  width: 82%; max-width: 320px; transform: translateX(-102%);
+  transition: transform .28s cubic-bezier(.22,.61,.36,1);
+  background: var(--bg-elev); border-right: 1px solid var(--hairline);
+  padding: calc(env(safe-area-inset-top) + 14px) 12px calc(env(safe-area-inset-bottom) + 14px);
+  display: flex; flex-direction: column; box-shadow: var(--shadow);
+}
+.nav-drawer.open { transform: translateX(0); }
+.nav-drawer-head { display: flex; align-items: baseline; gap: 8px; padding: 6px 12px 16px; }
+.nav-drawer-title { font-size: 19px; font-weight: 800; color: var(--text); }
+.nav-drawer-he { color: var(--faint); font-size: 13px; }
+.nav-drawer-list { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
+.nav-drawer-item {
+  display: flex; align-items: center; gap: 13px; padding: 13px 14px;
+  border: 0; background: transparent; border-radius: 12px; cursor: pointer;
+  color: var(--text); font-size: 15px; font-weight: 500; text-align: left; width: 100%;
+}
+.nav-drawer-item .nav-drawer-ico { width: 22px; text-align: center; font-size: 17px; }
+.nav-drawer-item:not(.active):active { background: var(--card); }
+.nav-drawer-item.active {
+  background: linear-gradient(100deg, var(--grad-1), var(--grad-2));
+  color: #1a1210; font-weight: 700;
+}
+
+@media (max-width: 768px) {
+  html, body { overscroll-behavior: none; }
+
+  /* App = fixed-height column: app bar + one scroll region. */
+  .app { height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
+
+  /* Swap desktop chrome for mobile chrome. */
+  .app-header { display: none; }
+  .app-nav { display: none; }
+  .mobile-appbar {
+    display: flex; align-items: center; gap: 12px;
+    position: relative; z-index: 30; flex: 0 0 auto;
+    height: calc(52px + env(safe-area-inset-top));
+    padding: env(safe-area-inset-top) 12px 0;
+    background: color-mix(in srgb, var(--bg) 82%, transparent);
+    -webkit-backdrop-filter: saturate(180%) blur(18px);
+    backdrop-filter: saturate(180%) blur(18px);
+    border-bottom: 1px solid var(--hairline);
+  }
+
+  /* The single scroll region (wraps VaultBanner + .shell). */
+  .app-scroll {
+    display: block; flex: 1 1 auto; min-height: 0;
+    overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
+  }
+
+  /* Content fills width; drop the desktop sidebar grid. */
+  .shell { display: block; }
+  .app-content { padding: 14px 14px max(18px, env(safe-area-inset-bottom)); }
+}
+
+/* Hard-hide the mobile shell above the breakpoint. */
+@media (min-width: 769px) {
+  .mobile-appbar, .nav-drawer, .nav-scrim { display: none !important; }
+}
+
+/* Body scroll-lock when the drawer is open. */
+body.drawer-open { overflow: hidden; }
+
+@media (prefers-reduced-motion: reduce) {
+  .nav-drawer, .nav-scrim { transition: none; }
+}
+/* ===================== END MOBILE SHELL ===================== */
