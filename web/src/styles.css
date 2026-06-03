@@ -3738,3 +3738,14 @@ body.drawer-open { overflow: hidden; }
   .conn-title-main { flex: none; }
 }
 /* ============ END ASSETS HEADER ============ */
+
+/* ============ Card grids that overflow narrow phones ============
+   .loans-grid and .set-grid use minmax(380px, 1fr). On a ~393px phone the
+   380px min exceeds the content width, so each card overflows the viewport and
+   its right edge (loan amount + stats, settings rows) gets clipped by the
+   global overflow-x:clip. Force a single column at ≤768px. (.piggy-grid 280px
+   and .voucher-grid 274px already fit a phone, so they're left to flow.) */
+@media (max-width: 768px) {
+  .loans-grid, .set-grid { grid-template-columns: 1fr; }
+}
+/* ============ END CARD GRIDS ============ */
