@@ -11,25 +11,8 @@ import { RecurringView } from './recurring/RecurringView';
 import { SettingsProvider } from './settings/useSettings';
 import { SettingsView } from './settings/SettingsView';
 import { VouchersView } from './vouchers/VouchersView';
-import { useUiStore, type Tab } from './store/uiStore';
-
-interface TabDef {
-  id: Tab;
-  label: string;
-  emoji: string;
-}
-
-const TABS: TabDef[] = [
-  { id: 'overview',  label: 'Overview',    emoji: '📊' },
-  { id: 'accounts',  label: 'Assets',      emoji: '🏦' },
-  { id: 'activity',  label: 'Activity',    emoji: '🧾' },
-  { id: 'recurring',     label: 'Fixed bills',   emoji: '📆' },
-{ id: 'piggy',         label: 'Piggy banks',   emoji: '🐷' },
-  { id: 'loans',     label: 'Loans',       emoji: '📉' },
-  { id: 'vouchers',  label: 'Vouchers',    emoji: '🎟️' },
-  { id: 'insights',  label: 'Insights',    emoji: '💡' },
-  { id: 'settings',  label: 'Settings',    emoji: '⚙️' },
-];
+import { useUiStore } from './store/uiStore';
+import { TABS } from './nav';
 
 interface Health {
   ok: boolean;
