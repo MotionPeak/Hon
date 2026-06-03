@@ -3749,3 +3749,13 @@ body.drawer-open { overflow: hidden; }
   .loans-grid, .set-grid { grid-template-columns: 1fr; }
 }
 /* ============ END CARD GRIDS ============ */
+
+/* ============ Insights spending tiles (mobile) ============
+   .md-tiles (the Spending-tab SPENT/INCOME/… summary) is a 4-column grid with
+   no mobile override, so on a phone the tiles' content can't shrink enough and
+   the 3rd/4th tile clips at the right edge. Drop to 2 columns (2×2) at ≤768px,
+   mirroring the existing .brk-stats mobile rule. */
+@media (max-width: 768px) {
+  .md-tiles { grid-template-columns: repeat(2, 1fr); }
+}
+/* ============ END INSIGHTS TILES ============ */
