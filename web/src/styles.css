@@ -3709,3 +3709,21 @@ body.drawer-open { overflow: hidden; }
   .activity-head .act-select-btn { margin-left: auto; }
 }
 /* ============ END ACTIVITY ============ */
+
+/* ============ Bespoke .modal → bottom sheet on phones (app-wide) ============
+   The .overlay/.modal pair (Assets: Credentials/AssetEdit/LoanEdit/Balance/
+   Remove/AddAsset + the brokerage-link modal; CarAssetForm; CategoriesPanel
+   editors; …) is a centered modal — NOT Radix, so the .rx-dialog sheet rule
+   never touched it. Give it the same bottom-sheet treatment at ≤768px. */
+@media (max-width: 768px) {
+  .overlay { align-items: flex-end; padding: 0; }
+  .modal {
+    max-width: 100%; width: 100%;
+    max-height: 92vh;
+    border-radius: 18px 18px 0 0;
+    border-left: 0; border-right: 0; border-bottom: 0;
+    padding-bottom: calc(24px + env(safe-area-inset-bottom));
+    animation: rx-sheet-up .26s cubic-bezier(.2,.7,.2,1);
+  }
+}
+/* ============ END MODAL SHEET ============ */
