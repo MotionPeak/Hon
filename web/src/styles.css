@@ -3694,3 +3694,18 @@ body.drawer-open { overflow: hidden; }
   to   { opacity: 1; transform: translateY(0); }
 }
 /* ============ END DIALOGS ============ */
+
+/* ============ ACTIVITY toolbar (mobile tighten) ============
+   .activity-head is a flex-wrap row with a flex:1 spacer, which breaks into
+   3 stacked rows on a phone. Make the month selector its own full-width row
+   (arrows pinned to the edges) and let search grow to fill the next row. */
+@media (max-width: 768px) {
+  .activity-head { gap: 10px; row-gap: 12px; }
+  .activity-head .month-pick { width: 100%; justify-content: space-between; }
+  .activity-head .month-label { flex: 1; min-width: 0; }
+  .activity-head .spacer { display: none; }
+  /* Search gets its own full-width row; count (left) + Select (right) share the last. */
+  .activity-head .act-search { flex: 1 1 100%; }
+  .activity-head .act-select-btn { margin-left: auto; }
+}
+/* ============ END ACTIVITY ============ */
