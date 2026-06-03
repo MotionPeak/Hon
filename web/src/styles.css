@@ -3727,3 +3727,14 @@ body.drawer-open { overflow: hidden; }
   }
 }
 /* ============ END MODAL SHEET ============ */
+
+/* ============ ASSETS conn-card header (mobile) ============
+   The connection-card header is a single non-wrapping row: [logo + name] +
+   [Sync / History / 12mo / Remove]. At 393px the buttons crowd in and collide
+   with the company logo (logo overlaps "Sync"). Stack on a phone: logo + name
+   on their own row, the action buttons on the next (they wrap as needed). */
+@media (max-width: 768px) {
+  .conn-title-row { flex-direction: column; align-items: stretch; gap: 10px; }
+  .conn-title-main { flex: none; }
+}
+/* ============ END ASSETS HEADER ============ */
