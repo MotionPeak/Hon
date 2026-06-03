@@ -208,20 +208,42 @@ goes to any cloud unless you explicitly configure an API-based provider
 
 ## Run it — NAS or home server
 
-Hon can run headless on a NAS or home server, reachable over your LAN or a
-VPN (Tailscale, WireGuard). The engine binds `127.0.0.1` by default; set
-`HON_HOST=0.0.0.0` to expose it.
+Hon runs headless on a NAS (Synology, QNAP, …) or any home server, reachable
+over your LAN or a private VPN (Tailscale, WireGuard).
+
+### Docker (recommended)
+
+The image bundles the engine, the built UI and headless Chromium, and builds
+`web/dist` itself — one command, nothing to pre-build. Run it from the repo
+root:
 
 ```bash
-HON_HOST=0.0.0.0 HON_PORT=4000 npm run web --prefix sidecar
+cp .env.example .env          # then set a long random HON_TOKEN
+docker compose up -d --build
 ```
 
-(`npm run dev` from the repo root also works, but on a headless box set
-`HON_HEADLESS=1` so it doesn't try to open a browser.)
+Reach it at `http://<server>:4000/#token=<HON_TOKEN>`. The container is
+`restart: unless-stopped` (survives reboots) and persists the database, vault
+and any downloaded AI models in the `hon-data` volume. Generate a token with:
 
-**Security note:** the bearer token is the only thing protecting your finances
-if you bind to `0.0.0.0`. Use a strong token (`HON_TOKEN`) and ideally keep it
-behind a VPN, never the public internet.
+```bash
+node -e "console.log(require('crypto').randomUUID())"
+```
+
+### Without Docker
+
+Run the engine directly — its launcher builds `web/dist` on first start:
+
+```bash
+HON_HOST=0.0.0.0 HON_PORT=4000 HON_HEADLESS=1 npm run web --prefix sidecar
+```
+
+(The engine binds `127.0.0.1` by default; `HON_HOST=0.0.0.0` exposes it on the
+LAN. `HON_HEADLESS=1` stops it trying to open a browser on a headless box.)
+
+**Security note:** the bearer token (`HON_TOKEN`) is the only thing protecting
+your finances once Hon is bound to `0.0.0.0`. Use a strong token and keep Hon
+on your LAN or a private VPN — never the public internet.
 
 ---
 

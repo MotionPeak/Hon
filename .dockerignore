@@ -1,0 +1,21 @@
+# Keep the build context lean and never ship local state into an image layer.
+# web/dist is rebuilt inside the image (stage 1), so it is excluded here too.
+**/node_modules
+**/dist
+**/.puppeteer
+**/*.log
+
+# Local financial data — must never enter an image layer.
+**/*.db
+**/*.db-wal
+**/*.db-shm
+data/
+**/models/
+.env
+**/.env
+
+# VCS / OS / planning cruft — irrelevant to the build.
+.git
+.gitignore
+**/.DS_Store
+.planning
