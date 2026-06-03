@@ -11,7 +11,7 @@
 // migration here, mirror the change in ./schema.ts; the schema-parity test
 // (tests/schema.parity.test.ts) fails if they drift.
 
-export const SCHEMA_VERSION = 41;
+export const SCHEMA_VERSION = 42;
 
 export const MIGRATIONS: { version: number; sql: string }[] = [
   {
@@ -968,5 +968,14 @@ export const MIGRATIONS: { version: number; sql: string }[] = [
         ('עמלת', 'Fees', 1430, 'builtin', datetime('now')),
         ('עמלה', 'Fees', 1440, 'builtin', datetime('now'));
     `,
+  },
+  {
+    // Per-connection scrape watermark: the earliest date a successful sync has
+    // already fetched from. NULL = unknown, which makes the next sync a full
+    // backfill that then records it. The runner reads this to fetch
+    // incrementally instead of re-downloading the whole historyMonths window
+    // every time (see scrapeWindow.pickScrapeStartDate).
+    version: 42,
+    sql: `ALTER TABLE connections ADD COLUMN fetched_since TEXT;`,
   },
 ];

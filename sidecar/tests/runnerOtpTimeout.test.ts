@@ -21,6 +21,7 @@ vi.mock('../src/scrapers.js', () => ({
     return { accounts: [] };
   }),
   runScrape: vi.fn(async () => ({ accounts: [] })),
+  isCardCompany: () => false,
 }));
 
 import { openDatabase } from '../src/db.js';
