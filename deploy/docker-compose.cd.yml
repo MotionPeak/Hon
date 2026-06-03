@@ -1,0 +1,53 @@
+# Continuous-deploy compose for a NAS / home server.
+#
+# Runs Hon from the prebuilt GHCR image (no building on the NAS) and a Watchtower
+# sidecar that polls GHCR every 5 minutes and recreates `hon` when a new image is
+# published. Watchtower is LABEL-SCOPED — it only touches containers carrying the
+# watchtower.enable=true label, so other containers on the NAS are left alone.
+#
+# Setup (once):
+#   1. Authenticate to GHCR so the private image can be pulled:
+#        echo <READ_PACKAGES_TOKEN> | docker login ghcr.io -u <github-user> --password-stdin
+#   2. cp .env.example .env   and set HON_TOKEN  (same token you already use)
+#   3. docker compose -f docker-compose.cd.yml up -d
+#
+# To reuse an existing data volume (e.g. after migrating in), run with the same
+# project name so the `hon-data` volume resolves to <project>_hon-data:
+#        docker compose -p hon-deploy -f docker-compose.cd.yml up -d
+services:
+  hon:
+    image: ghcr.io/motionpeak/hon:latest
+    container_name: hon
+    restart: unless-stopped
+    pull_policy: always
+    ports:
+      - "4000:4000"
+    environment:
+      HON_TOKEN: ${HON_TOKEN:?set HON_TOKEN in .env — see .env.example}
+    volumes:
+      # vault, SQLite DB and downloaded AI models persist here
+      - hon-data:/data
+    labels:
+      # Watchtower watches only containers with this label set true.
+      - "com.centurylinklabs.watchtower.enable=true"
+
+  watchtower:
+    image: containrrr/watchtower
+    container_name: watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # GHCR credentials written by `docker login` (root, on Synology) so
+      # Watchtower can pull the private image.
+      - /root/.docker/config.json:/config.json:ro
+    environment:
+      # Only act on labelled containers (just `hon`) — never the whole host.
+      WATCHTOWER_LABEL_ENABLE: "true"
+      # Poll GHCR every 5 minutes.
+      WATCHTOWER_POLL_INTERVAL: "300"
+      # Remove the old image after a successful update.
+      WATCHTOWER_CLEANUP: "true"
+      WATCHTOWER_NO_STARTUP_MESSAGE: "true"
+
+volumes:
+  hon-data:
