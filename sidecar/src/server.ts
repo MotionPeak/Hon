@@ -223,10 +223,19 @@ type App = typeof app;
 //  - `/snaptrade/done` the post-connection landing page SnapTrade opens in
 //                      a browser, which carries no token.
 // Slash-terminated subtrees — startsWith is safe (only their own paths match).
-const PUBLIC_ROUTE_PREFIXES = ['/logo/', '/assets/'];
+const PUBLIC_ROUTE_PREFIXES = ['/logo/', '/assets/', '/workbox-'];
 // Exact paths — matched against the path only, so a sibling like
 // /snaptrade/donezo or a future /snaptrade/done-export can't inherit exemption.
-const PUBLIC_ROUTE_EXACT = ['/snaptrade/done'];
+// PWA root-level files emitted by vite-plugin-pwa to web/dist root (NOT
+// /assets). Public — the browser fetches these before it has a token. The
+// matching GET routes are registered below the SPA shell route.
+const PWA_ROOT_FILES = [
+  'manifest.webmanifest', 'sw.js', 'sw.js.map', 'registerSW.js',
+  'icon.svg', 'favicon.ico',
+  'pwa-64x64.png', 'pwa-192x192.png', 'pwa-512x512.png',
+  'maskable-icon-512x512.png', 'apple-touch-icon-180x180.png',
+];
+const PUBLIC_ROUTE_EXACT = ['/snaptrade/done', ...PWA_ROOT_FILES.map((f) => `/${f}`)];
 
 /** True for the small set of GET routes that are exempt from the token. */
 function isPublicRoute(method: string, url: string): boolean {
@@ -292,6 +301,19 @@ app.register(fastifyStatic, {
 });
 
 app.get('/', async (_req, reply) => reply.type('text/html; charset=utf-8').send(webAppHtml));
+
+// Serve the PWA root files (manifest, service worker, icons) that
+// vite-plugin-pwa emits to web/dist ROOT (not /assets). reply.sendFile, decorated
+// by the /assets static plugin above, takes a root override. These paths are in
+// the public allowlist (PWA_ROOT_FILES) so the browser can fetch them pre-token.
+const webDistRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'web', 'dist');
+for (const pwaFile of PWA_ROOT_FILES) {
+  app.get(`/${pwaFile}`, (_req, reply) => reply.sendFile(pwaFile, webDistRoot));
+}
+// Workbox runtime has a content-hashed filename (covered by the public
+// '/workbox-' prefix above).
+app.get('/workbox-:hash.js', (req, reply) =>
+  reply.sendFile(`workbox-${(req.params as { hash: string }).hash}.js`, webDistRoot));
 
 app.get('/health', async () => ({
   ok: true,
