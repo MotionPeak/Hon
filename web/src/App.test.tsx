@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { screen } from '@testing-library/react';
+import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { App } from './App';
 import { installFetchMock } from './test/mockFetch';
@@ -147,5 +147,25 @@ describe('App — tab routing', () => {
       .toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /vouchers/i }))
       .toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('opens the navigation drawer from the hamburger', async () => {
+    withToken();
+    installFetchMock(EMPTY);
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole('button', { name: /open menu/i }));
+    expect(screen.getByRole('dialog', { name: /navigation/i })).toBeInTheDocument();
+  });
+
+  it('switches tabs from a drawer item and closes the drawer', async () => {
+    withToken();
+    installFetchMock(EMPTY);
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole('button', { name: /open menu/i }));
+    const drawer = screen.getByRole('dialog', { name: /navigation/i });
+    await user.click(within(drawer).getByRole('button', { name: /loans/i }));
+    expect(await screen.findByRole('heading', { level: 1, name: /loans/i })).toBeInTheDocument();
   });
 });

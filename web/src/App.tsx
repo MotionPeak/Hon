@@ -14,6 +14,8 @@ import { VouchersView } from './vouchers/VouchersView';
 import { useUiStore } from './store/uiStore';
 import { TABS } from './nav';
 import { BrandMark } from './ui/BrandMark';
+import { MobileAppBar } from './ui/MobileAppBar';
+import { NavDrawer } from './ui/NavDrawer';
 
 interface Health {
   ok: boolean;
@@ -35,6 +37,7 @@ export function App() {
   const refreshUnseenLoans = useUiStore((s) => s.refreshUnseenLoans);
   const [health, setHealth] = useState<Health | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   // The browser's `storage` event is cross-tab only, so a same-tab write by
   // AccountsView's new-loan detector still needs a nudge — but that now calls
@@ -71,6 +74,7 @@ export function App() {
   return (
     <SettingsProvider>
       <main className="app">
+        <MobileAppBar onMenu={() => setDrawerOpen(true)} />
         <header className="app-header">
           <div className="brand">
             <BrandMark />
@@ -97,6 +101,7 @@ export function App() {
             aria-label="Toggle theme"
           >☀</button>
         </header>
+        <div className="app-scroll">
         <VaultBanner onUnlockClick={() => setTab('settings')} />
         <div className="shell">
           <nav
@@ -146,6 +151,14 @@ export function App() {
             </div>
           </div>
         </div>
+        </div>
+        <NavDrawer
+          tabs={TABS}
+          activeTab={tab}
+          open={drawerOpen}
+          onSelect={setTab}
+          onClose={() => setDrawerOpen(false)}
+        />
       </main>
     </SettingsProvider>
   );
