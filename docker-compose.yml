@@ -1,15 +1,16 @@
-# Run the Hon engine on a NAS or home server.
+# Run Hon on a NAS or home server.
 #
-#   1. cp .env.example .env   and put a long random secret in HON_TOKEN
+#   1. cp .env.example .env   and set a long random HON_TOKEN
 #   2. docker compose up -d --build
 #
-# Reach it at  http://<server>:4000/#token=<your HON_TOKEN>
-#
-# Keep <server> on your LAN or a private VPN (Tailscale, WireGuard) — do not
-# port-forward this to the public internet. See the README's NAS section.
+# Reach it at  http://<server>:4000/#token=<HON_TOKEN>
+# Keep <server> on your LAN or a private VPN (Tailscale, WireGuard) — never
+# port-forward this to the public internet.
 services:
   hon:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: hon
     restart: unless-stopped
     ports:
