@@ -1261,7 +1261,7 @@ button.mini { padding: 5px 11px; font-size: 12px; }
 }
 .bh-row {
   display: grid;
-  grid-template-columns: auto 1fr 1fr auto auto;
+  grid-template-columns: auto 1fr 1fr auto auto auto;
   align-items: center; gap: 14px;
   padding: 11px 0;
   border-top: 1px solid var(--hairline);
@@ -1341,7 +1341,7 @@ button.bh-row {
   cursor: pointer;
   /* Restore the grid layout (matches the non-button .bh-row above). */
   display: grid;
-  grid-template-columns: auto 1fr 1fr auto auto;
+  grid-template-columns: auto 1fr 1fr auto auto auto;
   align-items: center; gap: 14px;
   border-top: 1px solid var(--hairline);
   transition: none; /* suppress global button scale transition on this layout */
@@ -1405,13 +1405,17 @@ button.bh-row:active { transform: none; }        /* suppress global scale(.97) *
 .hd-stat-val.good { color: var(--green); }
 .hd-stat-val.bad  { color: var(--red); }
 
-/* Sparkline wrapper: fixed height so the Recharts LineChart renders
-   as a compact sparkline rather than stretching to fill available space. */
+/* Sparkline wrapper: fixed height so the LineChart renders as a compact
+   sparkline rather than stretching to fill available space. */
 .hd-chart-wrap {
   background: var(--card); border-radius: 12px;
   padding: 14px 14px 10px;
   height: 160px;
 }
+/* The LineChart's .lc-wrap hard-codes height:220px for the big brokerage
+   card. Inside the per-position sparkline that overflows the 160px wrapper
+   and bleeds onto the next holding row — so clip it to fill its container. */
+.hd-chart-wrap .lc-wrap { height: 100%; }
 
 /* Fallback text when no sparkline data is available. */
 .hd-empty {

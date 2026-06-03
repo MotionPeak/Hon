@@ -904,7 +904,7 @@ function HoldingRow({
             {pnlCur >= 0 ? '+' : '−'}{money(Math.abs(pnlCur), displayCur)}
           </span>
         )}
-        <span className="bh-chev">{open ? '▾' : '▸'}</span>
+        <span className="bh-chev" aria-hidden="true">▸</span>
       </button>
       {open && (
         <HoldingDetail
