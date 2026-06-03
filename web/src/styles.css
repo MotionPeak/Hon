@@ -3670,3 +3670,27 @@ body.drawer-open { overflow: hidden; }
   .balance-line .bli b { white-space: nowrap; }
 }
 /* ============ END OVERVIEW ============ */
+
+/* ============ DIALOGS → bottom sheet on phones (app-wide) ============
+   Radix dialogs (.rx-dialog) are centered modals with a 360px min-width on
+   desktop. On a phone that's cramped and can overflow narrow screens, so pin
+   them to the bottom as a full-width sheet. Affects every Radix dialog:
+   Activity (bulk category, loan picker), Piggy, Vouchers, Recurring, Settings. */
+@media (max-width: 768px) {
+  .rx-dialog,
+  .rx-dialog.rx-dialog-sm {
+    top: auto; left: 0; right: 0; bottom: 0;
+    transform: none;
+    min-width: 0; width: 100%; max-width: 100%;
+    max-height: 92vh; overflow-y: auto;
+    border-radius: 18px 18px 0 0;
+    border-left: 0; border-right: 0; border-bottom: 0;
+    padding-bottom: calc(22px + env(safe-area-inset-bottom));
+    animation: rx-sheet-up .26s cubic-bezier(.2,.7,.2,1);
+  }
+}
+@keyframes rx-sheet-up {
+  from { opacity: 0; transform: translateY(100%); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+/* ============ END DIALOGS ============ */
