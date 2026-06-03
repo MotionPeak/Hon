@@ -5,7 +5,8 @@ import type { Vault } from './vault.js';
 import { isSnapTrade, runSnapTradeSync, SNAPTRADE_COMPANY_ID } from './snaptrade.js';
 import { fetchHistoryForSymbol } from './marketData.js';
 import { isPensionCompany, runPensionScrape } from './pension.js';
-import { runInteractiveScrape, runScrape, type ScrapeOutcome } from './scrapers.js';
+import { runInteractiveScrape, runScrape, isCardCompany, type ScrapeOutcome } from './scrapers.js';
+import { pickScrapeStartDate } from './scrapeWindow.js';
 import { openSession } from './session.js';
 import { fetchCpiForMonth } from './loans.js';
 import { makeLog } from './log.js';
@@ -178,19 +179,6 @@ export class ScrapeRunner {
     return this.runs.get(runId);
   }
 
-  /**
-   * Picks the start date for a scrape: always `monthsBack` months ago.
-   *
-   * Earlier behavior used `lastSuccess - 14d` as an incremental shortcut, but
-   * once any connection had a small first sync the shortcut locked it into
-   * the same small window forever. Per-connection `historyMonths`
-   * (default 12) is now the only knob — DB UNIQUE(account_id, external_id)
-   * makes refetching old months a free no-op on persistence.
-   */
-  private chooseStartDate(_connectionId: string, _companyId: string, monthsBack: number): Date {
-    return startDateMonthsAgo(monthsBack);
-  }
-
   /** Clears any stale failure screenshot and returns the path for a new one. */
   private prepareScreenshotPath(companyId: string): string | undefined {
     try {
@@ -269,14 +257,22 @@ export class ScrapeRunner {
     // as part of its tag — `grep '[scrape:run123]'` shows everything for
     // one attempt across runner, scrapers and bank-loans output combined.
     const log = runnerLog.child(`run:${status.runId.slice(0, 8)}`);
-    const startDate = this.chooseStartDate(args.connectionId, args.companyId, args.monthsBack);
-    const lastSuccess = this.repo.lastSuccessfulScrapeAt(args.connectionId);
+    const lastSuccess = this.repo.lastSuccessfulScrapeAt(args.connectionId) ?? null;
+    const fetchedSince = this.repo.getScrapeFetchedSince(args.connectionId) ?? null;
+    const startDate = pickScrapeStartDate({
+      now: new Date(),
+      monthsBack: args.monthsBack,
+      lastSuccess,
+      fetchedSince,
+      isCard: isCardCompany(args.companyId),
+    });
     log.info('execute', {
       companyId: args.companyId,
       connectionId: args.connectionId,
       monthsBack: args.monthsBack,
       startDate: startDate.toISOString().slice(0, 10),
-      lastSuccess: lastSuccess ?? null,
+      lastSuccess,
+      fetchedSince,
       interactive: args.interactive,
     });
     const overallDone = log.timer('scrape', { companyId: args.companyId });
@@ -472,6 +468,13 @@ export class ScrapeRunner {
         transactions: saved.transactions,
         loans: outcome.scrapedLoans?.length ?? 0,
       });
+      // Remember how far back this sync fetched so the next one can go
+      // incremental instead of re-downloading the whole window. (The repo keeps
+      // the earliest coverage, so a recent incremental start never shrinks it.)
+      this.repo.extendScrapeFetchedSince(
+        args.connectionId,
+        startDate.toISOString().slice(0, 10),
+      );
       this.finish(
         status,
         args.connectionId,
@@ -583,12 +586,6 @@ export class ScrapeRunner {
       message: message.length > 200 ? message.slice(0, 197) + '…' : message,
     });
   }
-}
-
-function startDateMonthsAgo(months: number): Date {
-  const date = new Date();
-  date.setMonth(date.getMonth() - months);
-  return date;
 }
 
 function describeError(outcome: { errorType?: string; errorMessage?: string }): string {

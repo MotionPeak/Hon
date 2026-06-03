@@ -461,6 +461,29 @@ export class Repo {
     return this.getConnection(id)!;
   }
 
+  /** The scrape watermark — the earliest date a successful sync has already
+   *  fetched from for this connection — or undefined when never recorded. */
+  getScrapeFetchedSince(connectionId: string): string | undefined {
+    return this.orm
+      .select({ fetchedSince: connectionsT.fetchedSince })
+      .from(connectionsT)
+      .where(eq(connectionsT.id, connectionId))
+      .get()?.fetchedSince ?? undefined;
+  }
+
+  /** Extends the scrape watermark to the EARLIER of its current value and
+   *  `startDate` (YYYY-MM-DD); a later start from an incremental run never
+   *  shrinks recorded coverage. Called after every successful scrape. */
+  extendScrapeFetchedSince(connectionId: string, startDate: string): void {
+    const current = this.getScrapeFetchedSince(connectionId);
+    if (current != null && current <= startDate) return;
+    this.orm
+      .update(connectionsT)
+      .set({ fetchedSince: startDate })
+      .where(eq(connectionsT.id, connectionId))
+      .run();
+  }
+
   // --- Accounts & transactions ---------------------------------------------
 
   /** Drizzle column map mirroring the legacy `TXN_COLS` bare-SELECT, including

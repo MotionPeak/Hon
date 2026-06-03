@@ -40,6 +40,9 @@ export const connections = sqliteTable('connections', {
   lastScrapeAt: text('last_scrape_at'),
   lastStatus: text('last_status'),
   historyMonths: integer('history_months').notNull().default(12),
+  // Watermark: earliest date a successful sync has already fetched from. Drives
+  // the runner's incremental-vs-backfill choice (see scrapeWindow.ts).
+  fetchedSince: text('fetched_since'),
 });
 
 export const accounts = sqliteTable('accounts', {

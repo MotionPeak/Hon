@@ -176,6 +176,15 @@ const COMPANY_TYPES: Record<string, CompanyType> = {
   amex: 'card',
 };
 
+/**
+ * True for credit-card institutions (vs banks). Cards get a wider incremental
+ * re-fetch overlap than banks so the next-bill balance — the sum of every
+ * still-unbilled charge — isn't undercounted by starting mid-cycle.
+ */
+export function isCardCompany(id: string): boolean {
+  return COMPANY_TYPES[id] === 'card';
+}
+
 // Website host per institution, used only to fetch its favicon as a logo.
 // A missing entry just means the UI falls back to a category icon.
 const COMPANY_DOMAINS: Record<string, string> = {
