@@ -294,13 +294,13 @@ function BalanceCard({
       </div>
       <div className="balance-cap">{cap}</div>
       <div className="balance-line">
-        <span>Income</span> <b>{money(income, currency)}</b>
+        <span className="bli"><span>Income</span> <b>{money(income, currency)}</b></span>
         <span className="balance-sep">−</span>
-        <span>Expected fixed + essentials</span> <b>{money(committedDisplay, currency)}</b>
+        <span className="bli"><span>Expected fixed + essentials</span> <b>{money(committedDisplay, currency)}</b></span>
         {spent > 0 && (
           <>
             <span className="balance-sep">−</span>
-            <span>Variable spent</span> <b>{money(spent, currency)}</b>
+            <span className="bli"><span>Variable spent</span> <b>{money(spent, currency)}</b></span>
           </>
         )}
       </div>
