@@ -3759,3 +3759,17 @@ body.drawer-open { overflow: hidden; }
   .md-tiles { grid-template-columns: repeat(2, 1fr); }
 }
 /* ============ END INSIGHTS TILES ============ */
+
+/* ============ Net-worth card (mobile) ============
+   .nw-total was 48px and clipped the big number at the card edge; .nw-bd-name
+   had no truncation so single-word names (Investments, Loans) overflowed into
+   the amount. Tighten card padding, shrink the total, truncate names, keep the
+   amount on one line. */
+@media (max-width: 768px) {
+  .networth { padding: 22px 18px; }
+  .nw-total { font-size: 34px; }
+  .nw-bd-row { gap: 8px; padding: 8px 2px; }
+  .nw-bd-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .nw-bd-amt { white-space: nowrap; flex: none; }
+}
+/* ============ END NET-WORTH ============ */
