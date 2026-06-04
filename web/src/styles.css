@@ -3784,3 +3784,45 @@ body.drawer-open { overflow: hidden; }
   .rec-tag { flex: none; white-space: nowrap; }
 }
 /* ============ END FIXED BILLS ============ */
+
+/* ============ BREATHING ROOM (mobile, ≤768px) ============
+   Dense screens read cramped: list rows packed at 8-10px, section/category
+   cards tight at 14px, projection rows at gap:4px. Loosen the VERTICAL rhythm
+   (so nothing loses content width and re-clips), widen the gaps between cards
+   and sections, and add line-height to the small meta text. */
+@media (max-width: 768px) {
+  /* more separation between stacked cards & sections */
+  .ov-stack { gap: 22px; }
+  .recurring-sections { gap: 22px; }
+  .act-umbrellas { gap: 26px; }
+  .act-umbrella { gap: 14px; }
+
+  /* roomier cards (vertical padding ↑; horizontal unchanged) */
+  .balance-card { padding: 24px 18px; }
+  .cat-card-act { padding: 17px 16px; }
+  .rec-section { padding: 17px 16px; }
+  .loan-card-rich { padding: 20px 18px; }
+  .voucher-card { padding: 19px 17px; }
+
+  /* taller, airier list rows */
+  .txn { padding: 13px 0; }
+  .rec-row { padding: 13px 0; }
+  .nw-bd-row { padding: 11px 4px; }
+  .balance-details { gap: 8px; }
+
+  /* small meta text easier to read */
+  .rec-meta, .nw-sub, .loan-sub, .conn-meta, .balance-cap { line-height: 1.5; }
+}
+/* breathing room, cont. — Assets / Insights cards + rows (same level) */
+@media (max-width: 768px) {
+  /* Assets */
+  .conn-card, .asset-card { padding: 18px; }
+  .asset-card { gap: 7px; }
+  .assets-stack { gap: 16px; }
+  .bh-row { padding: 12px 0; }
+  /* Insights */
+  .brk-stat { padding: 16px; }
+  .hd-stat { padding: 12px; }
+  .md-tile { padding: 15px 14px; }
+}
+/* ============ END BREATHING ROOM ============ */
