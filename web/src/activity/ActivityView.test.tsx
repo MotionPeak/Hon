@@ -820,3 +820,24 @@ describe('ActivityView — savings bucket', () => {
     expect(await screen.findByText('Transfer to savings')).toBeInTheDocument();
   });
 });
+
+describe('ActivityView — reimbursement net display', () => {
+  const reimbursedExpense = {
+    id: 'exp1', accountId: 'a-1', externalId: 'rx', date: `${thisMonth}-07`,
+    processedDate: null, amount: -7500, currency: 'ILS', description: 'Catering',
+    memo: null, kind: null, status: null, category: 'Groceries', createdAt: `${thisMonth}-07`,
+    reimbursedTotal: 5250, reimbursementCount: 2, effectiveAmount: -2250,
+  };
+
+  it('shows the net amount and an original/reimbursed subline', async () => {
+    installFetchMock({ ...FULL, 'GET /api/transactions': () => ({ transactions: [reimbursedExpense] }) });
+    renderView();
+    // Net the user bears (−₪2,250) is what shows — on the row AND its totals.
+    expect((await screen.findAllByText('−₪2,250')).length).toBeGreaterThan(0);
+    // The gross −₪7,500 is never the figure (rows reconcile with their totals).
+    expect(screen.queryByText('−₪7,500')).not.toBeInTheDocument();
+    // Subline gives the context.
+    expect(screen.getByText(/original/i)).toBeInTheDocument();
+    expect(screen.getByText(/reimbursed/i)).toBeInTheDocument();
+  });
+});

@@ -44,6 +44,32 @@ function SplitwiseNote({ txnId }: { txnId: string }) {
   return <span className="txn-sw"> · {money(remaining, link.currency)} owed to you</span>;
 }
 
+/** The amount the user actually bears: the net after reimbursements when the
+ *  expense has any, otherwise the gross amount unchanged. Accepts the minimal
+ *  shape so both row rendering and total summation can share it. */
+function displayAmount(
+  t: { amount: number; reimbursementCount?: number; effectiveAmount?: number },
+): number {
+  return (t.reimbursementCount ?? 0) > 0 ? (t.effectiveAmount ?? t.amount) : t.amount;
+}
+
+/** Subline note on a reimbursed expense: "₪X original · ₪Y reimbursed" (or
+ *  "fully reimbursed" when the net rounds to zero). Renders nothing otherwise.
+ *  The original is shown unsigned to read as a plain reference figure. */
+function ReimbursedNote({ t }: { t: Transaction }) {
+  if ((t.reimbursementCount ?? 0) === 0) return null;
+  const reimbursed = t.reimbursedTotal ?? 0;
+  const fully = Math.abs(t.effectiveAmount ?? t.amount) < 0.005;
+  return (
+    <span className="txn-reimbursed-note">
+      <span className="sep"> · </span>
+      {money(Math.abs(t.amount), t.currency)} original
+      <span className="sep"> · </span>
+      {fully ? 'fully reimbursed' : `${money(reimbursed, t.currency)} reimbursed`}
+    </span>
+  );
+}
+
 /** Match a transaction against a lowercase search query. Mirrors the legacy
  *  txnMatchesSearch — description, category, date, account label, or amount. */
 /** ± window so a search for "100" finds charges of 99.6–100.4. */
@@ -81,12 +107,16 @@ function txnMatchesSearch(
  *  with 3 ILS + 2 USD charges shows the ILS headline plus a muted "· +$X")
  *  rather than silently dropping the minority currency. */
 function singleCurrencyTotal(
-  txns: { amount: number; currency: string }[], abs = false,
+  txns: { amount: number; currency: string; reimbursementCount?: number; effectiveAmount?: number }[],
+  abs = false,
 ): { total: number; currency: string; others: { total: number; currency: string }[] } {
   const byCur = new Map<string, { total: number; count: number }>();
   for (const t of txns) {
     const e = byCur.get(t.currency) ?? { total: 0, count: 0 };
-    e.total += abs ? Math.abs(t.amount) : t.amount;
+    // Net reimbursements into the total so category/group figures reconcile
+    // with the per-row net (and match the budget). `abs` (savings magnitudes)
+    // stays gross.
+    e.total += abs ? Math.abs(t.amount) : displayAmount(t);
     e.count += 1;
     byCur.set(t.currency, e);
   }
@@ -437,11 +467,11 @@ export function ActivityView() {
                             {t.category}
                           </>
                         )}
-                        <SplitwiseNote txnId={t.id} />
+                        <SplitwiseNote txnId={t.id} /><ReimbursedNote t={t} />
                       </div>
                     </div>
                     <div className={`txn-amt${pos ? ' pos' : ''}`}>
-                      {money(t.amount, t.currency)}
+                      {money(displayAmount(t), t.currency)}
                     </div>
                   </li>
                 );
@@ -736,11 +766,11 @@ function ExcludedSection({
                           {acct.label || acct.connectionName}
                         </>
                       )}
-                      <SplitwiseNote txnId={t.id} />
+                      <SplitwiseNote txnId={t.id} /><ReimbursedNote t={t} />
                     </div>
                   </div>
                   <div className={`txn-amt${pos ? ' pos' : ''}`}>
-                    {money(t.amount, t.currency)}
+                    {money(displayAmount(t), t.currency)}
                   </div>
                 </li>
               );
@@ -818,11 +848,11 @@ function SavingsSection({
                           {acct.label || acct.connectionName}
                         </>
                       )}
-                      <SplitwiseNote txnId={t.id} />
+                      <SplitwiseNote txnId={t.id} /><ReimbursedNote t={t} />
                     </div>
                   </div>
                   <div className={`txn-amt${pos ? ' pos' : ''}`}>
-                    {money(t.amount, t.currency)}
+                    {money(displayAmount(t), t.currency)}
                   </div>
                 </li>
               );
@@ -902,11 +932,11 @@ function CatCard({
                       {acct.label || acct.connectionName}
                     </>
                   )}
-                  <SplitwiseNote txnId={t.id} />
+                  <SplitwiseNote txnId={t.id} /><ReimbursedNote t={t} />
                 </div>
               </div>
               <div className={`txn-amt${pos ? ' pos' : ''}`}>
-                {money(t.amount, t.currency)}
+                {money(displayAmount(t), t.currency)}
               </div>
             </li>
           );
@@ -1073,7 +1103,7 @@ function CategoryPickerSidebar(
           <div className="txn-sidebar-meta">
             <div className="txn-sidebar-name">{transaction.description}</div>
             <div className="txn-sidebar-sub">
-              {money(transaction.amount, transaction.currency)} · {transaction.date}
+              {money(displayAmount(transaction), transaction.currency)} · {transaction.date}
             </div>
           </div>
         </div>
