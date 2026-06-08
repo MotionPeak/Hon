@@ -25,6 +25,11 @@ export const transactionSchema = z.object({
   loanId: z.string().nullable().optional(),
   excludedManual: z.boolean().nullable().optional(),
   savings: z.boolean().nullable().optional(),
+  // Reimbursement netting (present from GET /transactions; optional so older
+  // payloads and test fixtures still parse).
+  reimbursedTotal: z.number().optional(),
+  reimbursementCount: z.number().optional(),
+  effectiveAmount: z.number().optional(),
 });
 export type Transaction = z.infer<typeof transactionSchema>;
 
@@ -55,3 +60,14 @@ export type TxnSavings = z.infer<typeof txnSavingsSchema>;
 /** PUT /transactions/:id/link — link `refundId` against this expense. */
 export const txnLinkSchema = z.object({ refundId: z.string().min(1) });
 export type TxnLink = z.infer<typeof txnLinkSchema>;
+
+/** One (expense, refund) allocation row as returned by GET /transaction-links. */
+export const transactionLinkSchema = z.object({
+  expenseId: z.string(),
+  refundId: z.string(),
+  amount: z.number(),
+});
+export type TransactionLink = z.infer<typeof transactionLinkSchema>;
+
+/** GET /transaction-links → a bare array of allocations. */
+export const transactionLinksResponseSchema = z.array(transactionLinkSchema);
