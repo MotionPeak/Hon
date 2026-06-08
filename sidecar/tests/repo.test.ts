@@ -312,3 +312,57 @@ describe('txn_effective — dual-role transaction (migration 39)', () => {
     expect(eff(e)).toBeCloseTo(-180, 5);
   });
 });
+
+describe('listTransactions reimbursement net fields', () => {
+  function seedExpenseAndRefunds(repo: Repo) {
+    const conn = repo.createConnection('max', 'Max');
+    repo.saveScrapeResult(conn.id, [
+      {
+        accountNumber: '1234', currency: 'ILS', balance: 0,
+        transactions: [
+          { externalId: 'exp', date: '2026-06-07', amount: -7500, currency: 'ILS', description: 'Catering' },
+          { externalId: 'rf1', date: '2026-06-07', amount: 3000, currency: 'ILS', description: 'Reimb A' },
+          { externalId: 'rf2', date: '2026-06-07', amount: 2250, currency: 'ILS', description: 'Reimb B' },
+        ],
+      },
+    ]);
+    const rows = repo.listTransactions({});
+    const expense = rows.find((r) => r.amount === -7500)!;
+    const rf1 = rows.find((r) => r.amount === 3000)!;
+    const rf2 = rows.find((r) => r.amount === 2250)!;
+    return { expense, rf1, rf2 };
+  }
+
+  it('nets multiple reimbursements into the expense', () => {
+    const { repo } = makeRepo();
+    const { expense, rf1, rf2 } = seedExpenseAndRefunds(repo);
+    repo.setTransactionLink(expense.id, rf1.id, 3000);
+    repo.setTransactionLink(expense.id, rf2.id, 2250);
+
+    const exp = repo.listTransactions({}).find((r) => r.id === expense.id)!;
+    expect(exp.reimbursedTotal).toBe(5250);
+    expect(exp.reimbursementCount).toBe(2);
+    expect(exp.effectiveAmount).toBe(-2250);
+  });
+
+  it('leaves un-reimbursed rows unchanged (effectiveAmount === amount)', () => {
+    const { repo } = makeRepo();
+    const { expense, rf1 } = seedExpenseAndRefunds(repo);
+    const exp = repo.listTransactions({}).find((r) => r.id === expense.id)!;
+    expect(exp.reimbursedTotal).toBe(0);
+    expect(exp.reimbursementCount).toBe(0);
+    expect(exp.effectiveAmount).toBe(-7500);
+    const refund = repo.listTransactions({}).find((r) => r.id === rf1.id)!;
+    expect(refund.reimbursedTotal).toBe(0);
+  });
+
+  it('effectiveAmount matches the txn_effective view (single source of truth)', () => {
+    const { repo, db } = makeRepo();
+    const { expense, rf1, rf2 } = seedExpenseAndRefunds(repo);
+    repo.setTransactionLink(expense.id, rf1.id, 3000);
+    repo.setTransactionLink(expense.id, rf2.id, 2250);
+    const exp = repo.listTransactions({}).find((r) => r.id === expense.id)!;
+    const view = db.prepare('SELECT amount FROM txn_effective WHERE id = ?').get(expense.id) as { amount: number };
+    expect(exp.effectiveAmount).toBeCloseTo(view.amount, 5);
+  });
+});

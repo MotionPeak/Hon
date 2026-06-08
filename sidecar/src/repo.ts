@@ -151,6 +151,14 @@ export interface TxnRow {
    *  Mutually exclusive with excludedManual. Stored as INTEGER (1/0/null);
    *  coerced to boolean on read. */
   savings?: boolean | null;
+  /** Total reimbursed into this expense — Σ transaction_links.amount where
+   *  expense_id = this row. 0 when none. Present only from listTransactions. */
+  reimbursedTotal?: number;
+  /** Number of reimbursements linked to this expense. 0 when none. */
+  reimbursementCount?: number;
+  /** Net amount the user bears after reimbursements (amount + reimbursedTotal).
+   *  Equals `amount` when there are no reimbursements. Matches txn_effective. */
+  effectiveAmount?: number;
 }
 
 export interface ScrapeRunRow {
@@ -713,7 +721,13 @@ export class Repo {
                    ORDER BY amount DESC LIMIT 1) AS refundId,
                 (SELECT expense_id FROM transaction_links
                    WHERE refund_id = transactions.id
-                   ORDER BY amount DESC LIMIT 1) AS refundForId
+                   ORDER BY amount DESC LIMIT 1) AS refundForId,
+                COALESCE((SELECT SUM(amount) FROM transaction_links
+                   WHERE expense_id = transactions.id), 0) AS reimbursedTotal,
+                (SELECT COUNT(*) FROM transaction_links
+                   WHERE expense_id = transactions.id) AS reimbursementCount,
+                amount + COALESCE((SELECT SUM(amount) FROM transaction_links
+                   WHERE expense_id = transactions.id), 0) AS effectiveAmount
          FROM transactions
          WHERE (@accountId IS NULL OR account_id = @accountId)
          ORDER BY date DESC, created_at DESC
@@ -831,7 +845,13 @@ export class Repo {
                    ORDER BY amount DESC LIMIT 1) AS refundId,
                 (SELECT expense_id FROM transaction_links
                    WHERE refund_id = transactions.id
-                   ORDER BY amount DESC LIMIT 1) AS refundForId
+                   ORDER BY amount DESC LIMIT 1) AS refundForId,
+                COALESCE((SELECT SUM(amount) FROM transaction_links
+                   WHERE expense_id = transactions.id), 0) AS reimbursedTotal,
+                (SELECT COUNT(*) FROM transaction_links
+                   WHERE expense_id = transactions.id) AS reimbursementCount,
+                amount + COALESCE((SELECT SUM(amount) FROM transaction_links
+                   WHERE expense_id = transactions.id), 0) AS effectiveAmount
          FROM transactions WHERE id = @id`,
       )
       .get({ id });
