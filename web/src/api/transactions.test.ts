@@ -71,10 +71,10 @@ describe('transaction mutations', () => {
 describe('listTransactionLinks', () => {
   it('parses the allocations array from GET /transaction-links', async () => {
     installFetchMock({
-      'GET /api/transaction-links': () => [
+      'GET /api/transaction-links': () => ({ links: [
         { expenseId: 'e1', refundId: 'r1', amount: 3000 },
         { expenseId: 'e1', refundId: 'r2', amount: 2250 },
-      ],
+      ] }),
     });
     const links = await listTransactionLinks();
     expect(links).toHaveLength(2);

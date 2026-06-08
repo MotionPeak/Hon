@@ -30,7 +30,7 @@ export async function listTransactions(): Promise<Transaction[]> {
 /** GET /transaction-links → every (expense, refund) reimbursement allocation. */
 export async function listTransactionLinks(): Promise<TransactionLink[]> {
   const data = await api<unknown>('/transaction-links');
-  return transactionLinksResponseSchema.parse(data);
+  return transactionLinksResponseSchema.parse(data).links;
 }
 
 /** PATCH /transactions/:id/category — set a transaction's category. Pass

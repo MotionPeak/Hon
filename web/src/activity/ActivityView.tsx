@@ -11,6 +11,7 @@ import type { Account, Loan } from '../accounts/types';
 import type { Category } from '../settings/CategoriesPanel';
 import type { Transaction } from './types';
 import type { TransactionLink } from '@hon/shared/transaction';
+import { listTransactionLinks } from '../api/transactions';
 import { merchantKey, recurrenceChoices, type Frequency } from '../recurring/helpers';
 import { isExcludedFromCycle, isManuallyExcluded, ruleMatches } from './excluded';
 import { SplitwiseSection } from './SplitwiseSection';
@@ -190,7 +191,7 @@ export function ActivityView() {
         api<{ loans: Loan[] }>('/loans').catch(() => ({ loans: [] as Loan[] })),
         api<{ frequencies: Record<string, FreqValue> }>('/merchant-frequencies')
           .catch(() => ({ frequencies: {} as Record<string, FreqValue> })),
-        api<TransactionLink[]>('/transaction-links').catch(() => [] as TransactionLink[]),
+        listTransactionLinks().catch(() => [] as TransactionLink[]),
       ]);
       setTransactions(t.transactions);
       setAccounts(a.accounts);

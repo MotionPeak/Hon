@@ -69,5 +69,7 @@ export const transactionLinkSchema = z.object({
 });
 export type TransactionLink = z.infer<typeof transactionLinkSchema>;
 
-/** GET /transaction-links → a bare array of allocations. */
-export const transactionLinksResponseSchema = z.array(transactionLinkSchema);
+/** GET /transaction-links → `{ links: [...] }`. */
+export const transactionLinksResponseSchema = z.object({
+  links: z.array(transactionLinkSchema),
+});

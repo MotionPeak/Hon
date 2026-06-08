@@ -72,7 +72,7 @@ const FULL = {
   'GET /api/accounts': () => ACCOUNTS,
   'GET /api/categories': () => CATEGORIES,
   'GET /api/merchant-frequencies': () => ({ frequencies: {} as Record<string, string> }),
-  'GET /api/transaction-links': () => [] as unknown[],
+  'GET /api/transaction-links': () => ({ links: [] as unknown[] }),
   ...SPLITWISE_OFF,
 };
 
@@ -503,7 +503,7 @@ describe('ActivityView — refund linking', () => {
     installFetchMock({
       ...FULL_REFUND,
       'GET /api/transactions': () => linkedTxns,
-      'GET /api/transaction-links': () => [{ expenseId: 't-2', refundId: 't-r1', amount: 250 }],
+      'GET /api/transaction-links': () => ({ links: [{ expenseId: 't-2', refundId: 't-r1', amount: 250 }] }),
     });
     renderView();
     await user.click(await screen.findByText('Shufersal'));
@@ -669,7 +669,7 @@ describe('ActivityView — refund linking', () => {
     installFetchMock({
       ...FULL_REFUND,
       'GET /api/transactions': get,
-      'GET /api/transaction-links': () => [{ expenseId: 't-2', refundId: 't-r1', amount: 250 }],
+      'GET /api/transaction-links': () => ({ links: [{ expenseId: 't-2', refundId: 't-r1', amount: 250 }] }),
       'DELETE /api/transactions/t-2/link': del,
     });
     renderView();
@@ -858,10 +858,10 @@ describe('ActivityView — reimbursement net display', () => {
     installFetchMock({
       ...FULL,
       'GET /api/transactions': () => ({ transactions: [reimbursedExpense, rf1, rf2] }),
-      'GET /api/transaction-links': () => [
+      'GET /api/transaction-links': () => ({ links: [
         { expenseId: 'exp1', refundId: 'r1', amount: 3000 },
         { expenseId: 'exp1', refundId: 'r2', amount: 2250 },
-      ],
+      ] }),
     });
     const user = userEvent.setup();
     renderView();
