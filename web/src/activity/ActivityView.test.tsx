@@ -72,6 +72,7 @@ const FULL = {
   'GET /api/accounts': () => ACCOUNTS,
   'GET /api/categories': () => CATEGORIES,
   'GET /api/merchant-frequencies': () => ({ frequencies: {} as Record<string, string> }),
+  'GET /api/transaction-links': () => [] as unknown[],
   ...SPLITWISE_OFF,
 };
 
@@ -502,6 +503,7 @@ describe('ActivityView — refund linking', () => {
     installFetchMock({
       ...FULL_REFUND,
       'GET /api/transactions': () => linkedTxns,
+      'GET /api/transaction-links': () => [{ expenseId: 't-2', refundId: 't-r1', amount: 250 }],
     });
     renderView();
     await user.click(await screen.findByText('Shufersal'));
@@ -667,6 +669,7 @@ describe('ActivityView — refund linking', () => {
     installFetchMock({
       ...FULL_REFUND,
       'GET /api/transactions': get,
+      'GET /api/transaction-links': () => [{ expenseId: 't-2', refundId: 't-r1', amount: 250 }],
       'DELETE /api/transactions/t-2/link': del,
     });
     renderView();
@@ -839,5 +842,35 @@ describe('ActivityView — reimbursement net display', () => {
     // Subline gives the context.
     expect(screen.getByText(/original/i)).toBeInTheDocument();
     expect(screen.getByText(/reimbursed/i)).toBeInTheDocument();
+  });
+
+  it('lists every linked reimbursement with a Your-share summary', async () => {
+    const rf1 = {
+      ...reimbursedExpense, id: 'r1', externalId: 'r1', amount: 3000,
+      description: 'Reimb A', refundForId: 'exp1',
+      reimbursedTotal: 0, reimbursementCount: 0, effectiveAmount: 3000,
+    };
+    const rf2 = {
+      ...reimbursedExpense, id: 'r2', externalId: 'r2', amount: 2250,
+      description: 'Reimb B', refundForId: 'exp1',
+      reimbursedTotal: 0, reimbursementCount: 0, effectiveAmount: 2250,
+    };
+    installFetchMock({
+      ...FULL,
+      'GET /api/transactions': () => ({ transactions: [reimbursedExpense, rf1, rf2] }),
+      'GET /api/transaction-links': () => [
+        { expenseId: 'exp1', refundId: 'r1', amount: 3000 },
+        { expenseId: 'exp1', refundId: 'r2', amount: 2250 },
+      ],
+    });
+    const user = userEvent.setup();
+    renderView();
+    await user.click(await screen.findByText('Catering'));
+    // Both reimbursements enumerated in the panel.
+    expect(await screen.findByText('Reimb A')).toBeInTheDocument();
+    expect(screen.getByText('Reimb B')).toBeInTheDocument();
+    // Your-share summary present, and each link independently removable.
+    expect(screen.getByText(/your share/i)).toBeInTheDocument();
+    expect(screen.getAllByText('Unlink')).toHaveLength(2);
   });
 });

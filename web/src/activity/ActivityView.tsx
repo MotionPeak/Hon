@@ -10,6 +10,7 @@ import { useSettings } from '../settings/useSettings';
 import type { Account, Loan } from '../accounts/types';
 import type { Category } from '../settings/CategoriesPanel';
 import type { Transaction } from './types';
+import type { TransactionLink } from '@hon/shared/transaction';
 import { merchantKey, recurrenceChoices, type Frequency } from '../recurring/helpers';
 import { isExcludedFromCycle, isManuallyExcluded, ruleMatches } from './excluded';
 import { SplitwiseSection } from './SplitwiseSection';
@@ -155,6 +156,7 @@ function OtherCurrencyTotals(
 export function ActivityView() {
   const [settings] = useSettings();
   const [transactions, setTransactions] = useState<Transaction[] | null>(null);
+  const [txnLinks, setTxnLinks] = useState<TransactionLink[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [loans, setLoans] = useState<Loan[]>([]);
@@ -181,19 +183,21 @@ export function ActivityView() {
 
   const refresh = useCallback(async () => {
     try {
-      const [t, a, c, l, f] = await Promise.all([
+      const [t, a, c, l, f, lk] = await Promise.all([
         api<{ transactions: Transaction[] }>('/transactions'),
         api<{ accounts: Account[] }>('/accounts'),
         api<{ categories: Category[] }>('/categories'),
         api<{ loans: Loan[] }>('/loans').catch(() => ({ loans: [] as Loan[] })),
         api<{ frequencies: Record<string, FreqValue> }>('/merchant-frequencies')
           .catch(() => ({ frequencies: {} as Record<string, FreqValue> })),
+        api<TransactionLink[]>('/transaction-links').catch(() => [] as TransactionLink[]),
       ]);
       setTransactions(t.transactions);
       setAccounts(a.accounts);
       setCategories(c.categories);
       setLoans(l.loans);
       setMerchantFreqs(f.frequencies ?? {});
+      setTxnLinks(lk);
     } catch {
       setTransactions([]);
     }
@@ -518,6 +522,7 @@ export function ActivityView() {
         <CategoryPickerSidebar
           transaction={moving}
           allTransactions={transactions}
+          links={txnLinks}
           categories={categories}
           loans={loans}
           onLinkLoan={async (loanId) => {
@@ -612,11 +617,12 @@ export function ActivityView() {
             );
             await refresh();
           }}
-          onUnlinkRefund={async () => {
-            // Only ever called from the expense side (where transaction.refundId
-            // is set) — so the URL is always the expense.
+          onUnlinkRefund={async (refundId: string) => {
+            // Called from the expense side; remove ONE allocation by passing the
+            // refund id as a query param (the expense is always the URL id).
             await api(
-              `/transactions/${encodeURIComponent(moving.id)}/link`,
+              `/transactions/${encodeURIComponent(moving.id)}/link`
+                + `?refundId=${encodeURIComponent(refundId)}`,
               'DELETE',
             );
             await refresh();
@@ -981,6 +987,7 @@ function LoanChip({
 interface CategoryPickerProps {
   transaction: Transaction;
   allTransactions: Transaction[];
+  links: TransactionLink[];
   categories: Category[];
   loans: Loan[];
   /** Stored billing frequency for this txn's merchant, or null if unset. */
@@ -1000,14 +1007,14 @@ interface CategoryPickerProps {
     opts: { applyToMerchant: boolean; frequency: Frequency | null },
   ) => void | Promise<void>;
   onLinkRefund: (refundId: string) => void | Promise<void>;
-  onUnlinkRefund: () => void | Promise<void>;
+  onUnlinkRefund: (refundId: string) => void | Promise<void>;
   onLinkLoan: (loanId: string) => void | Promise<void>;
   onUnlinkLoan: () => void | Promise<void>;
 }
 
 function CategoryPickerSidebar(
   {
-    transaction, allTransactions, categories, loans, currentFreq,
+    transaction, allTransactions, links, categories, loans, currentFreq,
     excluded, ruleMatched, onSetExcluded, savings, onSetSavings,
     onClose, onSaved,
     onLinkRefund, onUnlinkRefund, onLinkLoan, onUnlinkLoan,
@@ -1188,6 +1195,7 @@ function CategoryPickerSidebar(
             <RefundSection
               transaction={transaction}
               allTransactions={allTransactions}
+              links={links}
               onOpenPicker={() => setView('refund-picker')}
               onUnlinkRefund={onUnlinkRefund}
             />
@@ -1351,8 +1359,9 @@ function LoansSection({
 interface RefundSectionProps {
   transaction: Transaction;
   allTransactions: Transaction[];
+  links: TransactionLink[];
   onOpenPicker: () => void;
-  onUnlinkRefund: () => void | Promise<void>;
+  onUnlinkRefund: (refundId: string) => void | Promise<void>;
 }
 
 interface BulkCategoryDialogProps {
@@ -1433,37 +1442,49 @@ function BulkCategoryDialog({
 }
 
 function RefundSection({
-  transaction, allTransactions, onOpenPicker, onUnlinkRefund,
+  transaction, allTransactions, links, onOpenPicker, onUnlinkRefund,
 }: RefundSectionProps) {
   const [busy, setBusy] = useState(false);
   const isRefund = transaction.amount > 0;
-  // Only an expense carries a refundId; refunds don't show the linked-state
-  // card here (it would need /transaction-links to enumerate every expense
-  // linked to this refund — deferred).
-  const linked = !isRefund && transaction.refundId
-    ? allTransactions.find((t) => t.id === transaction.refundId) ?? null
-    : null;
+  // Every reimbursement allocated to this expense (an expense can have many).
+  const myLinks = isRefund ? [] : links.filter((l) => l.expenseId === transaction.id);
 
-  if (linked) {
+  if (myLinks.length > 0) {
+    const reimbursed = myLinks.reduce((s, l) => s + l.amount, 0);
+    const yourShare = transaction.amount + reimbursed; // negative outflow
     return (
       <div className="txn-sidebar-section">
         <div className="label">Reimbursement</div>
-        <div className="rf-linked">
-          <div className="rf-linked-name">{linked.description}</div>
-          <div className="rf-linked-sub">
-            +{money(linked.amount, linked.currency)} · {linked.date}
-          </div>
-          <button
-            type="button"
-            className="rf-unlink"
-            aria-label="Unlink refund"
-            disabled={busy}
-            onClick={async () => {
-              setBusy(true);
-              try { await onUnlinkRefund(); }
-              finally { setBusy(false); }
-            }}
-          >Unlink</button>
+        {myLinks.map((l) => {
+          const r = allTransactions.find((t) => t.id === l.refundId);
+          return (
+            <div className="rf-linked" key={l.refundId}>
+              <div className="rf-linked-name">{r?.description ?? 'Reimbursement'}</div>
+              <div className="rf-linked-sub">
+                +{money(l.amount, r?.currency ?? transaction.currency)}
+                {r?.date ? ` · ${r.date}` : ''}
+              </div>
+              <button
+                type="button"
+                className="rf-unlink"
+                aria-label="Unlink reimbursement"
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true);
+                  try { await onUnlinkRefund(l.refundId); }
+                  finally { setBusy(false); }
+                }}
+              >Unlink</button>
+            </div>
+          );
+        })}
+        <button type="button" className="txn-sidebar-action" onClick={onOpenPicker}>
+          + Add reimbursement
+        </button>
+        <div className="rf-summary">
+          Original {money(Math.abs(transaction.amount), transaction.currency)}
+          {' · '}Reimbursed {money(reimbursed, transaction.currency)}
+          {' · '}Your share {money(Math.abs(yourShare), transaction.currency)}
         </div>
       </div>
     );
