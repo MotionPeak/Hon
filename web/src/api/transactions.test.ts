@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { installFetchMock } from '../test/mockFetch';
 import {
   listTransactions,
+  listTransactionLinks,
   setTransactionCategory,
   setTransactionExcluded,
   unlinkRefund,
@@ -55,5 +56,28 @@ describe('transaction mutations', () => {
       '/api/transactions/t1/link',
       expect.objectContaining({ method: 'DELETE' }),
     );
+  });
+
+  it('appends ?refundId= when unlinking ONE specific reimbursement', async () => {
+    const spy = installFetchMock({ 'DELETE /api/transactions/e1/link': () => ({ ok: true }) });
+    await unlinkRefund('e1', 'r1');
+    expect(spy).toHaveBeenCalledWith(
+      '/api/transactions/e1/link?refundId=r1',
+      expect.objectContaining({ method: 'DELETE' }),
+    );
+  });
+});
+
+describe('listTransactionLinks', () => {
+  it('parses the allocations array from GET /transaction-links', async () => {
+    installFetchMock({
+      'GET /api/transaction-links': () => [
+        { expenseId: 'e1', refundId: 'r1', amount: 3000 },
+        { expenseId: 'e1', refundId: 'r2', amount: 2250 },
+      ],
+    });
+    const links = await listTransactionLinks();
+    expect(links).toHaveLength(2);
+    expect(links[0]).toEqual({ expenseId: 'e1', refundId: 'r1', amount: 3000 });
   });
 });

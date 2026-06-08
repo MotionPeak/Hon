@@ -12,7 +12,9 @@ import {
   txnExcludedSchema,
   txnSavingsSchema,
   txnLinkSchema,
+  transactionLinksResponseSchema,
   type Transaction,
+  type TransactionLink,
 } from '@hon/shared/transaction';
 import { api } from './client';
 
@@ -23,6 +25,12 @@ const sub = (id: string, leaf: string): string =>
 export async function listTransactions(): Promise<Transaction[]> {
   const data = await api<unknown>('/transactions');
   return transactionsResponseSchema.parse(data).transactions;
+}
+
+/** GET /transaction-links → every (expense, refund) reimbursement allocation. */
+export async function listTransactionLinks(): Promise<TransactionLink[]> {
+  const data = await api<unknown>('/transaction-links');
+  return transactionLinksResponseSchema.parse(data);
 }
 
 /** PATCH /transactions/:id/category — set a transaction's category. Pass
@@ -57,8 +65,9 @@ export async function linkRefund(expenseId: string, refundId: string): Promise<v
   await api(sub(expenseId, 'link'), 'PUT', txnLinkSchema.parse({ refundId }));
 }
 
-/** DELETE /transactions/:expenseId/link — unlink a refund (called from the
- *  expense side, where `refundId` is set). */
-export async function unlinkRefund(expenseId: string): Promise<void> {
-  await api(sub(expenseId, 'link'), 'DELETE');
+/** DELETE /transactions/:expenseId/link — unlink a reimbursement. Pass
+ *  `refundId` to remove ONE allocation; omit to remove all on this expense. */
+export async function unlinkRefund(expenseId: string, refundId?: string): Promise<void> {
+  const q = refundId ? `?refundId=${encodeURIComponent(refundId)}` : '';
+  await api(sub(expenseId, 'link') + q, 'DELETE');
 }
