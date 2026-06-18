@@ -1336,3 +1336,26 @@ describe('connection card — history months picker', () => {
     expect(within(penCard).queryByLabelText(/history months/i)).not.toBeInTheDocument();
   });
 });
+
+describe('AccountsView — restores an in-flight sync after remount', () => {
+  it('resumes the syncing state + polling from connection.activeRun on load', async () => {
+    const activeRun = {
+      runId: 'run-1', connectionId: 'c-bank-1', status: 'running' as const,
+      message: 'Reading balances…', accountsCount: 0, transactionsCount: 0,
+      startedAt: '2026-06-18T10:00:00.000Z',
+    };
+    const runningConn = { ...CONNECTIONS.connections[0]!, lastStatus: 'running', activeRun };
+    installFetchMock({
+      ...FULL,
+      'GET /api/connections': () => ({ connections: [runningConn] }),
+      'GET /api/scrape/run-1': () => ({ run: activeRun }),
+    });
+    render(<AccountsView />);
+    // Without the user clicking Sync, the bank card restores the in-progress
+    // sync (button reads "Syncing…") and resumes polling (the run message shows).
+    expect(await screen.findByText('Syncing…')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText(/reading balances/i)).toBeInTheDocument();
+    });
+  });
+});

@@ -357,6 +357,39 @@ export function AccountsView() {
     }
   }, [pollRun, setSyncForConnection, clearScheduled]);
 
+  // Mirror syncStates into a ref so the restore effect below can read the
+  // current state without listing it as a dependency (which would re-run the
+  // effect on every poll tick).
+  const syncStatesRef = useRef(syncStates);
+  useEffect(() => { syncStatesRef.current = syncStates; }, [syncStates]);
+
+  // Restore an in-flight sync after a remount/navigation. The sync's progress
+  // lives in this screen's local state, so navigating away and back used to
+  // lose it — and the OTP prompt — even though the engine kept syncing (and the
+  // per-connection lock stayed held, so a retry hit "a sync is already
+  // running"). /connections now carries each connection's active run; resume
+  // the running/OTP state + polling for any run we aren't already tracking.
+  useEffect(() => {
+    if (!data) return;
+    for (const conn of data.connections) {
+      const run = conn.activeRun;
+      if (!run || (run.status !== 'running' && run.status !== 'needs-otp')) continue;
+      const cur = syncStatesRef.current[conn.id];
+      const alreadyTracking = cur != null && (
+        cur.kind === 'starting'
+        || ((cur.kind === 'running' || cur.kind === 'needs-otp') && cur.runId === run.runId)
+      );
+      if (alreadyTracking) continue;
+      setSyncForConnection(
+        conn.id,
+        run.status === 'needs-otp'
+          ? { kind: 'needs-otp', runId: run.runId, message: run.message }
+          : { kind: 'running', runId: run.runId, message: run.message },
+      );
+      void pollRun(conn.id, run.runId);
+    }
+  }, [data, pollRun, setSyncForConnection]);
+
   const setHistoryMonths = useCallback(async (connection: Connection, months: number) => {
     // Optimistic update.
     const previous = connection.historyMonths;
