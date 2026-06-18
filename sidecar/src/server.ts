@@ -357,7 +357,13 @@ app.post('/vault/lock', async (_req, reply) => {
 
 app.get('/connections', async (_req, reply) => {
   if (!repo) return reply.code(503).send({ error: 'database unavailable' });
-  return { connections: repo.listConnections() };
+  // Attach each connection's in-flight run (if any) so the web app can restore
+  // sync progress + the OTP prompt after a navigation/remount.
+  const connections = repo.listConnections().map((c) => ({
+    ...c,
+    activeRun: runner?.activeRunFor(c.id) ?? null,
+  }));
+  return { connections };
 });
 
 // Serves an institution's logo, fetched from its own website and cached.
