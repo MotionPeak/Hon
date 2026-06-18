@@ -78,12 +78,25 @@ export class ScrapeRunner {
     return override > 0 ? override : 5 * 60_000;
   }
 
+  /** Overall per-run deadline. A scrape that hangs past this — a stuck browser,
+   *  a library call that never settles — is force-failed via finish('error') so
+   *  the per-connection lock can't stay held until the next process restart.
+   *  Generous (20 min) so it never kills a legitimately long sync; overridable
+   *  via HON_RUN_TIMEOUT_MS for tests. */
+  private runTimeoutMs(): number {
+    const override = Number(process.env.HON_RUN_TIMEOUT_MS);
+    return override > 0 ? override : 20 * 60_000;
+  }
+
   private readonly runs = new Map<string, RunStatus>();
   private readonly otpResolvers = new Map<string, (code: string) => void>();
   // The pending OTP-timeout timers, keyed by runId, so a run that ends for any
   // OTHER reason can clear its timer instead of leaking a 5-minute setTimeout
   // that later fires a spurious otp.timeout and rejects an abandoned promise.
   private readonly otpTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  // Per-run overall deadline timers, keyed by runId. Cleared in finish() so a
+  // run that ends normally doesn't leave a 20-minute setTimeout pending.
+  private readonly runTimers = new Map<string, ReturnType<typeof setTimeout>>();
   // Connection ids with a scrape currently in flight. Guards against a second
   // sync stomping on the same connection's browser/session while the first is
   // still running. Added in start(), cleared in finish() — the single terminal
@@ -105,6 +118,23 @@ export class ScrapeRunner {
     return this.active.has(connectionId);
   }
 
+  /** The in-flight (non-terminal) run for a connection, if any. Lets the web app
+   *  restore sync progress — and the OTP prompt — after a remount/navigation
+   *  without having held onto the runId. Returns undefined when nothing is
+   *  running for the connection. */
+  activeRunFor(connectionId: string): RunStatus | undefined {
+    if (!this.active.has(connectionId)) return undefined;
+    for (const run of this.runs.values()) {
+      if (
+        run.connectionId === connectionId &&
+        (run.status === 'running' || run.status === 'needs-otp')
+      ) {
+        return run;
+      }
+    }
+    return undefined;
+  }
+
   /** Kicks off a scrape and returns its run id immediately. */
   start(args: StartArgs): string {
     const run = this.repo.createRun(args.connectionId);
@@ -120,6 +150,19 @@ export class ScrapeRunner {
     this.runs.set(run.id, status);
     this.active.add(args.connectionId);
     this.repo.setConnectionStatus(args.connectionId, 'running');
+    // Overall deadline backstop: if the run hasn't reached a terminal state by
+    // the timeout, force-finish it so the per-connection lock is released even
+    // when the scrape hangs with no timeout of its own. .unref() so a pending
+    // deadline never keeps the process (or a test) alive on its own.
+    const deadline = setTimeout(() => {
+      const s = this.runs.get(run.id);
+      if (s && (s.status === 'running' || s.status === 'needs-otp')) {
+        runnerLog.error('run.timeout', { runId: run.id, connectionId: args.connectionId });
+        this.finish(s, args.connectionId, 'error', 'Sync timed out');
+      }
+    }, this.runTimeoutMs());
+    deadline.unref?.();
+    this.runTimers.set(run.id, deadline);
     // One log line per scrape kick-off so the lifecycle for a connection
     // is greppable end-to-end. Credentials are logged by field NAME only —
     // never values — so the log never carries usernames/passwords/tokens.
@@ -153,6 +196,7 @@ export class ScrapeRunner {
       });
       this.otpResolvers.delete(status.runId);
       this.clearOtpTimer(status.runId);
+      this.clearRunTimer(status.runId);
       this.active.delete(args.connectionId);
       // Mirror finish()'s minimal terminal state so the connection/run don't
       // appear stuck running. Wrapped because this runs outside execute()'s
@@ -197,6 +241,14 @@ export class ScrapeRunner {
     if (timer) {
       clearTimeout(timer);
       this.otpTimers.delete(runId);
+    }
+  }
+
+  private clearRunTimer(runId: string): void {
+    const timer = this.runTimers.get(runId);
+    if (timer) {
+      clearTimeout(timer);
+      this.runTimers.delete(runId);
     }
   }
 
@@ -562,6 +614,9 @@ export class ScrapeRunner {
     // Clear any armed OTP-timeout timer so a finished run can't fire a spurious
     // otp.timeout up to 5 minutes later (only the user-submit path cleared it).
     this.clearOtpTimer(status.runId);
+    // Clear the overall deadline backstop too, so a run that finishes normally
+    // doesn't leave a pending 20-minute timer (or fire finish() a second time).
+    this.clearRunTimer(status.runId);
     // finish() is the single terminal transition for every run (success and
     // every error/exception path routes here), so clearing the per-connection
     // lock here guarantees it is always released — even on failure (H-7).
