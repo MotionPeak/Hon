@@ -141,6 +141,21 @@ export class ScrapeRunner {
     return undefined;
   }
 
+  /** True if `ticket` matches a still-active run's one-time VNC ticket. Gates
+   *  the /vnc proxy: the noVNC window is reachable only while its run is live. */
+  validateVncTicket(ticket: string): boolean {
+    if (!ticket) return false;
+    for (const run of this.runs.values()) {
+      if (
+        run.vncTicket === ticket &&
+        (run.status === 'running' || run.status === 'needs-otp')
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /** Kicks off a scrape and returns its run id immediately. */
   start(args: StartArgs): string {
     const run = this.repo.createRun(args.connectionId);

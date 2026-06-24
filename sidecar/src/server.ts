@@ -42,6 +42,7 @@ import { rewriteApiPrefix } from './httpRewrite.js';
 import { openDatabase, type DbHandle } from './db.js';
 import { Repo } from './repo.js';
 import { ScrapeRunner } from './runner.js';
+import { registerVncProxy, attachVncUpgrade } from './vncProxy.js';
 import {
   scrapeShufersalGiftCards,
   scrapeBuyMeGiftCards,
@@ -239,6 +240,9 @@ const PUBLIC_ROUTE_EXACT = ['/snaptrade/done', ...PWA_ROOT_FILES.map((f) => `/${
 
 /** True for the small set of GET routes that are exempt from the token. */
 function isPublicRoute(method: string, url: string): boolean {
+  // The /vnc proxy carries its own one-time ticket (validated in vncProxy.ts),
+  // not the bearer token — a directly-opened noVNC tab can't send the header.
+  if (url.startsWith('/vnc')) return true;
   if (method !== 'GET') return false;
   if (url === '/') return true;
   const path = url.split('?')[0];
@@ -298,6 +302,14 @@ app.register(fastifyStatic, {
   prefix: '/assets/',
   cacheControl: true,
   maxAge: '7d',
+});
+
+// Remote sign-in window for captcha pension funds on the headless NAS: proxy
+// /vnc/* to the local websockify (noVNC), gated by the run's one-time ticket.
+const vncPort = Number(process.env.HON_VNC_PORT) || 6080;
+registerVncProxy(app, {
+  upstreamPort: vncPort,
+  validateTicket: (t) => runner?.validateVncTicket(t) ?? false,
 });
 
 app.get('/', async (_req, reply) => reply.type('text/html; charset=utf-8').send(webAppHtml));
@@ -2556,6 +2568,12 @@ async function main(): Promise<void> {
   }
   try {
     await app.listen({ host, port });
+    // noVNC opens wss://…/vnc/websockify — proxy that upgrade to local
+    // websockify, gated by the same one-time ticket as the HTTP half.
+    attachVncUpgrade(app.server, {
+      upstreamPort: vncPort,
+      validateTicket: (t) => runner?.validateVncTicket(t) ?? false,
+    });
     const addr = app.server.address();
     const actualPort = typeof addr === 'object' && addr ? addr.port : port;
     emit({ event: 'ready', port: actualPort, pid: process.pid, version: VERSION });
