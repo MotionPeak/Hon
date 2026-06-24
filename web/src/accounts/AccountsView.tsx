@@ -73,8 +73,8 @@ interface RunStatus {
 type SyncState =
   | { kind: 'idle' }
   | { kind: 'starting' }
-  | { kind: 'running'; runId: string; message: string }
-  | { kind: 'needs-otp'; runId: string; message: string }
+  | { kind: 'running'; runId: string; message: string; signin?: { ticket: string } }
+  | { kind: 'needs-otp'; runId: string; message: string; signin?: { ticket: string } }
   | { kind: 'success'; accountsCount: number; transactionsCount: number }
   | { kind: 'error'; message: string };
 
@@ -279,11 +279,12 @@ export function AccountsView() {
   const pollRun = useCallback(async (connectionId: string, runId: string) => {
     try {
       const { run } = await api<{ run: RunStatus }>(`/scrape/${encodeURIComponent(runId)}`);
+      const signin = run.needsRemoteSignin && run.vncTicket ? { ticket: run.vncTicket } : undefined;
       if (run.status === 'running') {
-        setSyncForConnection(connectionId, { kind: 'running', runId, message: run.message });
+        setSyncForConnection(connectionId, { kind: 'running', runId, message: run.message, signin });
         schedule(connectionId, () => void pollRun(connectionId, runId), SCRAPE_POLL_INTERVAL_MS);
       } else if (run.status === 'needs-otp') {
-        setSyncForConnection(connectionId, { kind: 'needs-otp', runId, message: run.message });
+        setSyncForConnection(connectionId, { kind: 'needs-otp', runId, message: run.message, signin });
         // Keep polling — the OTP modal posts the code, then the run goes
         // back to running and eventually success/error.
         schedule(connectionId, () => void pollRun(connectionId, runId), SCRAPE_POLL_INTERVAL_MS);
@@ -382,11 +383,12 @@ export function AccountsView() {
         || ((cur.kind === 'running' || cur.kind === 'needs-otp') && cur.runId === run.runId)
       );
       if (alreadyTracking) continue;
+      const signin = run.needsRemoteSignin && run.vncTicket ? { ticket: run.vncTicket } : undefined;
       setSyncForConnection(
         conn.id,
         run.status === 'needs-otp'
-          ? { kind: 'needs-otp', runId: run.runId, message: run.message }
-          : { kind: 'running', runId: run.runId, message: run.message },
+          ? { kind: 'needs-otp', runId: run.runId, message: run.message, signin }
+          : { kind: 'running', runId: run.runId, message: run.message, signin },
       );
       void pollRun(conn.id, run.runId);
     }
@@ -858,6 +860,16 @@ function ConnectionCard({ connection, company, accounts, callbacks, showHistory 
               >
                 {syncing ? 'Syncing…' : 'Sync'}
               </button>
+            )}
+            {(syncState.kind === 'running' || syncState.kind === 'needs-otp') && syncState.signin && (
+              <a
+                className="mini primary"
+                href={`/vnc/vnc_lite.html?path=${encodeURIComponent(`vnc/websockify?ticket=${syncState.signin.ticket}`)}&ticket=${encodeURIComponent(syncState.signin.ticket)}&autoconnect=true&resize=remote`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Open sign-in window
+              </a>
             )}
             {connection.hasCredentials && showHistory && (
               <span className="conn-history-label">

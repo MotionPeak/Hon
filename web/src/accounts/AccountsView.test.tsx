@@ -1359,3 +1359,24 @@ describe('AccountsView — restores an in-flight sync after remount', () => {
     });
   });
 });
+
+describe('AccountsView — remote sign-in window', () => {
+  it('shows "Open sign-in window" linking to /vnc with the ticket while a run needs it', async () => {
+    const activeRun = {
+      runId: 'run-9', connectionId: 'c-pen-1', status: 'running' as const,
+      message: 'Waiting for you to finish signing in…', accountsCount: 0,
+      transactionsCount: 0, startedAt: '2026-06-24T10:00:00.000Z',
+      needsRemoteSignin: true, vncTicket: 'tkt-123',
+    };
+    const penConn = { ...CONNECTIONS.connections[3]!, lastStatus: 'running', activeRun };
+    installFetchMock({
+      ...FULL,
+      'GET /api/connections': () => ({ connections: [penConn] }),
+      'GET /api/scrape/run-9': () => ({ run: activeRun }),
+    });
+    render(<AccountsView />);
+    const link = await screen.findByRole('link', { name: /open sign-in window/i });
+    expect(link).toHaveAttribute('href', expect.stringContaining('/vnc/vnc_lite.html'));
+    expect(link).toHaveAttribute('href', expect.stringContaining('ticket=tkt-123'));
+  });
+});
