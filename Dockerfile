@@ -40,9 +40,20 @@ FROM node:22-bookworm-slim
 # downloaded by Puppeteer (which ships no Linux-arm64 build). python3/make/g++
 # compile the native modules (better-sqlite3, node-llama-cpp) when no prebuilt
 # binary matches the host architecture.
+# Plus the virtual-display + VNC stack (xvfb/x11vnc/novnc/websockify) and REAL
+# Chrome (google-chrome-stable) so the captcha pension funds (Meitav/Menora)
+# can render a headful browser on a virtual display and be driven remotely over
+# noVNC — bundled Chromium is more bot-detectable than real Chrome.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       chromium ca-certificates fonts-liberation \
       python3 make g++ \
+      xvfb x11vnc novnc websockify \
+      wget gnupg \
+  && wget -qO- https://dl.google.com/linux/linux_signing_key.pub \
+       | gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg \
+  && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" \
+       > /etc/apt/sources.list.d/google-chrome.list \
+  && apt-get update && apt-get install -y --no-install-recommends google-chrome-stable \
   && rm -rf /var/lib/apt/lists/*
 
 # HON_TOKEN is intentionally unset — it must be supplied at run time (via .env),
@@ -52,6 +63,7 @@ ENV HON_DATA_DIR=/data \
     HON_PORT=4000 \
     HON_HEADLESS=1 \
     HON_BROWSER_NO_SANDBOX=1 \
+    HON_VIRTUAL_DISPLAY=:99 \
     PUPPETEER_SKIP_DOWNLOAD=true \
     PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
@@ -76,7 +88,11 @@ COPY --from=web /build/web/dist /opt/hon/web/dist
 # files (which live at /opt/hon/shared, outside sidecar/).
 RUN ln -sf /opt/hon/sidecar/node_modules /opt/hon/node_modules
 
+# Entrypoint starts Xvfb + x11vnc + websockify(noVNC), then execs the engine.
+COPY docker/entrypoint.sh /usr/local/bin/hon-entrypoint.sh
+RUN chmod +x /usr/local/bin/hon-entrypoint.sh
+
 VOLUME /data
 EXPOSE 4000
 
-CMD ["node", "--import", "tsx", "src/server.ts"]
+CMD ["/usr/local/bin/hon-entrypoint.sh"]
