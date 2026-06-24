@@ -464,6 +464,7 @@ export async function runPensionScrape(
   screenshotPath: string | undefined,
   onOtpNeeded: OtpCallback,
   session?: SessionHandle,
+  onRemoteSignin?: () => void,
 ): Promise<ScrapeOutcome> {
   const fund = FUNDS[companyId];
   if (!fund) return fail('CONFIG', `Unknown pension fund: ${companyId}`);
@@ -584,6 +585,9 @@ export async function runPensionScrape(
           'your ID and phone; you clear the security check and enter the SMS code.',
       );
       void prefillCredentials(page, fund, credentials).catch(() => {});
+      // Signal that a human now needs to drive the (visible) browser — on the
+      // NAS this surfaces the "Open sign-in window" (noVNC) button.
+      onRemoteSignin?.();
       onProgress?.('Waiting for you to finish signing in…');
       const deadline = Date.now() + INTERACTIVE_LOGIN_TIMEOUT_MS;
       let accounts: NormalizedAccount[] = [];

@@ -66,6 +66,8 @@ interface RunStatus {
   transactionsCount: number;
   startedAt: string;
   finishedAt?: string;
+  needsRemoteSignin?: boolean;
+  vncTicket?: string;
 }
 
 type SyncState =

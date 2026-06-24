@@ -16,6 +16,8 @@ export const activeRunSchema = z.object({
   transactionsCount: z.number(),
   startedAt: z.string(),
   finishedAt: z.string().optional(),
+  needsRemoteSignin: z.boolean().optional(),
+  vncTicket: z.string().optional(),
 });
 export type ActiveRun = z.infer<typeof activeRunSchema>;
 

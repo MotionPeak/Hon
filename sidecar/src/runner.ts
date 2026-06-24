@@ -1,5 +1,6 @@
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import type { Repo } from './repo.js';
 import type { Vault } from './vault.js';
 import { isSnapTrade, runSnapTradeSync, SNAPTRADE_COMPANY_ID } from './snaptrade.js';
@@ -55,6 +56,11 @@ export interface RunStatus {
   transactionsCount: number;
   startedAt: string;
   finishedAt?: string;
+  /** True while a captcha pension fund is waiting for the user to sign in via
+   *  the remote (noVNC) window. The UI shows an "Open sign-in window" button. */
+  needsRemoteSignin?: boolean;
+  /** One-time ticket gating the /vnc proxy for this run (set with the flag). */
+  vncTicket?: string;
 }
 
 /**
@@ -369,6 +375,14 @@ export class ScrapeRunner {
           this.prepareScreenshotPath(args.companyId),
           () => this.requestOtp(status),
           session,
+          () => {
+            status.needsRemoteSignin = true;
+            status.vncTicket = randomUUID();
+            runnerLog.info('remote-signin.waiting', {
+              runId: status.runId,
+              connectionId: args.connectionId,
+            });
+          },
         );
       } else if (args.interactive) {
         // Pass the per-connection session through so the bank can trust the
@@ -624,6 +638,8 @@ export class ScrapeRunner {
     status.status = result;
     status.message = message;
     status.finishedAt = new Date().toISOString();
+    status.needsRemoteSignin = false;
+    status.vncTicket = undefined;
     this.repo.updateRun(status.runId, {
       status: result,
       message,
