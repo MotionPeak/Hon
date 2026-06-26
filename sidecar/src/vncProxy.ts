@@ -18,13 +18,26 @@ function ticketOf(url: string): string {
   return new URLSearchParams(url.slice(q + 1)).get('ticket') ?? '';
 }
 
+/** noVNC's vnc_lite.html pulls its JS/CSS via relative URLs that DROP the
+ *  `?ticket=` query — ES-module and stylesheet sub-requests carry no query
+ *  string. So the ticketed page load plants this short cookie (scoped to /vnc)
+ *  and the asset requests that follow authorize against it. Without it every
+ *  sub-resource 403s and the noVNC client never loads (hangs on "Loading"). */
+function cookieTicket(cookieHeader: string | undefined): string {
+  const m = /(?:^|;\s*)vnc_ticket=([^;]+)/.exec(cookieHeader ?? '');
+  return m ? decodeURIComponent(m[1]) : '';
+}
+
 /** HTTP half: proxy GET /vnc/* → 127.0.0.1:<upstreamPort>/* when the ticket is
  *  valid. The noVNC static client (vnc_lite.html, JS, CSS) is served by
  *  websockify's --web, so this just streams it through. */
 export function registerVncProxy(app: FastifyInstance, opts: VncProxyOpts): void {
   app.get('/vnc', (_req, reply) => reply.redirect('/vnc/vnc_lite.html'));
   app.all('/vnc/*', (req, reply) => {
-    if (!opts.validateTicket(ticketOf(req.url))) {
+    // The page load carries the ticket in `?ticket=`; its asset sub-requests
+    // drop the query, so fall back to the cookie planted on that first hit.
+    const queryTicket = ticketOf(req.url);
+    if (!opts.validateTicket(queryTicket || cookieTicket(req.headers.cookie))) {
       reply.code(403).send({ error: 'invalid or expired sign-in ticket' });
       return;
     }
@@ -39,7 +52,14 @@ export function registerVncProxy(app: FastifyInstance, opts: VncProxyOpts): void
         headers: req.headers,
       },
       (proxyRes) => {
-        reply.raw.writeHead(proxyRes.statusCode ?? 502, proxyRes.headers);
+        const headers = { ...proxyRes.headers };
+        // When the ticket arrived in the query (the initial page request),
+        // plant it as a cookie so the ticket-less asset fetches that follow
+        // stay authorized. HttpOnly + Path=/vnc keeps it off the rest of the app.
+        if (queryTicket) {
+          headers['set-cookie'] = [`vnc_ticket=${encodeURIComponent(queryTicket)}; Path=/vnc; HttpOnly; SameSite=Strict`];
+        }
+        reply.raw.writeHead(proxyRes.statusCode ?? 502, headers);
         proxyRes.pipe(reply.raw);
       },
     );
