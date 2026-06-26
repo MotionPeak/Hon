@@ -405,6 +405,14 @@ async function launchPensionBrowser(
     headless,
     defaultViewport: headless ? undefined : null,
     userDataDir: profileDir,
+    // Strip Puppeteer's `--enable-automation` default: it shows the "Chrome is
+    // being controlled by automated test software" infobar AND sets
+    // navigator.webdriver=true, both of which Radware's bot-wall (Menora) and
+    // reCAPTCHA Enterprise (Meitav) fingerprint instantly — so even after the
+    // user solves the hCaptcha the wall keeps re-challenging. Paired with
+    // --disable-blink-features=AutomationControlled (kills the webdriver flag),
+    // this mirrors the stealth the HTZ voucher scraper uses against Cloudflare.
+    ignoreDefaultArgs: ['--enable-automation'],
     args: [
       ...SANDBOX_ARGS,
       '--disable-blink-features=AutomationControlled',
