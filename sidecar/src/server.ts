@@ -32,6 +32,7 @@ import {
   txnExcludedSchema,
   txnSavingsSchema,
   txnLinkSchema,
+  txnDetailsSchema,
 } from '@hon/shared/transaction';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -2021,6 +2022,20 @@ app.patch(
     }
     repo.setTransactionSavings(id, req.body.savings);
     return { ok: true, savings: req.body.savings };
+  },
+);
+
+app.patch(
+  '/transactions/:id/details',
+  { schema: { params: idParamSchema, body: txnDetailsSchema } },
+  async (req, reply) => {
+    if (!repo) return reply.code(503).send({ error: 'database unavailable' });
+    const { id } = req.params;
+    if (!repo.getTransaction(id)) {
+      return reply.code(404).send({ error: 'transaction not found' });
+    }
+    repo.setTransactionDetails(id, req.body);
+    return { ok: true };
   },
 );
 

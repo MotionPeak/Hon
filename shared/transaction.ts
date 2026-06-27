@@ -25,6 +25,8 @@ export const transactionSchema = z.object({
   loanId: z.string().nullable().optional(),
   excludedManual: z.boolean().nullable().optional(),
   savings: z.boolean().nullable().optional(),
+  customTitle: z.string().nullable().optional(),
+  notes: z.string().nullable().optional(),
   // Reimbursement netting (present from GET /transactions; optional so older
   // payloads and test fixtures still parse).
   reimbursedTotal: z.number().optional(),
@@ -56,6 +58,14 @@ export type TxnExcluded = z.infer<typeof txnExcludedSchema>;
 /** PATCH /transactions/:id/savings */
 export const txnSavingsSchema = z.object({ savings: z.boolean() });
 export type TxnSavings = z.infer<typeof txnSavingsSchema>;
+
+/** PATCH /transactions/:id/details — set/clear the display title and/or notes.
+ *  Both optional; null or "" clears. */
+export const txnDetailsSchema = z.object({
+  customTitle: z.string().max(200).nullable().optional(),
+  notes: z.string().max(2000).nullable().optional(),
+});
+export type TxnDetails = z.infer<typeof txnDetailsSchema>;
 
 /** PUT /transactions/:id/link — link `refundId` against this expense. */
 export const txnLinkSchema = z.object({ refundId: z.string().min(1) });
