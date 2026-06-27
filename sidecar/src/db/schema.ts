@@ -300,6 +300,10 @@ export const merchantSplits = sqliteTable('merchant_splits', {
 export const categorySplits = sqliteTable('category_splits', {
   category: text('category').primaryKey(),
   splitCount: integer('split_count').notNull(),
+  // Optional absolute "my share" of the category's recurring charge (e.g. rent
+  // is ₪7,500 but I pay ₪2,250). When set it overrides the equal split_count
+  // divisor everywhere the bill's amount is used. NULL = fall back to ÷N.
+  shareAmount: real('share_amount'),
   createdAt: text('created_at').notNull(),
 });
 

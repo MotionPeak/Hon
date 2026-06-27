@@ -11,7 +11,7 @@
 // migration here, mirror the change in ./schema.ts; the schema-parity test
 // (tests/schema.parity.test.ts) fails if they drift.
 
-export const SCHEMA_VERSION = 42;
+export const SCHEMA_VERSION = 43;
 
 export const MIGRATIONS: { version: number; sql: string }[] = [
   {
@@ -977,5 +977,12 @@ export const MIGRATIONS: { version: number; sql: string }[] = [
     // every time (see scrapeWindow.pickScrapeStartDate).
     version: 42,
     sql: `ALTER TABLE connections ADD COLUMN fetched_since TEXT;`,
+  },
+  {
+    // Optional absolute "my share" override for a split category — for uneven
+    // splits the integer split_count can't express (rent ₪7,500, I pay ₪2,250).
+    // NULL keeps the ÷split_count behaviour.
+    version: 43,
+    sql: `ALTER TABLE category_splits ADD COLUMN share_amount REAL;`,
   },
 ];
