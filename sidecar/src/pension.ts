@@ -434,7 +434,14 @@ async function launchPensionBrowser(
     browser = await puppeteer.launch(launchOptions);
   }
   const page = await browser.newPage();
-  await page.setUserAgent(USER_AGENT);
+  // Only spoof the UA for the headless bundled-Chromium funds (whose native UA
+  // says "HeadlessChrome" and gets blocked). For the captcha-walled real-Chrome
+  // path (profileDir set) DON'T override it: the macOS USER_AGENT contradicts
+  // the real Linux platform / TLS / Sec-CH-UA-Platform client hints, and that
+  // mismatch is a hard bot signal — Radware (Menora) saw the session flip
+  // between the genuine Linux UA and the spoofed macOS one and walled it. Real
+  // Chrome's own UA is internally consistent, so leave it untouched.
+  if (!profileDir) await page.setUserAgent(USER_AGENT);
   if (headless) await page.setViewport({ width: 1280, height: 900 });
   await page.setExtraHTTPHeaders({ 'Accept-Language': 'he-IL,he;q=0.9,en;q=0.8' });
   // tsx/esbuild rewrites this file's functions with a `__name` helper. When a
