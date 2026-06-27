@@ -76,6 +76,10 @@ export const transactions = sqliteTable('transactions', {
   // Tri-state: null = follow the live rule, true/false = explicit override.
   excludedManual: integer('excluded_manual', { mode: 'boolean' }),
   savings: integer('savings', { mode: 'boolean' }),
+  // User-set display title (shows in place of `description`, which stays the
+  // grouping/categorization key) and free-form notes. Both nullable.
+  customTitle: text('custom_title'),
+  notes: text('notes'),
 });
 
 export const scrapeRuns = sqliteTable('scrape_runs', {

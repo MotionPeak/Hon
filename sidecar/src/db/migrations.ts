@@ -11,7 +11,7 @@
 // migration here, mirror the change in ./schema.ts; the schema-parity test
 // (tests/schema.parity.test.ts) fails if they drift.
 
-export const SCHEMA_VERSION = 43;
+export const SCHEMA_VERSION = 44;
 
 export const MIGRATIONS: { version: number; sql: string }[] = [
   {
@@ -984,5 +984,14 @@ export const MIGRATIONS: { version: number; sql: string }[] = [
     // NULL keeps the ÷split_count behaviour.
     version: 43,
     sql: `ALTER TABLE category_splits ADD COLUMN share_amount REAL;`,
+  },
+  {
+    // Per-transaction user display title + notes (cosmetic; description stays
+    // the grouping/categorization key).
+    version: 44,
+    sql: `
+      ALTER TABLE transactions ADD COLUMN custom_title TEXT;
+      ALTER TABLE transactions ADD COLUMN notes TEXT;
+    `,
   },
 ];
