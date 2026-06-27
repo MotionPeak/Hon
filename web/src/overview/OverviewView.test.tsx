@@ -206,12 +206,14 @@ describe('OverviewView', () => {
     }));
     renderOverview();
     const card = await screen.findByTestId('balance-card');
-    // net = income(12000) − committedDisplay(5100) − spent(1200) = 5700
-    expect((card.querySelector('.balance-num') as HTMLElement).textContent).toMatch(/5,?700/);
-    // committed line shows 5,100 (predicted 3,000 + essential 2,100), not 7,500.
-    // Scope to the headline breakdown — the projection line below also shows 5,100.
-    const line = card.querySelector('.balance-line') as HTMLElement;
-    expect(within(line).getByText(/5,?100/)).toBeInTheDocument();
+    // freeNet = income(12000) − committedDisplay(5100) − spent(1200) = 5700
+    // The new hero is the projected bank balance; "free to spend" shows freeNet.
+    const freeRow = card.querySelector('.balance-free') as HTMLElement;
+    expect(freeRow.textContent).toMatch(/5,?700/);
+    // The details block shows "Fixed + essentials still due" driven by predictedFixed=3000.
+    // (fixedDueNotYetPosted uses the merchant rows — RENT ₪3000 not yet posted this cycle.)
+    const details = card.querySelector('[data-testid="bank-projection"]') as HTMLElement;
+    expect(within(details).getByText(/3,?000/)).toBeInTheDocument();
   });
 
   it('falls back to posted committed when the recurring fetch fails', async () => {
@@ -221,8 +223,11 @@ describe('OverviewView', () => {
     renderOverview();
     const card = await screen.findByTestId('balance-card');
     // recurring failed → committedDisplay = variable.committed (7500);
-    // net = 12000 − 7500 − 1200 = 3300
-    expect((card.querySelector('.balance-num') as HTMLElement).textContent).toMatch(/3,?300/);
+    // freeNet = 12000 − 7500 − 1200 = 3300
+    // When recurring fails, merchant rows are empty so fixedDueNotYetPosted=0.
+    // The hero (.balance-num) shows futureBank; freeNet is in .balance-free.
+    const freeRow = card.querySelector('.balance-free') as HTMLElement;
+    expect(freeRow.textContent).toMatch(/3,?300/);
   });
 
   it('adds an "Owed to you (Splitwise)" line to the projection and end balance', async () => {
@@ -299,16 +304,22 @@ describe('OverviewView', () => {
     expect(within(card as HTMLElement).getByText('4 accounts · 1 asset')).toBeInTheDocument();
   });
 
-  it('renders the "this month" balance headline (income - committed - spent)', async () => {
+  it('renders the projected checking balance hero and the mode picker', async () => {
     installFetchMock(mocks());
     renderOverview();
-    // 12000 - 7500 - 1200 = 3300
     const card = await screen.findByTestId('balance-card');
-    const headline = card.querySelector('.balance-num') as HTMLElement;
-    expect(headline.textContent).toMatch(/3,?300/);
+    // New hero: "Projected checking balance" (not "This month")
+    expect(card.querySelector('.balance-head')!.textContent).toBe('Projected checking balance');
+    // The projection-picker renders two tabs
+    const picker = await screen.findByTestId('projection-picker');
+    expect(within(picker).getByRole('tab', { name: 'Committed' })).toBeInTheDocument();
+    expect(within(picker).getByRole('tab', { name: '+ Variable budget' })).toBeInTheDocument();
+    // "Free to spend this month" row still present (freeNet = 12000 - 7500 - 1200 = 3300)
+    const freeRow = card.querySelector('.balance-free') as HTMLElement;
+    expect(freeRow.textContent).toMatch(/3,?300/);
   });
 
-  it('marks the balance card red when committed > income (in the red)', async () => {
+  it('marks the "free to spend" row red when committed > income (in the red)', async () => {
     installFetchMock(mocks({
       'GET /api/budget': () => ({
         ...FULL_BUDGET,
@@ -316,11 +327,13 @@ describe('OverviewView', () => {
       }),
     }));
     renderOverview();
-    // 5000 - 7500 - 1200 = -3700
+    // freeNet = 5000 - 7500 - 1200 = -3700
     const card = await screen.findByTestId('balance-card');
-    const headline = card.querySelector('.balance-num') as HTMLElement;
-    expect(headline.textContent).toMatch(/3,?700/);
-    expect(headline.className).toMatch(/\bbad\b/);
+    const freeRow = card.querySelector('.balance-free') as HTMLElement;
+    expect(freeRow.textContent).toMatch(/3,?700/);
+    // The amount span inside .balance-free carries 'bad' when freeNet < 0
+    const amtSpan = freeRow.querySelector('span:last-child') as HTMLElement;
+    expect(amtSpan.className).toMatch(/\bbad\b/);
   });
 
   it('shows the empty state when there are no accounts or budget data', async () => {
@@ -334,7 +347,7 @@ describe('OverviewView', () => {
     expect(await screen.findByText(/nothing here yet/i)).toBeInTheDocument();
   });
 
-  it('renders the projected bank balance: bankNow + income − committed − spent − piggy', async () => {
+  it('renders the projected bank balance and details breakdown', async () => {
     installFetchMock(mocks({
       'GET /api/budget': () => ({
         ...FULL_BUDGET,
@@ -342,15 +355,18 @@ describe('OverviewView', () => {
       }),
     }));
     renderOverview();
-    const card = await screen.findByTestId('bank-projection');
-    // bankNow = 15000 + 1000 = 16000 (card account excluded)
-    // change = 12000 − 7500 − 1200 − 500 = 2800
-    // end = 16000 + 2800 = 18800
-    expect(within(card).getByText(/18,?800/)).toBeInTheDocument();
-    // The change delta is shown as +2,800
-    expect(within(card).getByText(/2,?800/)).toBeInTheDocument();
-    // And the starting "Bank balance now" row is 16,000.
-    expect(within(card).getByText(/16,?000/)).toBeInTheDocument();
+    // bank-projection testid is now the details div inside the card.
+    const details = await screen.findByTestId('bank-projection');
+    // "Bank balance now" row: bankNow = 15000 + 1000 = 16000 (card account excluded)
+    expect(within(details).getByText(/16,?000/)).toBeInTheDocument();
+    // Set-asides (piggies) row shows 500
+    expect(within(details).getByText(/500/)).toBeInTheDocument();
+    // The hero (.balance-num on the balance-card) shows the projected futureBank.
+    // bankNow=16000, incomeStillExpected=12000 (no income posted this cycle),
+    // fixedDueNotYetPosted=5400 (RENT from recurring), piggies=500
+    // futureBank = 16000 + 12000 − 5400 − 500 = 22100
+    const balanceCard = await screen.findByTestId('balance-card');
+    expect((balanceCard.querySelector('.balance-num') as HTMLElement).textContent).toMatch(/22,?100/);
   });
 
   it('excludes excluded bank accounts and non-ILS accounts from bank-now', async () => {

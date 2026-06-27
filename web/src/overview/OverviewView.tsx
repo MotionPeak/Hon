@@ -20,6 +20,10 @@ import { isExcludedFromCycle } from '../activity/excluded';
 import { buildPieCats, savedThisCycle } from './spend';
 import { SpendingCard } from './SpendingCard';
 import { BudgetCard } from './BudgetCard';
+import { projectBank, classifyAccounts, type ProjectionMode } from './bankProjection';
+import { loadProjectionMode, saveProjectionMode } from './projectionMode';
+import { projectVariable } from './projectedVariable';
+import type { MerchantRow } from '../recurring/helpers';
 
 /**
  * Builds the `/budget` query path, scoping it to the user's billing-cycle
@@ -175,6 +179,29 @@ export function OverviewView() {
     [recurring, settings.monthStartDay, settings.projectRecurring],
   );
 
+  // Recurring rows (override-aware) for the bank projection's "fixed due" term.
+  const merchantRows = useMemo(
+    () => (recurring ? detectMerchants(recurring, settings.monthStartDay).rows : []),
+    [recurring, settings.monthStartDay],
+  );
+
+  // The variable allowance still "left to spend" (the Budget card's figure);
+  // the projection reserves it only in "+ Variable budget" mode.
+  const variableLeftToSpend = useMemo(() => {
+    const vv = budget?.variable;
+    if (!vv) return 0;
+    const ess = (budget?.essentials ?? []).filter((l) => (l.budget ?? 0) > 0 || l.spent > 0);
+    const essTotal = ess.reduce((s, l) => s + (l.budget ?? 0), 0);
+    const pv = projectVariable(
+      {
+        income: vv.income, spent: vv.spent, essentialSpent: vv.essentialSpent,
+        fixedSpent: vv.fixedSpent, piggyFunded: vv.piggyFunded, savings: vv.savings,
+      },
+      essTotal, predictedFixed, settings.projectRecurring,
+    );
+    return Math.max(0, pv.allowed);
+  }, [budget, predictedFixed, settings.projectRecurring]);
+
   if (summary === null) return <DelayedLoader />;
 
   const v = budget?.variable;
@@ -229,6 +256,10 @@ export function OverviewView() {
             currency={budget!.currency}
             companies={companies}
             accounts={accounts}
+            transactions={recurring?.transactions ?? []}
+            rows={merchantRows}
+            monthStartDay={settings.monthStartDay}
+            variableLeftToSpend={variableLeftToSpend}
           />
         )}
         <NetWorthCard summary={summary} />
@@ -270,127 +301,130 @@ export function OverviewView() {
 }
 
 function BalanceCard({
-  variable, committedDisplay, currency, companies, accounts,
+  variable, committedDisplay, currency, companies, accounts, transactions, rows,
+  monthStartDay, variableLeftToSpend,
 }: {
   variable: BudgetVariable;
   committedDisplay: number;
   currency: string;
   companies: Company[];
   accounts: Account[];
+  transactions: Transaction[];
+  rows: MerchantRow[];
+  monthStartDay: number;
+  variableLeftToSpend: number;
 }) {
-  const { income, spent } = variable;
-  if (income <= 0 && committedDisplay <= 0 && spent <= 0) return null;
-  const net = income - committedDisplay - spent;
-  const positive = net >= 0;
-  const cls = positive ? 'good' : 'bad';
-  const sign = positive ? '+' : '−';
-  const cap = positive
-    ? 'free this month after fixed, essentials and variable spend so far'
-    : "short of what this month's commitments need";
-  return (
-    <section className="card balance-card" data-testid="balance-card">
-      <div className="balance-head">This month</div>
-      <div className={`balance-num ${cls}`}>
-        {sign}{money(Math.abs(net), currency)}
-      </div>
-      <div className="balance-cap">{cap}</div>
-      <div className="balance-line">
-        <span className="bli"><span>Income</span> <b>{money(income, currency)}</b></span>
-        <span className="balance-sep">−</span>
-        <span className="bli"><span>Expected fixed + essentials</span> <b>{money(committedDisplay, currency)}</b></span>
-        {spent > 0 && (
-          <>
-            <span className="balance-sep">−</span>
-            <span className="bli"><span>Variable spent</span> <b>{money(spent, currency)}</b></span>
-          </>
-        )}
-      </div>
-      <BankProjection
-        variable={variable}
-        committedDisplay={committedDisplay}
-        currency={currency}
-        companies={companies}
-        accounts={accounts}
-      />
-    </section>
-  );
-}
-
-function BankProjection({
-  variable, committedDisplay, currency, companies, accounts,
-}: {
-  variable: BudgetVariable;
-  committedDisplay: number;
-  currency: string;
-  companies: Company[];
-  accounts: Account[];
-}) {
-  // Hook must run before the early return below — money friends owe the user
-  // (same-currency, positive) is incoming, so it lifts the end-of-cycle balance.
   const sw = useSplitwise();
+  const [mode, setMode] = useState<ProjectionMode>(loadProjectionMode());
+  const setModePersist = (m: ProjectionMode) => { setMode(m); saveProjectionMode(m); };
+
+  const { income, spent } = variable;
+  // All hooks are above; these guards are safe below them.
+  if (income <= 0 && committedDisplay <= 0 && spent <= 0) return null;
+
   const bankCompanyIds = new Set(
     companies.filter((c) => c.type === 'bank').map((c) => c.id),
   );
   const bankAccounts = accounts.filter(
     (a) => !a.excluded && a.currency === 'ILS' && bankCompanyIds.has(a.companyId),
   );
-  if (bankAccounts.length === 0) return null;
-
   const owed = sw.connected
-    ? owedByFriend(sw.links)
-        .filter((f) => f.currency === currency)
-        .reduce((s, f) => s + f.owed, 0)
+    ? owedByFriend(sw.links).filter((f) => f.currency === currency).reduce((s, f) => s + f.owed, 0)
     : 0;
-  const bankNow = bankAccounts.reduce((s, a) => s + (a.balance ?? 0), 0);
-  const expectedIncome = variable.income;
-  const fixedEss = committedDisplay; // predicted fixed-this-cycle + posted essentials
-  const cycleVariable = variable.spent;
-  const cyclePiggy = Math.max(0, variable.piggyFunded ?? 0);
-  const change = expectedIncome - fixedEss - cycleVariable - cyclePiggy + owed;
-  const endBalance = bankNow + change;
-  const up = change >= 0;
-  const sign = up ? '+' : '−';
-  const dcls = up ? 'good' : 'bad';
+  const freeNet = income - committedDisplay - spent;
 
-  const Detail = ({ label, amount, tone }: {
-    label: string; amount: number; tone: 'good' | 'bad';
-  }) => {
-    const dSign = amount === 0 ? '' : tone === 'good' ? '+' : '−';
-    const toneClass = amount === 0 ? '' : tone;
+  // No bank balance to project from → keep the legacy "free this month" hero so
+  // the card still says something useful.
+  if (bankAccounts.length === 0) {
+    const positive = freeNet >= 0;
     return (
-      <div className="balance-detail">
-        <span>{label}</span>
-        <span className={`balance-detail-amt ${toneClass}`}>
-          {dSign}{money(Math.abs(amount), currency)}
-        </span>
-      </div>
+      <section className="card balance-card" data-testid="balance-card">
+        <div className="balance-head">This month</div>
+        <div className={`balance-num ${positive ? 'good' : 'bad'}`}>
+          {positive ? '+' : '−'}{money(Math.abs(freeNet), currency)}
+        </div>
+        <div className="balance-cap">
+          free this month after fixed, essentials and variable spend so far
+        </div>
+      </section>
     );
-  };
+  }
+
+  const bankNow = bankAccounts.reduce((s, a) => s + (a.balance ?? 0), 0);
+  // PRECONDITION of projectBank: exclude transactions from excluded accounts.
+  const excludedIds = new Set(accounts.filter((a) => a.excluded).map((a) => a.id));
+  const proj = projectBank({
+    transactions: transactions.filter((t) => !excludedIds.has(t.accountId)),
+    accountType: classifyAccounts(accounts, companies),
+    bankNow,
+    expectedIncome: income,
+    owed,
+    piggies: Math.max(0, variable.piggyFunded ?? 0),
+    variableLeftToSpend,
+    rows,
+    monthStartDay,
+    mode,
+  });
 
   return (
-    <div className="balance-sub" data-testid="bank-projection">
-      <div className="balance-sub-head">Projected bank balance at end of cycle</div>
-      <div className="balance-sub-row">
-        <div className="balance-sub-num">{money(endBalance, currency)}</div>
-        <div className={`balance-sub-delta ${dcls}`}>
-          {sign}{money(Math.abs(change), currency)}
-        </div>
+    <section className="card balance-card" data-testid="balance-card">
+      <div className="balance-head">Projected checking balance</div>
+      <div className={`balance-num ${proj.futureBank >= 0 ? 'good' : 'bad'}`}>
+        {money(proj.futureBank, currency)}
       </div>
-      <div className="balance-details">
+      <div className="balance-cap">after income lands &amp; this cycle's bills clear</div>
+
+      <div className="proj-picker" role="tablist" data-testid="projection-picker">
+        <button
+          type="button" role="tab" aria-selected={mode === 'committed'}
+          className={`proj-tab${mode === 'committed' ? ' on' : ''}`}
+          onClick={() => setModePersist('committed')}
+        >Committed</button>
+        <button
+          type="button" role="tab" aria-selected={mode === 'budget'}
+          className={`proj-tab${mode === 'budget' ? ' on' : ''}`}
+          onClick={() => setModePersist('budget')}
+        >+ Variable budget</button>
+      </div>
+
+      <div className="balance-details" data-testid="bank-projection">
         <div className="balance-detail balance-detail-baseline">
           <span>Bank balance now</span>
           <span className={`balance-detail-amt ${bankNow >= 0 ? 'good' : 'bad'}`}>
             {money(bankNow, currency)}
           </span>
         </div>
-        <Detail label="Income expected this cycle" amount={expectedIncome} tone="good" />
-        {owed > 0 && (
-          <Detail label="Owed to you (Splitwise)" amount={owed} tone="good" />
+        <Detail label="Income still expected" amount={proj.incomeStillExpected} tone="good" currency={currency} />
+        {owed > 0 && <Detail label="Owed to you (Splitwise)" amount={owed} tone="good" currency={currency} />}
+        <Detail label="Fixed + essentials still due" amount={proj.fixedDueNotYetPosted} tone="bad" currency={currency} />
+        <Detail label="Card spend still to bill" amount={proj.cardSpendThisCycle} tone="bad" currency={currency} />
+        {mode === 'budget' && (
+          <Detail label="Variable budget left" amount={proj.variableLeftToSpend} tone="bad" currency={currency} />
         )}
-        <Detail label="Fixed + essentials this cycle" amount={fixedEss} tone="bad" />
-        <Detail label="Variable spent so far" amount={cycleVariable} tone="bad" />
-        <Detail label="Set asides (piggies)" amount={cyclePiggy} tone="bad" />
+        <Detail label="Set-asides (piggies)" amount={proj.piggies} tone="bad" currency={currency} />
       </div>
+
+      <div className="balance-free">
+        <span>Free to spend this month</span>
+        <span className={freeNet >= 0 ? 'good' : 'bad'}>
+          {freeNet >= 0 ? '+' : '−'}{money(Math.abs(freeNet), currency)}
+        </span>
+      </div>
+    </section>
+  );
+}
+
+function Detail({ label, amount, tone, currency }: {
+  label: string; amount: number; tone: 'good' | 'bad'; currency: string;
+}) {
+  const dSign = amount === 0 ? '' : tone === 'good' ? '+' : '−';
+  const toneClass = amount === 0 ? '' : tone;
+  return (
+    <div className="balance-detail">
+      <span>{label}</span>
+      <span className={`balance-detail-amt ${toneClass}`}>
+        {dSign}{money(Math.abs(amount), currency)}
+      </span>
     </div>
   );
 }
