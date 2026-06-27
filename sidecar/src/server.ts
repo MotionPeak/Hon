@@ -37,12 +37,13 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { timingSafeEqual } from 'node:crypto';
+import { timingSafeEqual, randomUUID } from 'node:crypto';
 import { rewriteApiPrefix } from './httpRewrite.js';
 import { openDatabase, type DbHandle } from './db.js';
 import { Repo } from './repo.js';
 import { ScrapeRunner } from './runner.js';
 import { registerVncProxy, attachVncUpgrade } from './vncProxy.js';
+import { matchesLiveHtzTicket } from './htzTicket.js';
 import { registerCategorySplitRoutes } from './categorySplitRoutes.js';
 import {
   scrapeShufersalGiftCards,
@@ -314,12 +315,17 @@ app.register(fastifyStatic, {
   maxAge: '7d',
 });
 
-// Remote sign-in window for captcha pension funds on the headless NAS: proxy
-// /vnc/* to the local websockify (noVNC), gated by the run's one-time ticket.
+// Remote sign-in window for captcha pension funds AND Hi-Tech Zone voucher
+// syncs on the headless NAS: proxy /vnc/* to the local websockify (noVNC),
+// gated by a one-time ticket. A ticket is valid while it matches a live scrape
+// run (pension/bank) OR a live HTZ voucher sync awaiting remote sign-in.
 const vncPort = Number(process.env.HON_VNC_PORT) || 6080;
+function vncTicketValid(t: string): boolean {
+  return (runner?.validateVncTicket(t) ?? false) || matchesLiveHtzTicket(htzSyncs.values(), t);
+}
 registerVncProxy(app, {
   upstreamPort: vncPort,
-  validateTicket: (t) => runner?.validateVncTicket(t) ?? false,
+  validateTicket: vncTicketValid,
 });
 
 app.get('/', async (_req, reply) => reply.type('text/html; charset=utf-8').send(webAppHtml));
@@ -1761,6 +1767,13 @@ interface HtzSync {
    *  op (every op throws after browser.close, which falls into the
    *  scraper's catch and exits cleanly). */
   browser?: import('puppeteer').Browser;
+  /** True while the visible Chrome is up and the user must solve the
+   *  Cloudflare/reCAPTCHA. On a headless NAS the web modal turns this into an
+   *  "Open sign-in window" button (the same noVNC flow captcha pensions use). */
+  needsRemoteSignin?: boolean;
+  /** One-time ticket gating the /vnc proxy for this sync (minted with the flag,
+   *  cleared when the sync finishes/cancels — see vncTicketValid). */
+  vncTicket?: string;
 }
 
 const htzSyncs = new Map<string, HtzSync>();
@@ -1809,6 +1822,12 @@ app.post('/vouchers/sync/htzone/start', async (req, reply) => {
         // Stash the browser so /cancel can close it. The handle lives on
         // the in-memory sync state and is cleared in the finally below.
         onBrowserReady: (browser) => { state.browser = browser; },
+        // The captcha window is up — mint a one-time noVNC ticket so a headless
+        // NAS user can open the sign-in window and solve it themselves.
+        onRemoteSignin: () => {
+          state.needsRemoteSignin = true;
+          state.vncTicket = randomUUID();
+        },
       });
       // If the user (or the cleanup interval) cancelled between scrape
       // start and now, do NOT persist the result. The state has already
@@ -1846,6 +1865,10 @@ app.post('/vouchers/sync/htzone/start', async (req, reply) => {
       // /cancel calling browser.close); drop the ref so the cleanup
       // interval can GC the whole entry without holding a dead Browser.
       state.browser = undefined;
+      // The sign-in window is gone — retire the noVNC ticket so it can no
+      // longer reach the proxy, and hide the button on any final status poll.
+      state.needsRemoteSignin = false;
+      state.vncTicket = undefined;
     }
   })();
 
@@ -1862,6 +1885,8 @@ app.get('/vouchers/sync/htzone/status/:id', async (req, reply) => {
     error: state.error ?? null,
     vouchers: state.vouchers ?? null,
     finished: !!state.finished,
+    needsRemoteSignin: !!state.needsRemoteSignin,
+    vncTicket: state.vncTicket ?? null,
   };
 });
 
@@ -2552,7 +2577,7 @@ async function main(): Promise<void> {
     // websockify, gated by the same one-time ticket as the HTTP half.
     attachVncUpgrade(app.server, {
       upstreamPort: vncPort,
-      validateTicket: (t) => runner?.validateVncTicket(t) ?? false,
+      validateTicket: vncTicketValid,
     });
     const addr = app.server.address();
     const actualPort = typeof addr === 'object' && addr ? addr.port : port;

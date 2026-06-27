@@ -454,6 +454,10 @@ interface SyncStatus {
   error: string | null;
   vouchers: { id: string; name: string; balance: number; currency: string }[] | null;
   finished: boolean;
+  /** Set by captcha-walled providers (Hi-Tech Zone) on a headless NAS: the
+   *  sign-in window is rendered remotely and reachable via the noVNC ticket. */
+  needsRemoteSignin?: boolean;
+  vncTicket?: string | null;
 }
 
 interface ProviderConfig {
@@ -753,6 +757,20 @@ function ProviderSyncDialog({
               <p className="vc-sync-msg">
                 {status?.message || cfg.workingMessage}
               </p>
+              {status?.needsRemoteSignin && status?.vncTicket && (
+                <div className="form-actions">
+                  <a
+                    className="btn-primary"
+                    href={`/vnc/vnc_lite.html?path=${encodeURIComponent(
+                      `vnc/websockify?ticket=${status.vncTicket}`,
+                    )}&ticket=${encodeURIComponent(status.vncTicket)}&autoconnect=true&resize=remote`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Open sign-in window
+                  </a>
+                </div>
+              )}
               <div className="form-actions">
                 <button type="button" className="btn-ghost" onClick={cancel}>
                   Cancel

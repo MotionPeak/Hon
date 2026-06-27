@@ -1193,6 +1193,11 @@ export interface HitechZoneScrapeOptions {
    *  the caller is the signal that aborts the scrape — every Puppeteer
    *  op after that throws and the function returns through its catch. */
   onBrowserReady?: (browser: Browser) => void;
+  /** Fired once the visible browser is up and the user must interact with the
+   *  Cloudflare/reCAPTCHA. On a headless NAS the caller turns this into the
+   *  remote sign-in (noVNC) ticket + button so the user can reach the window
+   *  rendered on the container's virtual display. */
+  onRemoteSignin?: () => void;
 }
 
 export async function scrapeHitechZoneBalance(
@@ -1270,6 +1275,9 @@ export async function scrapeHitechZoneBalance(
   // catch block then returns and the server's IIFE finishes cleanly
   // without writing a voucher the user cancelled.
   try { options.onBrowserReady?.(browser); } catch { /* never let a caller's bookkeeping break the scrape */ }
+  // The window is now up and the user must solve the captcha — signal remote
+  // sign-in so a headless NAS can surface the noVNC window + button.
+  try { options.onRemoteSignin?.(); } catch { /* never let a caller's bookkeeping break the scrape */ }
   let page: Page | undefined;
   try {
     page = await browser.newPage();
