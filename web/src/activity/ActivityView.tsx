@@ -96,6 +96,7 @@ function txnMatchesSearch(
   if (!q) return true;
   if ((t.description || '').toLowerCase().includes(q)) return true;
   if ((t.customTitle || '').toLowerCase().includes(q)) return true;
+  if ((t.notes || '').toLowerCase().includes(q)) return true;
   if ((t.category || '').toLowerCase().includes(q)) return true;
   if (t.date && t.date.includes(q)) return true;
   const acct = accounts.get(t.accountId);

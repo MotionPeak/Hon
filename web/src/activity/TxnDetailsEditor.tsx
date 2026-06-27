@@ -45,7 +45,7 @@ export function TxnDetailsEditor({ transaction }: { transaction: Transaction }) 
         className="btn-primary"
         disabled={!dirty || mutation.isPending}
         onClick={onSave}
-      >{mutation.isPending ? 'Saving…' : 'Save'}</button>
+      >{mutation.isPending ? 'Saving…' : 'Save title & notes'}</button>
     </div>
   );
 }

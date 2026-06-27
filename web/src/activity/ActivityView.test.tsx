@@ -196,9 +196,7 @@ describe('ActivityView — category move', () => {
     await user.click(within(sidebar).getByRole('button', { name: /Groceries/ }));
     // No network call yet — tile click is selection only.
     expect(patch).not.toHaveBeenCalled();
-    // Two "Save" buttons: details editor (disabled, no changes) + category save. Click category save.
-    const [, categorySaveBtn] = within(sidebar).getAllByRole('button', { name: /^save$/i });
-    await user.click(categorySaveBtn);
+    await user.click(within(sidebar).getByRole('button', { name: /^save$/i }));
     await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
     expect(patch.mock.calls[0]?.[0]).toEqual({
       category: 'Groceries',
@@ -216,9 +214,7 @@ describe('ActivityView — category move', () => {
     // the user picks a different tile.
     await user.click(await screen.findByText('Aroma Coffee'));
     const sidebar = screen.getByRole('dialog', { name: /move to category/i });
-    // Two "Save" buttons: details editor + category save. Category save is the second.
-    const [, categorySaveBtn] = within(sidebar).getAllByRole('button', { name: /^save$/i });
-    expect(categorySaveBtn).toBeDisabled();
+    expect(within(sidebar).getByRole('button', { name: /^save$/i })).toBeDisabled();
   });
 
   it('close (X) closes the sidebar without calling the engine', async () => {
@@ -249,8 +245,7 @@ describe('ActivityView — always categorize + billing frequency', () => {
     await user.click(within(sidebar).getByRole('checkbox', {
       name: /always categorize transactions from this business this way/i,
     }));
-    const [, categorySaveBtn] = within(sidebar).getAllByRole('button', { name: /^save$/i });
-    await user.click(categorySaveBtn);
+    await user.click(within(sidebar).getByRole('button', { name: /^save$/i }));
     await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
     expect(patch.mock.calls[0]?.[0]).toEqual({
       category: 'Groceries',
@@ -264,8 +259,7 @@ describe('ActivityView — always categorize + billing frequency', () => {
     renderView();
     await user.click(await screen.findByText('Aroma Coffee'));
     const sidebar = screen.getByRole('dialog', { name: /move to category/i });
-    // Two "Save" buttons: details editor + category save. Category save is the second.
-    const [, saveBtn] = within(sidebar).getAllByRole('button', { name: /^save$/i });
+    const saveBtn = within(sidebar).getByRole('button', { name: /^save$/i });
     expect(saveBtn).toBeDisabled();
     await user.click(within(sidebar).getByRole('checkbox', {
       name: /always categorize/i,
@@ -315,8 +309,7 @@ describe('ActivityView — always categorize + billing frequency', () => {
     const sidebar = screen.getByRole('dialog', { name: /move to category/i });
     await user.click(within(sidebar).getByRole('button', { name: /Utilities/ }));
     await user.click(within(sidebar).getByRole('radio', { name: 'Bimonthly' }));
-    const [, categorySaveBtn] = within(sidebar).getAllByRole('button', { name: /^save$/i });
-    await user.click(categorySaveBtn);
+    await user.click(within(sidebar).getByRole('button', { name: /^save$/i }));
     await waitFor(() => expect(put).toHaveBeenCalledTimes(1));
     expect(put.mock.calls[0]?.[0]).toEqual({
       key: 'aroma coffee', frequency: 'bimonthly',
@@ -351,8 +344,7 @@ describe('ActivityView — always categorize + billing frequency', () => {
     await user.click(await screen.findByText('Aroma Coffee'));
     const sidebar = screen.getByRole('dialog', { name: /move to category/i });
     await user.click(within(sidebar).getByRole('button', { name: /Groceries/ }));
-    const [, categorySaveBtn] = within(sidebar).getAllByRole('button', { name: /^save$/i });
-    await user.click(categorySaveBtn);
+    await user.click(within(sidebar).getByRole('button', { name: /^save$/i }));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: /move to category/i })).not.toBeInTheDocument());
     expect(put).not.toHaveBeenCalled();
   });
@@ -951,6 +943,27 @@ describe('ActivityView — custom titles and notes', () => {
     await screen.findByText('Lunch');
     await user.type(screen.getByPlaceholderText(/search transactions/i), 'SUPERPHARM');
     expect(await screen.findByText('Lunch')).toBeInTheDocument();
+  });
+
+  it('searching the notes finds the row', async () => {
+    const user = userEvent.setup();
+    const dentistTxn = {
+      ...notedTxn, id: 't-dentist', externalId: 'xd',
+      description: 'Clinic Smile', notes: 'dentist appointment',
+    };
+    installFetchMock({
+      ...FULL,
+      'GET /api/transactions': () => ({
+        transactions: [...TXNS.transactions, dentistTxn],
+      }),
+    });
+    renderView();
+    await screen.findByText('Clinic Smile');
+    await user.type(screen.getByPlaceholderText(/search transactions/i), 'dentist');
+    // The noted row matches on its note text.
+    expect(await screen.findByText('Clinic Smile')).toBeInTheDocument();
+    // Unrelated rows hidden.
+    expect(screen.queryByText('Pay Cheque')).not.toBeInTheDocument();
   });
 
   it('sidebar header shows custom title; real name appears beneath with testid', async () => {
