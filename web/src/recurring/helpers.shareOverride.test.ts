@@ -62,4 +62,12 @@ describe('fixedDueNotYetPosted', () => {
     const { rows } = detectMerchants(data, 1);
     expect(fixedDueNotYetPosted(rows, 1)).toBe(2250);
   });
+
+  it('uses lastChargeAbs / split when due and no override', () => {
+    const data = baseData();
+    data.splits = { Housing: 2 };
+    data.transactions = [rent(ym(-2)), rent(ym(-1))]; // no current-cycle charge → due
+    const { rows } = detectMerchants(data, 1);
+    expect(fixedDueNotYetPosted(rows, 1)).toBe(3750); // 7500 / 2
+  });
 });

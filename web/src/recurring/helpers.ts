@@ -149,6 +149,7 @@ export function detectMerchants(
     const override = data.shareAmounts?.[r.category];
     const fullMonthly = monthlyEquivalent(r.lastChargeAbs, freq);
     // The override is the user's share of EACH charge (e.g. rent ₪2,250).
+    // It supersedes the split divisor — when both are set, the override wins.
     const cycleCharge = override != null ? override : r.lastChargeAbs / split;
     const monthlyShare = override != null ? override / RECURRENCE_DIV[freq] : fullMonthly / split;
     rows.push({
