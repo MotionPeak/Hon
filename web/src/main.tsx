@@ -4,6 +4,7 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { App } from './App';
 import { queryClient } from './api/queryClient';
 import './styles.css';
+import './activity/txnNames.css';
 
 /**
  * Top-level error boundary so a render-time throw anywhere in the tree shows a
