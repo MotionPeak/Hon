@@ -78,6 +78,14 @@ export function RecurringView() {
     await api('/merchant-frequency', 'PUT', { key, frequency: 'ignore' });
     await reload();
   };
+  const markCancelled = async (key: string): Promise<void> => {
+    await api('/subscriptions/cancelled', 'PUT', { merchantKey: key });
+    await reload();
+  };
+  const restoreCancelled = async (key: string): Promise<void> => {
+    await api('/subscriptions/cancelled', 'DELETE', { merchantKey: key });
+    await reload();
+  };
   const saveCategorySplit = async (
     category: string, splitCount: number | null,
   ): Promise<void> => {
@@ -235,6 +243,8 @@ export function RecurringView() {
         transactions={data.transactions}
         frequencies={data.frequencies}
         cancelled={data.cancelled}
+        onCancel={markCancelled}
+        onRestore={restoreCancelled}
       />
 
       <SplitEditorDialog

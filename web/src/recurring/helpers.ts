@@ -94,6 +94,17 @@ export interface RecurringData {
   cancelled: Record<string, string>;
 }
 
+/** The synthetic merchant key every loan-repayment line collapses into. */
+export const LOAN_GROUP_KEY = '__loan__';
+const LOAN_GROUP_DESC = 'Loan';
+
+/** True when a charge's description names a loan (Hebrew הלוואה / הלואה). Banks
+ *  post one instalment as separate principal / interest / fee lines that all
+ *  carry this word, so detectMerchants merges them into a single row. */
+function isLoanCharge(description: string): boolean {
+  return /הלוואה|הלואה/.test(description || '');
+}
+
 /**
  * Groups fixed-category ILS charges by merchant and classifies each as a
  * monthly/bimonthly/yearly recurring bill. A user-set frequency wins; otherwise
@@ -110,12 +121,38 @@ export function detectMerchants(
     cycles: Set<string>; lastTxnDate: string | null; lastTs: number;
     lastChargeAbs: number;
   }>();
+  // Loan lines (principal / interest / fee) collapse into one group, summed PER
+  // CYCLE so the row reflects the full instalment — not just one component.
+  const loanByCycle = new Map<string, number>();
+  let loanCount = 0;
+  let loanLastDate: string | null = null;
+  let loanLastTs = 0;
+  let loanFixedCat: string | null = null;
+  let loanFixedCatTs = -1;
+  let loanAnyCat: string | null = null;
   for (const t of data.transactions) {
     if (t.currency !== 'ILS') continue;
     if (t.refundForId) continue;
+    if (t.amount >= 0) continue;
+    const ts = new Date(t.date).getTime();
+    if (isLoanCharge(t.description)) {
+      // Bypass the category filter: a loan repayment counts even when the bank
+      // left the principal/interest lines uncategorised or in a non-fixed group.
+      const cyc = cycleKey(t.date, monthStartDay);
+      loanByCycle.set(cyc, (loanByCycle.get(cyc) ?? 0) + -t.amount);
+      loanCount += 1;
+      if (ts >= loanLastTs) { loanLastTs = ts; loanLastDate = t.date; }
+      // File the merged row under the most recent fixed category seen (e.g. the
+      // Fees line), so it lands in a real Fixed-bills section.
+      if (t.category && catGroupByName[t.category] === 'fixed' && ts >= loanFixedCatTs) {
+        loanFixedCatTs = ts; loanFixedCat = t.category;
+      } else if (t.category && !loanAnyCat) {
+        loanAnyCat = t.category;
+      }
+      continue;
+    }
     if (!t.category) continue;
     if (catGroupByName[t.category] !== 'fixed') continue;
-    if (t.amount >= 0) continue;
     const key = merchantKey(t.description);
     let r = merch.get(key);
     if (!r) {
@@ -127,7 +164,6 @@ export function detectMerchants(
     }
     r.cycles.add(cycleKey(t.date, monthStartDay));
     r.count += 1;
-    const ts = new Date(t.date).getTime();
     if (ts >= r.lastTs) {
       r.lastTs = ts;
       r.lastTxnDate = t.date;
@@ -137,26 +173,42 @@ export function detectMerchants(
     }
   }
   const rows: MerchantRow[] = [];
-  for (const r of merch.values()) {
-    const userFreq = data.frequencies[r.key];
-    if (userFreq === 'ignore') continue;
-    if (data.cancelled[r.key]) continue;
-    if (!userFreq && r.cycles.size < 2) continue;
+  // Build a row, applying the same recurrence gate + split/share math whether it
+  // came from a single merchant or the merged loan group.
+  const pushRow = (
+    key: string, desc: string, category: string, count: number,
+    cycles: Set<string>, lastTxnDate: string | null, lastChargeAbs: number,
+  ): void => {
+    const userFreq = data.frequencies[key];
+    if (userFreq === 'ignore') return;
+    if (data.cancelled[key]) return;
+    if (!userFreq && cycles.size < 2) return;
     const freq: Frequency =
       userFreq === 'monthly' || userFreq === 'bimonthly' || userFreq === 'yearly'
         ? userFreq : 'monthly';
-    const split = data.splits[r.category] || 1;
-    const override = data.shareAmounts?.[r.category];
-    const fullMonthly = monthlyEquivalent(r.lastChargeAbs, freq);
+    const split = data.splits[category] || 1;
+    const override = data.shareAmounts?.[category];
+    const fullMonthly = monthlyEquivalent(lastChargeAbs, freq);
     // The override is the user's share of EACH charge (e.g. rent ₪2,250).
     // It supersedes the split divisor — when both are set, the override wins.
-    const cycleCharge = override != null ? override : r.lastChargeAbs / split;
+    const cycleCharge = override != null ? override : lastChargeAbs / split;
     const monthlyShare = override != null ? override / RECURRENCE_DIV[freq] : fullMonthly / split;
     rows.push({
-      key: r.key, desc: r.desc, category: r.category, count: r.count, freq,
-      cycles: r.cycles, lastTxnDate: r.lastTxnDate, lastChargeAbs: r.lastChargeAbs,
+      key, desc, category, count, freq, cycles, lastTxnDate, lastChargeAbs,
       monthly: fullMonthly, split, monthlyShare, cycleCharge,
     });
+  };
+  for (const r of merch.values()) {
+    pushRow(r.key, r.desc, r.category, r.count, r.cycles, r.lastTxnDate, r.lastChargeAbs);
+  }
+  if (loanByCycle.size > 0 && loanLastDate) {
+    // The latest cycle's summed instalment is "this month's" loan cost.
+    const latestSum = loanByCycle.get(cycleKey(loanLastDate, monthStartDay)) ?? 0;
+    const loanCat = loanFixedCat ?? loanAnyCat ?? 'Fees';
+    pushRow(
+      LOAN_GROUP_KEY, LOAN_GROUP_DESC, loanCat, loanCount,
+      new Set(loanByCycle.keys()), loanLastDate, latestSum,
+    );
   }
   return { rows, categoryGroups: catGroupByName };
 }

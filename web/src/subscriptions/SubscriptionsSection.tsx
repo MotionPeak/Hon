@@ -114,15 +114,27 @@ interface SubscriptionsSectionProps {
   frequencies: Record<string, FreqOrIgnore>;
   /** merchantKey → ISO cancellation timestamp. */
   cancelled: Record<string, string>;
+  /** Mark a subscription cancelled by merchant key (Active / lapsed cards). */
+  onCancel?: (key: string) => void;
+  /** Undo a cancellation by merchant key (Cancelled / flagged cards). */
+  onRestore?: (key: string) => void;
 }
+
+interface RowAction { label: string; onClick: () => void }
 
 /**
  * The Subscriptions area of the Fixed bills page. Detects 'Subscriptions'-
  * category charges and groups them into active / cancelled / flagged / lapsed
  * buckets. Presentational — fed by RecurringView's existing data fetch.
  */
-export function SubscriptionsSection({ transactions, frequencies, cancelled }: SubscriptionsSectionProps) {
+export function SubscriptionsSection({
+  transactions, frequencies, cancelled, onCancel, onRestore,
+}: SubscriptionsSectionProps) {
   const rows = detect({ transactions, frequencies });
+  const cancelAction = (r: SubRow): RowAction | undefined =>
+    onCancel ? { label: 'Mark cancelled', onClick: () => onCancel(r.key) } : undefined;
+  const restoreAction = (r: SubRow): RowAction | undefined =>
+    onRestore ? { label: 'Restore', onClick: () => onRestore(r.key) } : undefined;
 
   if (rows.length === 0) {
     return (
@@ -172,7 +184,7 @@ export function SubscriptionsSection({ transactions, frequencies, cancelled }: S
             A new charge arrived after you marked these cancelled — the
             cancellation may not have gone through. Reconfirm with the merchant.
           </p>
-          {flagged.map((r) => <SubRowCard key={r.key} row={r} />)}
+          {flagged.map((r) => <SubRowCard key={r.key} row={r} action={restoreAction(r)} />)}
         </section>
       )}
 
@@ -180,7 +192,7 @@ export function SubscriptionsSection({ transactions, frequencies, cancelled }: S
         <h3>Active</h3>
         {active.length === 0
           ? <p className="blank">No active subscriptions in the last month.</p>
-          : active.map((r) => <SubRowCard key={r.key} row={r} />)}
+          : active.map((r) => <SubRowCard key={r.key} row={r} action={cancelAction(r)} />)}
       </section>
 
       {userCancelled.length > 0 && (
@@ -189,7 +201,7 @@ export function SubscriptionsSection({ transactions, frequencies, cancelled }: S
           <p className="sub-section-hint">
             You marked these cancelled — Hon flags any new charge.
           </p>
-          {userCancelled.map((r) => <SubRowCard key={r.key} row={r} faded />)}
+          {userCancelled.map((r) => <SubRowCard key={r.key} row={r} faded action={restoreAction(r)} />)}
         </section>
       )}
 
@@ -199,14 +211,14 @@ export function SubscriptionsSection({ transactions, frequencies, cancelled }: S
           <p className="sub-section-hint">
             No charge in over a month — likely cancelled.
           </p>
-          {autoLapsed.map((r) => <SubRowCard key={r.key} row={r} faded />)}
+          {autoLapsed.map((r) => <SubRowCard key={r.key} row={r} faded action={cancelAction(r)} />)}
         </section>
       )}
     </section>
   );
 }
 
-function SubRowCard({ row, faded }: { row: SubRow; faded?: boolean }) {
+function SubRowCard({ row, faded, action }: { row: SubRow; faded?: boolean; action?: RowAction }) {
   const subNote = row.freq !== 'monthly'
     ? ` · billed ${row.freq} · ${money(row.charge, row.currency)}`
     : '';
@@ -226,6 +238,15 @@ function SubRowCard({ row, faded }: { row: SubRow; faded?: boolean }) {
         {money(row.monthly, row.currency)}
         <span className="sub-per">/mo</span>
       </div>
+      {action && (
+        <button
+          type="button"
+          className="sub-cancel-btn"
+          onClick={action.onClick}
+        >
+          {action.label}
+        </button>
+      )}
     </div>
   );
 }
