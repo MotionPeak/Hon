@@ -16,6 +16,7 @@ import {
   setTransactionSavings,
   linkRefund,
   unlinkRefund,
+  setTransactionDetails,
 } from '../transactions';
 import { qk } from '../queryClient';
 
@@ -79,6 +80,15 @@ export function useUnlinkRefund() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (expenseId: string) => unlinkRefund(expenseId),
+    onSuccess: () => invalidateAfterTxnWrite(qc),
+  });
+}
+
+export function useSetTransactionDetails() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { id: string; customTitle?: string | null; notes?: string | null }) =>
+      setTransactionDetails(v.id, { customTitle: v.customTitle, notes: v.notes }),
     onSuccess: () => invalidateAfterTxnWrite(qc),
   });
 }

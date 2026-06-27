@@ -12,6 +12,7 @@ import {
   txnExcludedSchema,
   txnSavingsSchema,
   txnLinkSchema,
+  txnDetailsSchema,
   transactionLinksResponseSchema,
   type Transaction,
   type TransactionLink,
@@ -70,4 +71,12 @@ export async function linkRefund(expenseId: string, refundId: string): Promise<v
 export async function unlinkRefund(expenseId: string, refundId?: string): Promise<void> {
   const q = refundId ? `?refundId=${encodeURIComponent(refundId)}` : '';
   await api(sub(expenseId, 'link') + q, 'DELETE');
+}
+
+/** PATCH /transactions/:id/details — set a custom title and/or notes. */
+export async function setTransactionDetails(
+  id: string,
+  fields: { customTitle?: string | null; notes?: string | null },
+): Promise<void> {
+  await api(sub(id, 'details'), 'PATCH', txnDetailsSchema.parse(fields));
 }
