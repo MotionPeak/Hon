@@ -21,6 +21,11 @@ export function classifyAccounts(
 }
 
 export interface BankProjectionInput {
+  /**
+   * Transactions to scan for this cycle's income/card flows. PRECONDITION: the
+   * caller must exclude transactions from excluded accounts — this helper has no
+   * visibility into the `excluded` flag.
+   */
   transactions: Transaction[];
   accountType: Map<string, AccountType>;
   bankNow: number;
@@ -64,6 +69,7 @@ export function projectBank(input: BankProjectionInput): BankProjection {
     if (t.refundForId) continue;
     if (!inCurrentCycle(t)) continue;
     const type = input.accountType.get(t.accountId) ?? 'other';
+    // Income counts only if it posted to a BANK account (not card or other/investment).
     if (type === 'bank' && t.amount > 0) incomeReceived += t.amount;
     if (type === 'card' && t.amount < 0) cardSpendThisCycle += -t.amount;
   }

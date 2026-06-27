@@ -120,3 +120,21 @@ describe('projectBank — + Variable budget mode', () => {
     expect(out.futureBank).toBe(150);
   });
 });
+
+describe('projectBank — non-bank account income ignored', () => {
+  it('ignores positive postings on other-type (e.g. pension) accounts', () => {
+    const companiesX: Company[] = [...companies, { id: 'other1', type: 'pension' } as Company];
+    const accountsX: Account[] = [
+      ...accounts,
+      { id: 'O', companyId: 'other1', balance: 0, currency: 'ILS', excluded: false } as Account,
+    ];
+    const out = projectBank({
+      transactions: [txn({ accountId: 'O', amount: 5000, category: 'Salary' })],
+      accountType: classifyAccounts(accountsX, companiesX),
+      bankNow: 0, expectedIncome: 10000, owed: 0, piggies: 0, variableLeftToSpend: 0,
+      rows: [], monthStartDay: 1, mode: 'committed',
+    });
+    expect(out.incomeStillExpected).toBe(10000); // 'other' inflow not counted as received
+    expect(out.futureBank).toBe(10000);
+  });
+});
