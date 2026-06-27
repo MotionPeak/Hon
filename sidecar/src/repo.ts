@@ -2443,7 +2443,7 @@ export class Repo {
     fields: { customTitle?: string | null; notes?: string | null },
   ): void {
     const norm = (v: string | null | undefined): string | null =>
-      v == null ? null : v.trim() === '' ? null : v;
+      v == null ? null : v.trim() === '' ? null : v.trim();
     const set: { customTitle?: string | null; notes?: string | null } = {};
     if ('customTitle' in fields) set.customTitle = norm(fields.customTitle);
     if ('notes' in fields) set.notes = norm(fields.notes);

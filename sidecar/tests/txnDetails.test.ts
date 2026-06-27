@@ -60,4 +60,22 @@ describe('Repo transaction details', () => {
     expect(t.customTitle).toBe('New');
     expect(t.notes).toBe('Note');
   });
+
+  it('explicit null clears the field', () => {
+    const { repo, id } = seed();
+    repo.setTransactionDetails(id, { customTitle: 'X' });
+    repo.setTransactionDetails(id, { customTitle: null });
+    expect(repo.getTransaction(id)!.customTitle).toBeNull();
+  });
+
+  it('surfaces customTitle + notes through listTransactions (TXN_COLS read path)', () => {
+    // Guards the silent-failure mode CLAUDE.md warns about: a column missing
+    // from TXN_COLS would be dropped from list reads even if getTransaction
+    // (also TXN_COLS) returns it. listTransactions({}) returns the full history.
+    const { repo, id } = seed();
+    repo.setTransactionDetails(id, { customTitle: 'Lunch with Sara', notes: 'work trip' });
+    const row = repo.listTransactions({}).find((r) => r.id === id)!;
+    expect(row.customTitle).toBe('Lunch with Sara');
+    expect(row.notes).toBe('work trip');
+  });
 });
