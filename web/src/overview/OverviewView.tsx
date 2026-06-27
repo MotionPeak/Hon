@@ -344,7 +344,9 @@ function BalanceCard({
           {positive ? '+' : '−'}{money(Math.abs(freeNet), currency)}
         </div>
         <div className="balance-cap">
-          free this month after fixed, essentials and variable spend so far
+          {positive
+            ? 'free this month after fixed, essentials and variable spend so far'
+            : "short of what this month's commitments need"}
         </div>
       </section>
     );
@@ -374,14 +376,14 @@ function BalanceCard({
       </div>
       <div className="balance-cap">after income lands &amp; this cycle's bills clear</div>
 
-      <div className="proj-picker" role="tablist" data-testid="projection-picker">
+      <div className="proj-picker" role="group" aria-label="Projection mode" data-testid="projection-picker">
         <button
-          type="button" role="tab" aria-selected={mode === 'committed'}
+          type="button" aria-pressed={mode === 'committed'}
           className={`proj-tab${mode === 'committed' ? ' on' : ''}`}
           onClick={() => setModePersist('committed')}
         >Committed</button>
         <button
-          type="button" role="tab" aria-selected={mode === 'budget'}
+          type="button" aria-pressed={mode === 'budget'}
           className={`proj-tab${mode === 'budget' ? ' on' : ''}`}
           onClick={() => setModePersist('budget')}
         >+ Variable budget</button>

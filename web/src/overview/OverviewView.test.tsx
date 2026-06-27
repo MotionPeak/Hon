@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { screen, within } from '@testing-library/react';
+import { fireEvent, screen, within } from '@testing-library/react';
 import { renderWithProviders } from '../test/renderWithProviders';
 import { OverviewView } from './OverviewView';
 import { installFetchMock } from '../test/mockFetch';
@@ -310,13 +310,24 @@ describe('OverviewView', () => {
     const card = await screen.findByTestId('balance-card');
     // New hero: "Projected checking balance" (not "This month")
     expect(card.querySelector('.balance-head')!.textContent).toBe('Projected checking balance');
-    // The projection-picker renders two tabs
+    // The projection-picker renders two toggle buttons (role=group, aria-pressed)
     const picker = await screen.findByTestId('projection-picker');
-    expect(within(picker).getByRole('tab', { name: 'Committed' })).toBeInTheDocument();
-    expect(within(picker).getByRole('tab', { name: '+ Variable budget' })).toBeInTheDocument();
+    expect(within(picker).getByRole('button', { name: 'Committed' })).toBeInTheDocument();
+    expect(within(picker).getByRole('button', { name: '+ Variable budget' })).toBeInTheDocument();
     // "Free to spend this month" row still present (freeNet = 12000 - 7500 - 1200 = 3300)
     const freeRow = card.querySelector('.balance-free') as HTMLElement;
     expect(freeRow.textContent).toMatch(/3,?300/);
+  });
+
+  it('adds the "Variable budget left" row when + Variable budget is selected', async () => {
+    // Default mocks have a bank account present, so the projected hero + picker render.
+    installFetchMock(mocks());
+    renderOverview();
+    await screen.findByTestId('projection-picker');
+    // Committed is the default (afterEach clears localStorage, so no leaked mode).
+    expect(screen.queryByText(/Variable budget left/i)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '+ Variable budget' }));
+    expect(await screen.findByText(/Variable budget left/i)).toBeInTheDocument();
   });
 
   it('marks the "free to spend" row red when committed > income (in the red)', async () => {
