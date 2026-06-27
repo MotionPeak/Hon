@@ -1546,6 +1546,7 @@ function RefundPicker({
     return baseCandidates.filter((t) => {
       if ((t.description || '').toLowerCase().includes(q)) return true;
       if ((t.customTitle || '').toLowerCase().includes(q)) return true;
+      if ((t.notes || '').toLowerCase().includes(q)) return true;
       if ((t.category || '').toLowerCase().includes(q)) return true;
       if (t.date && t.date.includes(q)) return true;
       return amountMatches(t.amount, q);
