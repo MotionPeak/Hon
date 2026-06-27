@@ -85,6 +85,13 @@ export function RecurringView() {
     setSplitEdit(null);
     await reload();
   };
+  const saveCategoryShare = async (
+    category: string, shareAmount: number | null,
+  ): Promise<void> => {
+    await api('/category-share', 'PUT', { category, shareAmount });
+    setSplitEdit(null);
+    await reload();
+  };
 
   const detected = useMemo(
     () => data ? detectMerchants(data, settings.monthStartDay) : null,
@@ -233,27 +240,35 @@ export function RecurringView() {
       <SplitEditorDialog
         category={splitEdit}
         currentSplit={splitEdit ? (data.splits[splitEdit] || 1) : 1}
+        currentShare={splitEdit ? (data.shareAmounts[splitEdit] ?? null) : null}
         onClose={() => setSplitEdit(null)}
         onSave={saveCategorySplit}
+        onSaveShare={saveCategoryShare}
       />
     </div>
   );
 }
 
 function SplitEditorDialog({
-  category, currentSplit, onClose, onSave,
+  category, currentSplit, currentShare, onClose, onSave, onSaveShare,
 }: {
   category: string | null;
   currentSplit: number;
+  currentShare: number | null;
   onClose: () => void;
   onSave: (category: string, splitCount: number | null) => void | Promise<void>;
+  onSaveShare: (category: string, shareAmount: number | null) => void | Promise<void>;
 }) {
   const open = category !== null;
   const [value, setValue] = useState<string>(String(currentSplit));
+  const [share, setShare] = useState<string>(currentShare != null ? String(currentShare) : '');
 
   useEffect(() => {
-    if (open) setValue(String(currentSplit));
-  }, [open, currentSplit]);
+    if (open) {
+      setValue(String(currentSplit));
+      setShare(currentShare != null ? String(currentShare) : '');
+    }
+  }, [open, currentSplit, currentShare]);
 
   const handleSave = (): void => {
     if (!category) return;
@@ -265,6 +280,11 @@ function SplitEditorDialog({
     if (!category) return;
     void onSave(category, null);
   };
+  const handleSaveShare = (): void => {
+    if (!category) return;
+    const n = Number(share);
+    void onSaveShare(category, Number.isFinite(n) && n > 0 ? n : null);
+  };
 
   return (
     <Dialog.Root open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
@@ -274,11 +294,14 @@ function SplitEditorDialog({
           <Dialog.Title>Split {category}</Dialog.Title>
           <Dialog.Description className="rx-dialog-desc">
             How many people share these bills? Your share is shown as the
-            total ÷ N everywhere {category} appears.
+            total ÷ N everywhere {category} appears. Or set the exact amount you pay.
           </Dialog.Description>
           <form
             className="piggy-form"
-            onSubmit={(e) => { e.preventDefault(); handleSave(); }}
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (share.trim() !== '') handleSaveShare(); else handleSave();
+            }}
           >
             <label htmlFor="rec-split-input" className="fld-lbl">
               People sharing
@@ -292,6 +315,19 @@ function SplitEditorDialog({
               value={value}
               onChange={(e) => setValue(e.target.value)}
               autoFocus
+            />
+            <label htmlFor="rec-share-input" className="fld-lbl">
+              …or my exact amount (₪)
+            </label>
+            <input
+              id="rec-share-input"
+              type="number"
+              min={0}
+              step={1}
+              placeholder="e.g. 2250"
+              value={share}
+              onChange={(e) => setShare(e.target.value)}
+              aria-label="My exact amount"
             />
             <div className="form-actions">
               <Dialog.Close asChild>

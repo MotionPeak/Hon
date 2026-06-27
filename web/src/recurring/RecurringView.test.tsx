@@ -367,4 +367,22 @@ describe('RecurringView — CRUD', () => {
     expect(body.category).toBe('Housing');
     expect(body.splitCount).toBeNull();
   });
+
+  it('saves an exact share amount via PUT /category-share', async () => {
+    const calls: unknown[] = [];
+    installFetchMock({
+      ...TWO_RENT,
+      'GET /api/category-splits': () => ({ splits: {}, shareAmounts: {} }),
+      'PUT /api/category-share': (body: unknown) => { calls.push(body); return { ok: true }; },
+    });
+    const user = userEvent.setup();
+    renderView();
+    await user.click(await screen.findByLabelText(/Split Housing/i));
+    const amount = screen.getByLabelText(/my exact amount/i);
+    await user.clear(amount);
+    await user.type(amount, '2250');
+    await user.click(screen.getByRole('button', { name: /save/i }));
+    await waitFor(() => expect(calls.length).toBeGreaterThan(0));
+    expect(calls).toContainEqual({ category: 'Housing', shareAmount: 2250 });
+  });
 });
