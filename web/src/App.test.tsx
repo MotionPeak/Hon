@@ -33,7 +33,7 @@ const EMPTY = {
     currency: 'ILS',
   }),
   'GET /api/merchant-frequencies': () => ({ frequencies: {} }),
-  'GET /api/category-splits': () => ({ splits: {} }),
+  'GET /api/category-splits': () => ({ splits: {}, shareAmounts: {} }),
   'GET /api/subscriptions/cancelled': () => ({ cancelled: {} }),
   // Overview/Activity/Settings tabs mount Splitwise-aware components whose
   // useSplitwise hook fetches on mount; stub disconnected.

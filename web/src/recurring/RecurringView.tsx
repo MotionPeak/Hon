@@ -53,7 +53,7 @@ export function RecurringView() {
         api<{ transactions: Transaction[] }>('/transactions'),
         api<{ categories: Category[] }>('/categories'),
         api<{ frequencies: Record<string, FreqOrIgnore> }>('/merchant-frequencies'),
-        api<{ splits: Record<string, number> }>('/category-splits'),
+        api<{ splits: Record<string, number>; shareAmounts: Record<string, number> }>('/category-splits'),
         api<{ cancelled: Record<string, string> }>('/subscriptions/cancelled')
           .catch(() => ({ cancelled: {} as Record<string, string> })),
       ]);
@@ -62,11 +62,12 @@ export function RecurringView() {
         categories: c.categories,
         frequencies: f.frequencies ?? {},
         splits: s.splits ?? {},
+        shareAmounts: s.shareAmounts ?? {},
         cancelled: sub.cancelled ?? {},
       });
     } catch {
       setData({
-        transactions: [], categories: [], frequencies: {}, splits: {}, cancelled: {},
+        transactions: [], categories: [], frequencies: {}, splits: {}, shareAmounts: {}, cancelled: {},
       });
     }
   }, []);

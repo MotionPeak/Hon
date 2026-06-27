@@ -148,7 +148,7 @@ function mocks(overrides: Record<string, unknown> = {}): Record<string, () => un
     'GET /api/transactions': () => ({ transactions: RECURRING_DEFAULT.transactions }),
     'GET /api/categories': () => ({ categories: RECURRING_DEFAULT.categories }),
     'GET /api/merchant-frequencies': () => ({ frequencies: {} }),
-    'GET /api/category-splits': () => ({ splits: {} }),
+    'GET /api/category-splits': () => ({ splits: {}, shareAmounts: {} }),
     'GET /api/subscriptions/cancelled': () => ({ cancelled: {} }),
     // OwedToYouCard's useSplitwise hook fetches on mount; stub disconnected
     // so the card renders null and no /refresh call is made.

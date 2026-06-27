@@ -78,6 +78,10 @@ export interface MerchantRow {
   split: number;
   /** This user's share of the monthly equivalent. */
   monthlyShare: number;
+  /** This cycle's full per-charge amount for the user — the share override if
+   *  set, else lastChargeAbs / split. Used by the due-this-cycle totals and the
+   *  bank projection. */
+  cycleCharge: number;
 }
 
 export interface RecurringData {
@@ -85,6 +89,8 @@ export interface RecurringData {
   categories: Category[];
   frequencies: Record<string, FreqOrIgnore>;
   splits: Record<string, number>;
+  /** Absolute "my share" override per category (overrides the ÷split divisor). */
+  shareAmounts: Record<string, number>;
   cancelled: Record<string, string>;
 }
 
@@ -140,11 +146,15 @@ export function detectMerchants(
       userFreq === 'monthly' || userFreq === 'bimonthly' || userFreq === 'yearly'
         ? userFreq : 'monthly';
     const split = data.splits[r.category] || 1;
+    const override = data.shareAmounts?.[r.category];
     const fullMonthly = monthlyEquivalent(r.lastChargeAbs, freq);
+    // The override is the user's share of EACH charge (e.g. rent ₪2,250).
+    const cycleCharge = override != null ? override : r.lastChargeAbs / split;
+    const monthlyShare = override != null ? override / RECURRENCE_DIV[freq] : fullMonthly / split;
     rows.push({
       key: r.key, desc: r.desc, category: r.category, count: r.count, freq,
       cycles: r.cycles, lastTxnDate: r.lastTxnDate, lastChargeAbs: r.lastChargeAbs,
-      monthly: fullMonthly, split, monthlyShare: fullMonthly / split,
+      monthly: fullMonthly, split, monthlyShare, cycleCharge,
     });
   }
   return { rows, categoryGroups: catGroupByName };
@@ -179,7 +189,7 @@ export function cycleStatus(
 
 /**
  * Sum of the full per-row charges due this cycle. A bill counts at its full
- * `lastChargeAbs / split` the cycle it is due (billed or expected) and ₪0 when
+ * `cycleCharge` the cycle it is due (billed or expected) and ₪0 when
  * off-cycle — mirroring cycleStatus(). This is the same "due this cycle" total
  * the Fixed bills tab shows, NOT the smoothed monthly-equivalent.
  */
@@ -187,7 +197,22 @@ export function expectedFixedThisCycle(rows: MerchantRow[], monthStartDay: numbe
   let total = 0;
   for (const row of rows) {
     if (cycleStatus(row, monthStartDay) !== 'off-cycle') {
-      total += row.lastChargeAbs / row.split;
+      total += row.cycleCharge;
+    }
+  }
+  return total;
+}
+
+/**
+ * Sum of fixed bills EXPECTED this cycle that have not yet posted (status
+ * 'due'). Feeds the bank projection: these are commitments still to clear the
+ * bank — distinct from billed bills (already in bankNow or on the card bill).
+ */
+export function fixedDueNotYetPosted(rows: MerchantRow[], monthStartDay: number): number {
+  let total = 0;
+  for (const row of rows) {
+    if (cycleStatus(row, monthStartDay) === 'due') {
+      total += row.cycleCharge;
     }
   }
   return total;

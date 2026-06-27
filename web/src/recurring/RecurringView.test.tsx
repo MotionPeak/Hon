@@ -23,7 +23,7 @@ const CATEGORIES = {
 
 const EMPTY_HELPERS = {
   'GET /api/merchant-frequencies': () => ({ frequencies: {} }),
-  'GET /api/category-splits': () => ({ splits: {} }),
+  'GET /api/category-splits': () => ({ splits: {}, shareAmounts: {} }),
   'GET /api/subscriptions/cancelled': () => ({ cancelled: {} }),
 };
 
@@ -291,7 +291,7 @@ describe('RecurringView — CRUD', () => {
   it('renders a ÷N split pill on each category section header', async () => {
     installFetchMock({
       ...TWO_RENT,
-      'GET /api/category-splits': () => ({ splits: { Housing: 3 } }),
+      'GET /api/category-splits': () => ({ splits: { Housing: 3 }, shareAmounts: {} }),
     });
     renderView();
     const section = (await screen.findByRole('heading', { name: /housing/i })).closest('section')!;
@@ -310,7 +310,7 @@ describe('RecurringView — CRUD', () => {
   it('opens a split editor dialog when the ÷N pill is clicked', async () => {
     installFetchMock({
       ...TWO_RENT,
-      'GET /api/category-splits': () => ({ splits: { Housing: 3 } }),
+      'GET /api/category-splits': () => ({ splits: { Housing: 3 }, shareAmounts: {} }),
     });
     const user = userEvent.setup();
     renderView();
@@ -329,7 +329,7 @@ describe('RecurringView — CRUD', () => {
       ...TWO_RENT,
       'GET /api/category-splits': () => {
         splitCalls += 1;
-        return { splits: {} };
+        return { splits: {}, shareAmounts: {} };
       },
       'PUT /api/category-split': put,
     });
@@ -353,7 +353,7 @@ describe('RecurringView — CRUD', () => {
     const put = vi.fn((_body: unknown) => ({ ok: true }));
     installFetchMock({
       ...TWO_RENT,
-      'GET /api/category-splits': () => ({ splits: { Housing: 3 } }),
+      'GET /api/category-splits': () => ({ splits: { Housing: 3 }, shareAmounts: {} }),
       'PUT /api/category-split': put,
     });
     const user = userEvent.setup();

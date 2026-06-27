@@ -41,12 +41,15 @@ describe('monthlyEquivalent', () => {
 
 // Build a MerchantRow with only the fields expectedFixedThisCycle reads.
 function row(over: Partial<MerchantRow>): MerchantRow {
-  return {
+  const base = {
     key: 'k', desc: 'd', category: 'Housing', count: 1,
-    freq: 'monthly', cycles: new Set<string>(), lastTxnDate: null,
+    freq: 'monthly' as const, cycles: new Set<string>(), lastTxnDate: null,
     lastChargeAbs: 0, monthly: 0, split: 1, monthlyShare: 0,
     ...over,
   };
+  // Default cycleCharge to lastChargeAbs / split (the no-override path) unless
+  // the caller explicitly overrides it via the `over` spread.
+  return { cycleCharge: base.lastChargeAbs / base.split, ...base, ...over };
 }
 
 // A "YYYY-MM" that is `n` whole months before the current cycle (monthStartDay=1).
