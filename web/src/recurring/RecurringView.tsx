@@ -285,6 +285,10 @@ function SplitEditorDialog({
     const n = Number(share);
     void onSaveShare(category, Number.isFinite(n) && n > 0 ? n : null);
   };
+  const handleClearShare = (): void => {
+    if (!category) return;
+    void onSaveShare(category, null);
+  };
 
   return (
     <Dialog.Root open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
@@ -293,14 +297,17 @@ function SplitEditorDialog({
         <Dialog.Content className="rx-dialog rx-dialog-sm">
           <Dialog.Title>Split {category}</Dialog.Title>
           <Dialog.Description className="rx-dialog-desc">
-            How many people share these bills? Your share is shown as the
-            total ÷ N everywhere {category} appears. Or set the exact amount you pay.
+            Set how many people share the bill — your share shows as the
+            total ÷ N. Or pin the exact amount you pay; the exact amount
+            takes precedence.
           </Dialog.Description>
           <form
             className="piggy-form"
             onSubmit={(e) => {
               e.preventDefault();
-              if (share.trim() !== '') handleSaveShare(); else handleSave();
+              if (share.trim() !== '') handleSaveShare();
+              else if (currentShare != null) handleClearShare();
+              else handleSave();
             }}
           >
             <label htmlFor="rec-split-input" className="fld-lbl">
@@ -314,6 +321,7 @@ function SplitEditorDialog({
               step={1}
               value={value}
               onChange={(e) => setValue(e.target.value)}
+              disabled={share.trim() !== ''}
               autoFocus
             />
             <label htmlFor="rec-share-input" className="fld-lbl">

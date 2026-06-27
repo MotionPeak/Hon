@@ -385,4 +385,21 @@ describe('RecurringView — CRUD', () => {
     await waitFor(() => expect(calls.length).toBeGreaterThan(0));
     expect(calls).toContainEqual({ category: 'Housing', shareAmount: 2250 });
   });
+
+  it('clears an existing share when the exact-amount field is emptied', async () => {
+    const calls: unknown[] = [];
+    installFetchMock({
+      ...TWO_RENT,
+      'GET /api/category-splits': () => ({ splits: {}, shareAmounts: { Housing: 2500 } }),
+      'PUT /api/category-share': (body: unknown) => { calls.push(body); return { ok: true }; },
+    });
+    const user = userEvent.setup();
+    renderView();
+    await user.click(await screen.findByLabelText(/Split Housing/i));
+    const amount = screen.getByLabelText(/my exact amount/i);
+    await user.clear(amount);                 // field had "2500", now empty
+    await user.click(screen.getByRole('button', { name: /save/i }));
+    await waitFor(() => expect(calls.length).toBeGreaterThan(0));
+    expect(calls).toContainEqual({ category: 'Housing', shareAmount: null });
+  });
 });
