@@ -1919,6 +1919,7 @@ export class Repo {
     this.orm
       .insert(categorySplitsT)
       .values({ category, splitCount, shareAmount: null, createdAt: new Date().toISOString() })
+      // shareAmount intentionally omitted from the update — independent of splitCount
       .onConflictDoUpdate({ target: categorySplitsT.category, set: { splitCount } })
       .run();
   }
@@ -1934,13 +1935,17 @@ export class Repo {
       .run();
   }
 
-  /** Clears just the share override; deletes the row if no split remains. */
+  /** Clears the share override; deletes the row when no split divisor remains
+   *  (split_count back at the default 1). */
   clearCategoryShareAmount(category: string): void {
     const row = this.orm
       .select({ splitCount: categorySplitsT.splitCount })
       .from(categorySplitsT)
       .where(eq(categorySplitsT.category, category))
       .get() as { splitCount: number } | undefined;
+    // splitCount is only ever stored as >1 (the PUT /category-split route in
+    // server.ts treats splitCount===1 / null as "clear the split"), so
+    // splitCount===1 means no split divisor remains → drop the now-shareless row.
     if (row && row.splitCount > 1) {
       this.orm
         .update(categorySplitsT)

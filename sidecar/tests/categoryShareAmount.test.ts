@@ -50,4 +50,16 @@ describe('Repo category share amounts', () => {
     expect(housing?.splitCount).toBe(3);
     expect(housing?.shareAmount ?? null).toBeNull();
   });
+
+  it('keeps the share when clearing only the split', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hon-share-'));
+    const { db } = openDatabase(dir);
+    const repo = new Repo(db);
+    repo.setCategoryShareAmount('Housing', 2250);
+    repo.setCategorySplit('Housing', 3);
+    repo.clearCategorySplit('Housing');
+    const housing = repo.listCategorySplits().find((r) => r.category === 'Housing');
+    expect(housing?.splitCount).toBe(1);
+    expect(housing?.shareAmount).toBe(2250);
+  });
 });
