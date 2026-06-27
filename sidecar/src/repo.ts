@@ -159,6 +159,10 @@ export interface TxnRow {
   /** Net amount the user bears after reimbursements (amount + reimbursedTotal).
    *  Equals `amount` when there are no reimbursements. Matches txn_effective. */
   effectiveAmount?: number;
+  /** User-supplied display title (cosmetic; never replaces `description`). */
+  customTitle: string | null;
+  /** Free-form notes the user attached to this transaction. */
+  notes: string | null;
 }
 
 export interface ScrapeRunRow {
@@ -344,7 +348,8 @@ const TXN_COLS =
   'id, account_id AS accountId, external_id AS externalId, date, ' +
   'processed_date AS processedDate, amount, currency, description, memo, ' +
   'kind, status, category, created_at AS createdAt, loan_id AS loanId, ' +
-  'excluded_manual AS excludedManual, savings';
+  'excluded_manual AS excludedManual, savings, ' +
+  'custom_title AS customTitle, notes';
 
 /** Normalises a tri-state flag to `boolean | null` at the read boundary.
  *  `excludedManual` / `savings` are tri-state in `TxnRow` (and the React
@@ -517,6 +522,8 @@ export class Repo {
       loanId: transactionsT.loanId,
       excludedManual: transactionsT.excludedManual,
       savings: transactionsT.savings,
+      customTitle: transactionsT.customTitle,
+      notes: transactionsT.notes,
     };
   }
 
@@ -2426,6 +2433,22 @@ export class Repo {
       .set(savings ? { savings: true, excludedManual: null } : { savings: false })
       .where(eq(transactionsT.id, txnId))
       .run();
+  }
+
+  /** Sets the user's display title and/or notes for a transaction. Only the
+   *  provided fields are updated; an empty/whitespace string is stored as null
+   *  (clears). Cosmetic — never touches `description` (the grouping key). */
+  setTransactionDetails(
+    txnId: string,
+    fields: { customTitle?: string | null; notes?: string | null },
+  ): void {
+    const norm = (v: string | null | undefined): string | null =>
+      v == null ? null : v.trim() === '' ? null : v;
+    const set: { customTitle?: string | null; notes?: string | null } = {};
+    if ('customTitle' in fields) set.customTitle = norm(fields.customTitle);
+    if ('notes' in fields) set.notes = norm(fields.notes);
+    if (Object.keys(set).length === 0) return;
+    this.orm.update(transactionsT).set(set).where(eq(transactionsT.id, txnId)).run();
   }
 
   /** Every transaction linked to this loan, newest-first. */
