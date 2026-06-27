@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ActivityView } from './ActivityView';
 import { SettingsProvider } from '../settings/useSettings';
 import { installFetchMock } from '../test/mockFetch';
 import { __resetSplitwiseCache } from '../splitwise/useSplitwise';
+import { renderWithProviders } from '../test/renderWithProviders';
 
 const CATEGORIES = {
   categories: [
@@ -79,7 +80,7 @@ const FULL = {
 beforeEach(() => { __resetSplitwiseCache(); });
 
 function renderView() {
-  return render(<SettingsProvider><ActivityView /></SettingsProvider>);
+  return renderWithProviders(<SettingsProvider><ActivityView /></SettingsProvider>);
 }
 
 describe('ActivityView — read-only', () => {
@@ -195,7 +196,9 @@ describe('ActivityView — category move', () => {
     await user.click(within(sidebar).getByRole('button', { name: /Groceries/ }));
     // No network call yet — tile click is selection only.
     expect(patch).not.toHaveBeenCalled();
-    await user.click(within(sidebar).getByRole('button', { name: /^save$/i }));
+    // Two "Save" buttons: details editor (disabled, no changes) + category save. Click category save.
+    const [, categorySaveBtn] = within(sidebar).getAllByRole('button', { name: /^save$/i });
+    await user.click(categorySaveBtn);
     await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
     expect(patch.mock.calls[0]?.[0]).toEqual({
       category: 'Groceries',
@@ -213,7 +216,9 @@ describe('ActivityView — category move', () => {
     // the user picks a different tile.
     await user.click(await screen.findByText('Aroma Coffee'));
     const sidebar = screen.getByRole('dialog', { name: /move to category/i });
-    expect(within(sidebar).getByRole('button', { name: /^save$/i })).toBeDisabled();
+    // Two "Save" buttons: details editor + category save. Category save is the second.
+    const [, categorySaveBtn] = within(sidebar).getAllByRole('button', { name: /^save$/i });
+    expect(categorySaveBtn).toBeDisabled();
   });
 
   it('close (X) closes the sidebar without calling the engine', async () => {
@@ -244,7 +249,8 @@ describe('ActivityView — always categorize + billing frequency', () => {
     await user.click(within(sidebar).getByRole('checkbox', {
       name: /always categorize transactions from this business this way/i,
     }));
-    await user.click(within(sidebar).getByRole('button', { name: /^save$/i }));
+    const [, categorySaveBtn] = within(sidebar).getAllByRole('button', { name: /^save$/i });
+    await user.click(categorySaveBtn);
     await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
     expect(patch.mock.calls[0]?.[0]).toEqual({
       category: 'Groceries',
@@ -258,7 +264,8 @@ describe('ActivityView — always categorize + billing frequency', () => {
     renderView();
     await user.click(await screen.findByText('Aroma Coffee'));
     const sidebar = screen.getByRole('dialog', { name: /move to category/i });
-    const saveBtn = within(sidebar).getByRole('button', { name: /^save$/i });
+    // Two "Save" buttons: details editor + category save. Category save is the second.
+    const [, saveBtn] = within(sidebar).getAllByRole('button', { name: /^save$/i });
     expect(saveBtn).toBeDisabled();
     await user.click(within(sidebar).getByRole('checkbox', {
       name: /always categorize/i,
@@ -308,7 +315,8 @@ describe('ActivityView — always categorize + billing frequency', () => {
     const sidebar = screen.getByRole('dialog', { name: /move to category/i });
     await user.click(within(sidebar).getByRole('button', { name: /Utilities/ }));
     await user.click(within(sidebar).getByRole('radio', { name: 'Bimonthly' }));
-    await user.click(within(sidebar).getByRole('button', { name: /^save$/i }));
+    const [, categorySaveBtn] = within(sidebar).getAllByRole('button', { name: /^save$/i });
+    await user.click(categorySaveBtn);
     await waitFor(() => expect(put).toHaveBeenCalledTimes(1));
     expect(put.mock.calls[0]?.[0]).toEqual({
       key: 'aroma coffee', frequency: 'bimonthly',
@@ -343,7 +351,8 @@ describe('ActivityView — always categorize + billing frequency', () => {
     await user.click(await screen.findByText('Aroma Coffee'));
     const sidebar = screen.getByRole('dialog', { name: /move to category/i });
     await user.click(within(sidebar).getByRole('button', { name: /Groceries/ }));
-    await user.click(within(sidebar).getByRole('button', { name: /^save$/i }));
+    const [, categorySaveBtn] = within(sidebar).getAllByRole('button', { name: /^save$/i });
+    await user.click(categorySaveBtn);
     await waitFor(() => expect(screen.queryByRole('dialog', { name: /move to category/i })).not.toBeInTheDocument());
     expect(put).not.toHaveBeenCalled();
   });
@@ -872,5 +881,105 @@ describe('ActivityView — reimbursement net display', () => {
     // Your-share summary present, and each link independently removable.
     expect(screen.getByText(/your share/i)).toBeInTheDocument();
     expect(screen.getAllByText('Unlink')).toHaveLength(2);
+  });
+});
+
+describe('ActivityView — custom titles and notes', () => {
+  const titledTxn = {
+    id: 't-titled', accountId: 'a-1', externalId: 'xt',
+    date: `${thisMonth}-12`, processedDate: null, amount: -80,
+    currency: 'ILS', description: 'SUPERPHARM 001', memo: null,
+    kind: null, status: null, category: 'Other', createdAt: `${thisMonth}-12`,
+    customTitle: 'Lunch', notes: null,
+  };
+  const notedTxn = {
+    id: 't-noted', accountId: 'a-1', externalId: 'xn',
+    date: `${thisMonth}-13`, processedDate: null, amount: -20,
+    currency: 'ILS', description: 'Aroma Coffee', memo: null,
+    kind: null, status: null, category: 'Coffee', createdAt: `${thisMonth}-13`,
+    customTitle: null, notes: 'remember',
+  };
+
+  it('shows custom title instead of raw description in the transaction row', async () => {
+    installFetchMock({
+      ...FULL,
+      'GET /api/transactions': () => ({ transactions: [titledTxn] }),
+    });
+    renderView();
+    // Custom title visible in the row.
+    expect(await screen.findByText('Lunch')).toBeInTheDocument();
+    // Real scraped name shows in txn-realname beneath it.
+    expect(screen.getByTestId('txn-realname')).toHaveTextContent('SUPERPHARM 001');
+  });
+
+  it('shows the note icon when a transaction has notes', async () => {
+    installFetchMock({
+      ...FULL,
+      'GET /api/transactions': () => ({ transactions: [notedTxn] }),
+    });
+    renderView();
+    await screen.findByText('Aroma Coffee');
+    expect(screen.getByLabelText(/has a note/i)).toBeInTheDocument();
+  });
+
+  it('searching the custom title finds the row', async () => {
+    const user = userEvent.setup();
+    installFetchMock({
+      ...FULL,
+      'GET /api/transactions': () => ({
+        transactions: [...TXNS.transactions, titledTxn],
+      }),
+    });
+    renderView();
+    await screen.findByText('Lunch');
+    await user.type(screen.getByPlaceholderText(/search transactions/i), 'Lunch');
+    // Titled row still visible.
+    expect(await screen.findByText('Lunch')).toBeInTheDocument();
+    // Unrelated rows hidden.
+    expect(screen.queryByText('Pay Cheque')).not.toBeInTheDocument();
+  });
+
+  it('searching the raw description still finds a titled row', async () => {
+    const user = userEvent.setup();
+    installFetchMock({
+      ...FULL,
+      'GET /api/transactions': () => ({
+        transactions: [...TXNS.transactions, titledTxn],
+      }),
+    });
+    renderView();
+    await screen.findByText('Lunch');
+    await user.type(screen.getByPlaceholderText(/search transactions/i), 'SUPERPHARM');
+    expect(await screen.findByText('Lunch')).toBeInTheDocument();
+  });
+
+  it('sidebar header shows custom title; real name appears beneath with testid', async () => {
+    const user = userEvent.setup();
+    installFetchMock({
+      ...FULL,
+      'GET /api/transactions': () => ({ transactions: [titledTxn] }),
+      'PATCH /api/transactions/t-titled/details': () => ({}),
+    });
+    renderView();
+    await user.click(await screen.findByText('Lunch'));
+    const sidebar = screen.getByRole('dialog', { name: /move to category/i });
+    // Header shows the custom title.
+    expect(within(sidebar).getByText('Lunch')).toBeInTheDocument();
+    // Real name shown beneath with testid.
+    expect(within(sidebar).getByTestId('txn-sidebar-realname')).toHaveTextContent('SUPERPHARM 001');
+  });
+
+  it('sidebar renders the Title & notes editor with Title input and Notes textarea', async () => {
+    const user = userEvent.setup();
+    installFetchMock({
+      ...FULL,
+      'GET /api/transactions': () => ({ transactions: [titledTxn] }),
+      'PATCH /api/transactions/t-titled/details': () => ({}),
+    });
+    renderView();
+    await user.click(await screen.findByText('Lunch'));
+    const sidebar = screen.getByRole('dialog', { name: /move to category/i });
+    expect(within(sidebar).getByRole('textbox', { name: /title/i })).toBeInTheDocument();
+    expect(within(sidebar).getByRole('textbox', { name: /notes/i })).toBeInTheDocument();
   });
 });

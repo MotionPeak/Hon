@@ -17,6 +17,9 @@ import { isExcludedFromCycle, isManuallyExcluded, ruleMatches } from './excluded
 import { SplitwiseSection } from './SplitwiseSection';
 import { SplitwiseRepaymentSection } from './SplitwiseRepaymentSection';
 import { useSplitwise } from '../splitwise/useSplitwise';
+import { TxnName } from './TxnName';
+import { displayName } from './displayName';
+import { TxnDetailsEditor } from './TxnDetailsEditor';
 
 /** Stored merchant-frequency value. 'income'/'ignore' are tags the editor
  *  here doesn't expose, but we keep them in the type to round-trip safely. */
@@ -92,6 +95,7 @@ function txnMatchesSearch(
 ): boolean {
   if (!q) return true;
   if ((t.description || '').toLowerCase().includes(q)) return true;
+  if ((t.customTitle || '').toLowerCase().includes(q)) return true;
   if ((t.category || '').toLowerCase().includes(q)) return true;
   if (t.date && t.date.includes(q)) return true;
   const acct = accounts.get(t.accountId);
@@ -454,10 +458,7 @@ export function ActivityView() {
                       {cat?.emoji ?? '▫️'}
                     </span>
                     <div className="txn-main">
-                      <div className="txn-name">
-                        {t.description}
-                        <LoanChip loanId={t.loanId} loans={loans} />
-                      </div>
+                      <TxnName t={t}><LoanChip loanId={t.loanId} loans={loans} /></TxnName>
                       <div className="txn-sub">
                         {fmtDate(t.date)}
                         {acct && (
@@ -764,7 +765,7 @@ function ExcludedSection({
                 >
                   <span className="txn-icon">▫️</span>
                   <div className="txn-main">
-                    <div className="txn-name">{t.description}</div>
+                    <TxnName t={t} />
                     <div className="txn-sub">
                       {fmtDate(t.date)}
                       {acct && (
@@ -846,7 +847,7 @@ function SavingsSection({
                 >
                   <span className="txn-icon">💰</span>
                   <div className="txn-main">
-                    <div className="txn-name">{t.description}</div>
+                    <TxnName t={t} />
                     <div className="txn-sub">
                       {fmtDate(t.date)}
                       {acct && (
@@ -927,10 +928,7 @@ function CatCard({
                 {cat?.emoji ?? '▫️'}
               </span>
               <div className="txn-main">
-                <div className="txn-name">
-                  {t.description}
-                  <LoanChip loanId={t.loanId} loans={loans} />
-                </div>
+                <TxnName t={t}><LoanChip loanId={t.loanId} loans={loans} /></TxnName>
                 <div className="txn-sub">
                   {fmtDate(t.date)}
                   {acct && (
@@ -1109,7 +1107,10 @@ function CategoryPickerSidebar(
             {cat?.emoji ?? '▫️'}
           </span>
           <div className="txn-sidebar-meta">
-            <div className="txn-sidebar-name">{transaction.description}</div>
+            <div className="txn-sidebar-name">{displayName(transaction)}</div>
+            {transaction.customTitle?.trim() && (
+              <div className="txn-realname" data-testid="txn-sidebar-realname">{transaction.description}</div>
+            )}
             <div className="txn-sidebar-sub">
               {money(displayAmount(transaction), transaction.currency)} · {transaction.date}
             </div>
@@ -1192,6 +1193,8 @@ function CategoryPickerSidebar(
                 </div>
               </div>
             )}
+
+            <TxnDetailsEditor transaction={transaction} />
 
             <RefundSection
               transaction={transaction}
@@ -1541,6 +1544,7 @@ function RefundPicker({
     if (!q) return baseCandidates;
     return baseCandidates.filter((t) => {
       if ((t.description || '').toLowerCase().includes(q)) return true;
+      if ((t.customTitle || '').toLowerCase().includes(q)) return true;
       if ((t.category || '').toLowerCase().includes(q)) return true;
       if (t.date && t.date.includes(q)) return true;
       return amountMatches(t.amount, q);
@@ -1626,7 +1630,7 @@ function RefundPicker({
                             style={{ background: color + '26', color }}
                           >{emoji}</span>
                           <span className="txn-main">
-                            <span className="txn-name">{c.description}</span>
+                            <span className="txn-name">{displayName(c)}</span>
                             <span className="txn-sub">{fmtDate(c.date)}</span>
                           </span>
                           <span className={`txn-amt${pos ? ' pos' : ''}`}>
