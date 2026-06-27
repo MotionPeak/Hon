@@ -1904,9 +1904,13 @@ export class Repo {
   // The Fixed-bills view multiplies every row in the category by 1/N and
   // adjusts section totals + the headline reservation accordingly.
 
-  listCategorySplits(): { category: string; splitCount: number }[] {
+  listCategorySplits(): { category: string; splitCount: number; shareAmount: number | null }[] {
     return this.orm
-      .select({ category: categorySplitsT.category, splitCount: categorySplitsT.splitCount })
+      .select({
+        category: categorySplitsT.category,
+        splitCount: categorySplitsT.splitCount,
+        shareAmount: categorySplitsT.shareAmount,
+      })
       .from(categorySplitsT)
       .all();
   }
@@ -1914,13 +1918,57 @@ export class Repo {
   setCategorySplit(category: string, splitCount: number): void {
     this.orm
       .insert(categorySplitsT)
-      .values({ category, splitCount, createdAt: new Date().toISOString() })
+      .values({ category, splitCount, shareAmount: null, createdAt: new Date().toISOString() })
       .onConflictDoUpdate({ target: categorySplitsT.category, set: { splitCount } })
       .run();
   }
 
+  /** Sets the absolute "my share" override for a category (e.g. rent ₪2,250).
+   *  Leaves split_count at its current value (default 1) so the two overrides
+   *  are independent. */
+  setCategoryShareAmount(category: string, shareAmount: number): void {
+    this.orm
+      .insert(categorySplitsT)
+      .values({ category, splitCount: 1, shareAmount, createdAt: new Date().toISOString() })
+      .onConflictDoUpdate({ target: categorySplitsT.category, set: { shareAmount } })
+      .run();
+  }
+
+  /** Clears just the share override; deletes the row if no split remains. */
+  clearCategoryShareAmount(category: string): void {
+    const row = this.orm
+      .select({ splitCount: categorySplitsT.splitCount })
+      .from(categorySplitsT)
+      .where(eq(categorySplitsT.category, category))
+      .get() as { splitCount: number } | undefined;
+    if (row && row.splitCount > 1) {
+      this.orm
+        .update(categorySplitsT)
+        .set({ shareAmount: null })
+        .where(eq(categorySplitsT.category, category))
+        .run();
+    } else {
+      this.orm.delete(categorySplitsT).where(eq(categorySplitsT.category, category)).run();
+    }
+  }
+
   clearCategorySplit(category: string): void {
-    this.orm.delete(categorySplitsT).where(eq(categorySplitsT.category, category)).run();
+    // Keep the row (reset split→1) when a share override is still present;
+    // otherwise drop it entirely.
+    const row = this.orm
+      .select({ shareAmount: categorySplitsT.shareAmount })
+      .from(categorySplitsT)
+      .where(eq(categorySplitsT.category, category))
+      .get() as { shareAmount: number | null } | undefined;
+    if (row && row.shareAmount != null) {
+      this.orm
+        .update(categorySplitsT)
+        .set({ splitCount: 1 })
+        .where(eq(categorySplitsT.category, category))
+        .run();
+    } else {
+      this.orm.delete(categorySplitsT).where(eq(categorySplitsT.category, category)).run();
+    }
   }
 
   // --- Cancelled subscriptions ----------------------------------------------
