@@ -43,6 +43,7 @@ import { openDatabase, type DbHandle } from './db.js';
 import { Repo } from './repo.js';
 import { ScrapeRunner } from './runner.js';
 import { registerVncProxy, attachVncUpgrade } from './vncProxy.js';
+import { registerCategorySplitRoutes } from './categorySplitRoutes.js';
 import {
   scrapeShufersalGiftCards,
   scrapeBuyMeGiftCards,
@@ -162,6 +163,15 @@ const llm = new LlmManager(dataDir, vault ?? undefined);
 
 // Transaction categorization (rules + LLM). Needs the database.
 const categorizer: Categorizer | null = repo ? new Categorizer(repo, llm) : null;
+
+// Auto-categorize after every successful sync, so a headless/NAS deployment
+// (or anyone) never has to press "Categorize all" by hand. The categorizer only
+// touches still-uncategorized rows and is a no-op while already running, so this
+// is safe to fire on each run. start() returns immediately; work runs in the
+// background and is reportable via GET /categorize.
+if (runner && categorizer) {
+  runner.onRunSuccess = () => categorizer.start();
+}
 
 // Budget insights (LLM free-text). Needs the database.
 const insights: InsightsGenerator | null = repo ? new InsightsGenerator(repo, llm) : null;
@@ -954,37 +964,7 @@ app.put(
   },
 );
 
-// Per-category split count (e.g. Utilities ÷ 3 when shared with roommates).
-// splitCount >= 1; setting it to 1 or null clears the override.
-app.get('/category-splits', async (_req, reply) => {
-  if (!repo) return reply.code(503).send({ error: 'database unavailable' });
-  const splits: Record<string, number> = {};
-  for (const row of repo.listCategorySplits()) splits[row.category] = row.splitCount;
-  return { splits };
-});
-
-// `splitCount: null` (or <= 1) clears the override — business rule kept.
-app.put(
-  '/category-split',
-  { schema: { body: z.object({ category: z.string().min(1), splitCount: z.number().int().nullable() }) } },
-  async (req, reply) => {
-    if (!repo) return reply.code(503).send({ error: 'database unavailable' });
-    const { splitCount } = req.body;
-    const category = req.body.category.trim();
-    if (!category) return reply.code(400).send({ error: 'a category is required' });
-    if (splitCount == null || splitCount === 1) {
-      repo.clearCategorySplit(category);
-      return { ok: true };
-    }
-    if (splitCount < 1 || splitCount > 50) {
-      return reply.code(400).send({
-        error: 'splitCount must be a whole number between 1 and 50',
-      });
-    }
-    repo.setCategorySplit(category, splitCount);
-    return { ok: true };
-  },
-);
+registerCategorySplitRoutes(app, () => repo);
 
 app.put(
   '/merchant-frequency',
