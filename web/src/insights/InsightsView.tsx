@@ -19,6 +19,7 @@ import {
 } from './equitySeries';
 import { buildHoldingSeries } from './holdingSeries';
 import { earliestTxnDate } from './txnCap';
+import { displayName } from '../activity/displayName';
 
 function monthLetter(key: string): string {
   // "2026-05" → "M" (English month letter — matches the legacy app).
@@ -1068,7 +1069,7 @@ function MonthDetail(
   const byCat = new Map<string, number>();
   let totalSpending = 0;
   let totalIncome = 0;
-  let biggest: { amount: number; description: string; date: string; cat: string } | null = null;
+  let biggest: { amount: number; description: string; customTitle?: string | null; date: string; cat: string } | null = null;
   for (const t of inMonth) {
     if (t.amount < 0) {
       const cat = t.category || 'Other';
@@ -1076,7 +1077,7 @@ function MonthDetail(
       totalSpending += -t.amount;
       const spent = -t.amount;
       if (!biggest || spent > biggest.amount) {
-        biggest = { amount: spent, description: t.description, date: t.date, cat };
+        biggest = { amount: spent, description: t.description, customTitle: t.customTitle, date: t.date, cat };
       }
     } else {
       totalIncome += t.amount;
@@ -1165,7 +1166,7 @@ function MonthDetail(
           </span>
           <div className="md-big-main">
             <div className="md-big-cap">Biggest expense</div>
-            <div className="md-big-desc">{biggest.description || biggest.cat}</div>
+            <div className="md-big-desc">{displayName(biggest) || biggest.cat}</div>
           </div>
           <div>
             <div className="md-big-amt">{money(biggest.amount, 'ILS')}</div>

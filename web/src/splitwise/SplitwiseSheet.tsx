@@ -3,6 +3,7 @@ import * as Dialog from '@radix-ui/react-dialog';
 import { money } from '../format';
 import type { Transaction } from '../activity/types';
 import type { SplitwisePickList, SplitwiseShare } from './types';
+import { displayName } from '../activity/displayName';
 
 interface Props {
   open: boolean;
@@ -41,7 +42,7 @@ export function SplitwiseSheet({ open, transaction, loadPickList, onCreate, onCl
             {pick ? `Split with ${pick.name}` : 'Split on Splitwise'}
           </Dialog.Title>
           <Dialog.Description className="rx-dialog-desc">
-            {transaction.description} · {money(cost, transaction.currency)}
+            {displayName(transaction)} · {money(cost, transaction.currency)}
           </Dialog.Description>
 
           {loadErr && <p className="set-error" role="alert">{loadErr}</p>}

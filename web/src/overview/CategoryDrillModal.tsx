@@ -4,6 +4,7 @@ import { money } from '../format';
 import { cycleKey, currentCycleKey, cycleLabel } from '../cycle';
 import type { Transaction } from '../activity/types';
 import type { Account } from '../accounts/types';
+import { displayName } from '../activity/displayName';
 
 interface CategoryDrillModalProps {
   category: string;
@@ -83,7 +84,7 @@ export function CategoryDrillModal({
               return (
                 <div className="drill-row" key={t.id}>
                   <div className="drill-main">
-                    <div className="drill-name">{t.description || '—'}</div>
+                    <div className="drill-name">{displayName(t) || '—'}</div>
                     <div className="drill-sub">{fmtDate(t.date)}{place}</div>
                   </div>
                   <div className="drill-amt">{money(t.amount, t.currency)}</div>
