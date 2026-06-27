@@ -111,6 +111,11 @@ export class ScrapeRunner {
   private readonly active = new Set<string>();
   private readonly debugDir: string;
 
+  /** Fired once, best-effort, whenever a run terminates successfully — wired by
+   *  server.ts to auto-categorize freshly-synced transactions so the user never
+   *  has to press "Categorize all" after a sync. Never throws into finish(). */
+  onRunSuccess?: (connectionId: string) => void;
+
   constructor(
     private readonly repo: Repo,
     dataDir: string,
@@ -671,6 +676,18 @@ export class ScrapeRunner {
       // Truncated so very long error messages don't sprawl across lines.
       message: message.length > 200 ? message.slice(0, 197) + '…' : message,
     });
+    // Best-effort kick of the categorizer for the just-synced transactions.
+    // Wrapped so a categorizer failure can never break the run's terminal state.
+    if (result === 'success' && this.onRunSuccess) {
+      try {
+        this.onRunSuccess(connectionId);
+      } catch (err) {
+        runnerLog.warn('onRunSuccess.failed', {
+          runId: status.runId,
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
   }
 }
 
