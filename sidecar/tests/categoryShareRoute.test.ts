@@ -46,4 +46,20 @@ describe('/category-share + /category-splits', () => {
     expect(get.json()).toEqual({ splits: { Utilities: 3 }, shareAmounts: { Housing: 2250 } });
     await app.close();
   });
+
+  it('PUT /category-split sets and clears', async () => {
+    const { app } = buildApp();
+    await app.ready();
+    const set = await app.inject({ method: 'PUT', url: '/category-split',
+      payload: { category: 'Utilities', splitCount: 3 } });
+    expect(set.statusCode).toBe(200);
+    const get1 = await app.inject({ method: 'GET', url: '/category-splits' });
+    expect(get1.json().splits).toEqual({ Utilities: 3 });
+    const clear = await app.inject({ method: 'PUT', url: '/category-split',
+      payload: { category: 'Utilities', splitCount: null } });
+    expect(clear.statusCode).toBe(200);
+    const get2 = await app.inject({ method: 'GET', url: '/category-splits' });
+    expect(get2.json().splits).toEqual({});
+    await app.close();
+  });
 });

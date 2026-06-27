@@ -38,6 +38,7 @@ export function registerCategorySplitRoutes(
     if (!parsed.success) return reply.code(400).send({ error: 'category and splitCount are required' });
     const category = parsed.data.category.trim();
     const { splitCount } = parsed.data;
+    // zod min(1) passes whitespace-only strings; re-check after trim.
     if (!category) return reply.code(400).send({ error: 'a category is required' });
     if (splitCount == null || splitCount === 1) {
       repo.clearCategorySplit(category);
@@ -58,6 +59,7 @@ export function registerCategorySplitRoutes(
     if (!parsed.success) return reply.code(400).send({ error: 'category and shareAmount are required' });
     const category = parsed.data.category.trim();
     const { shareAmount } = parsed.data;
+    // zod min(1) passes whitespace-only strings; re-check after trim.
     if (!category) return reply.code(400).send({ error: 'a category is required' });
     if (shareAmount == null || shareAmount <= 0) {
       repo.clearCategoryShareAmount(category);
